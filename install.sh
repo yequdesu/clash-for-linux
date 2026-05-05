@@ -263,8 +263,12 @@ _install_tui() {
 # ═══════════════════════════════════════════════
 if [ -d "$CLASH_BASE_DIR" ] && [ -f "$CLASH_BASE_DIR/bin/yq" ]; then
     if $FORCE; then
-        _log_info "force reinstall — removing previous installation"
-        _sudo rm -rf "$CLASH_BASE_DIR" 2>/dev/null || true
+        _log_info "force reinstall — preserving binaries, refreshing config..."
+        _sudo mkdir -p /usr/local/bin 2>/dev/null || true
+        for bin in mihomo yq; do
+            [ -f "${CLASH_BASE_DIR}/bin/${bin}" ] && _sudo cp "${CLASH_BASE_DIR}/bin/${bin}" "/usr/local/bin/${bin}" 2>/dev/null && _log_info "preserved ${bin}" || true
+        done
+        _sudo rm -rf "${CLASH_BASE_DIR}/resources" "${CLASH_BASE_DIR}/logs" "${CLASH_BASE_DIR}/runtime" 2>/dev/null || true
     else
         _log_warn "already installed at $CLASH_BASE_DIR"
         if $WITH_TUI; then
@@ -274,6 +278,22 @@ if [ -d "$CLASH_BASE_DIR" ] && [ -f "$CLASH_BASE_DIR/bin/yq" ]; then
         exit 1
     fi
 fi
+
+# Helper: prefer system binary over download
+_sync_or_download() {
+    local name="$1"; local dst="$2"; shift 2
+    if [ -f "$dst" ] && [ -x "$dst" ]; then
+        _log_info "${name} already exists, skipping download"
+        return 0
+    fi
+    if [ -f "/usr/local/bin/${name}" ] && [ -x "/usr/local/bin/${name}" ]; then
+        _sudo cp "/usr/local/bin/${name}" "$dst" 2>/dev/null || true
+        _sudo chmod 755 "$dst" 2>/dev/null || true
+        _log_ok "${name} copied from /usr/local/bin/"
+        return 0
+    fi
+    "$@"
+}
 
 # ═══════════════════════════════════════════════
 #  Main install flow
@@ -304,8 +324,8 @@ _sudo mkdir -p /etc/clashctl 2>/dev/null
 echo "CLASH_BASE_DIR=$CLASH_BASE_DIR" | _sudo tee /etc/clashctl/install.env >/dev/null 2>&1
 
 # ── Download resources ──
-[ ! -f "$BIN_KERNEL" ] && _download_kernel
-[ ! -f "${CLASH_BASE_DIR}/bin/yq" ] && _download_yq
+_sync_or_download "$KERNEL_NAME" "$BIN_KERNEL" _download_kernel
+_sync_or_download yq "${CLASH_BASE_DIR}/bin/yq" _download_yq
 _download_geodata
 
 # ── Set kernel capabilities (for TUN mode) ──
