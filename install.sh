@@ -120,7 +120,7 @@ _download_kernel() {
     local base_url="${URL_GH_PROXY:-https://gh-proxy.org}/https://github.com/MetaCubeX/mihomo/releases/download/${ver}"
     local filename="mihomo-${arch}-${ver}.gz"
     _log_info "downloading $KERNEL_NAME ${ver}..."
-    if curl -fsSL "${base_url}/${filename}" -o /tmp/mihomo.gz; then
+    if curl -fSL --progress-bar "${base_url}/${filename}" -o /tmp/mihomo.gz; then
         gunzip -f /tmp/mihomo.gz
         _sudo install -D /tmp/mihomo "$BIN_KERNEL"
         _sudo chmod 755 "$BIN_KERNEL"
@@ -141,7 +141,7 @@ _download_yq() {
     case "$(uname -m)" in aarch64|arm64) arch="arm64" ;; esac
     local url="https://github.com/mikefarah/yq/releases/download/${ver}/yq_linux_${arch}"
     _log_info "downloading yq ${ver}..."
-    if curl -fsSL "$url" -o /tmp/yq; then
+    if curl -fSL --progress-bar "$url" -o /tmp/yq; then
         _sudo install -D /tmp/yq "${CLASH_BASE_DIR}/bin/yq"
         _sudo chmod 755 "${CLASH_BASE_DIR}/bin/yq"
         rm -f /tmp/yq
@@ -150,6 +150,28 @@ _download_yq() {
     fi
     _log_warn "yq download failed"
     return 1
+}
+
+# ═══════════════════════════════════════════════
+#  Function: download geodata databases
+# ═══════════════════════════════════════════════
+_download_geodata() {
+    local geover="${VERSION_GEODATA:-20250101}"
+    local base="https://github.com/MetaCubeX/meta-rules-dat/releases/download/${geover}"
+    local dest="${CLASH_BASE_DIR}/resources"
+
+    for f in Country.mmdb geosite.dat geoip.dat; do
+        if [ -f "${dest}/${f}" ]; then
+            _log_info "geodata ${f} already exists, skipping"
+            continue
+        fi
+        _log_info "downloading ${f}..."
+        if curl -fSL --progress-bar "${base}/${f}" -o "${dest}/${f}"; then
+            _log_ok "${f} installed"
+        else
+            _log_warn "${f} download failed — kernel may still work without it"
+        fi
+    done
 }
 
 # ═══════════════════════════════════════════════
@@ -173,7 +195,7 @@ _install_cli() {
     _log_info "Go not found — installing Go 1.24.1..."
     local go_arch="linux-amd64"
     case "$(uname -m)" in aarch64|arm64) go_arch="linux-arm64" ;; armv*) go_arch="linux-armv6l" ;; esac
-    if curl -fsSL "https://go.dev/dl/go1.24.1.${go_arch}.tar.gz" -o /tmp/go.tar.gz; then
+    if curl -fSL --progress-bar "https://go.dev/dl/go1.24.1.${go_arch}.tar.gz" -o /tmp/go.tar.gz; then
         _sudo tar -C /usr/local -xzf /tmp/go.tar.gz; rm -f /tmp/go.tar.gz
         export PATH="/usr/local/go/bin:$PATH"
         _log_ok "Go 1.24.1 installed"
@@ -274,6 +296,7 @@ echo "CLASH_BASE_DIR=$CLASH_BASE_DIR" | _sudo tee /etc/clashctl/install.env >/de
 # ── Download resources ──
 [ ! -f "$BIN_KERNEL" ] && _download_kernel
 [ ! -f "${CLASH_BASE_DIR}/bin/yq" ] && _download_yq
+_download_geodata
 
 # ── Set kernel capabilities (for TUN mode) ──
 command -v setcap >/dev/null 2>&1 && \

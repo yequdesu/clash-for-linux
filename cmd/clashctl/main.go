@@ -41,6 +41,7 @@ func main() {
 	rootCmd.AddCommand(envCmd)
 	rootCmd.AddCommand(testCmd)
 	rootCmd.AddCommand(tuiCmd)
+	rootCmd.AddCommand(versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

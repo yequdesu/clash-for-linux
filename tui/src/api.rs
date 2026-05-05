@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::env;
+use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct KernelInfo {
@@ -76,6 +79,75 @@ pub struct LogEntry {
     #[serde(rename = "type")]
     pub level: String,
     pub payload: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProfilesMeta {
+    #[serde(default)]
+    pub profiles: Vec<ProfileEntry>,
+    #[serde(rename = "use", default)]
+    pub active_id: i32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProfileEntry {
+    pub id: i32,
+    #[serde(default)]
+    pub path: String,
+    pub url: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub updated: String,
+    #[serde(default)]
+    pub interval: String,
+}
+
+pub fn read_profiles() -> ProfilesMeta {
+    let empty = ProfilesMeta { profiles: vec![], active_id: 0 };
+    let path = resolve_profiles_path();
+    match path {
+        Some(p) => {
+            match fs::read_to_string(&p) {
+                Ok(content) => serde_yaml::from_str(&content).unwrap_or(empty),
+                Err(_) => empty,
+            }
+        }
+        None => empty,
+    }
+}
+
+fn resolve_profiles_path() -> Option<PathBuf> {
+    if let Ok(home) = env::var("HOME") {
+        for base in &["clashctl", ".clashctl"] {
+            let p = PathBuf::from(&home).join(base).join("resources").join("profiles.yaml");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn read_tun_status() -> bool {
+    if let Ok(home) = env::var("HOME") {
+        for base in &["clashctl", ".clashctl"] {
+            let p = PathBuf::from(&home).join(base).join("resources").join("runtime.yaml");
+            if let Ok(content) = fs::read_to_string(&p) {
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("tun:") || trimmed == "tun:" {
+                        continue;
+                    }
+                    if trimmed.starts_with("enable:") || trimmed.starts_with("  enable:") {
+                        let val = trimmed.split(':').nth(1).unwrap_or("false").trim();
+                        return val == "true";
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 #[derive(Debug, Clone)]

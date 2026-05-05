@@ -115,11 +115,11 @@ fn run(
                         app.selected_proxy_idx = app.proxy_groups.len().saturating_sub(1);
                         app.connections_selected = app.connections.len().saturating_sub(1);
                     },
-                    KeyCode::Char('1') => app.tab = Tab::Overview,
-                    KeyCode::Char('2') => app.tab = Tab::Proxies,
-                    KeyCode::Char('3') => app.tab = Tab::Subscriptions,
-                    KeyCode::Char('4') => app.tab = Tab::Connections,
-                    KeyCode::Char('5') => app.tab = Tab::Logs,
+                    KeyCode::Char('1') => { app.tab = Tab::Overview; }
+                    KeyCode::Char('2') => { app.tab = Tab::Proxies; }
+                    KeyCode::Char('3') => { app.tab = Tab::Subscriptions; app.refresh_subscriptions(); }
+                    KeyCode::Char('4') => { app.tab = Tab::Connections; }
+                    KeyCode::Char('5') => { app.tab = Tab::Logs; }
                     KeyCode::Enter => {
                         match app.tab {
                             Tab::Proxies | Tab::Overview => {
@@ -129,13 +129,28 @@ fn run(
                                     app.test_selected_delay();
                                 }
                             }
+                            Tab::Subscriptions => {
+                                app.refresh_subscriptions();
+                            }
                             _ => {}
                         }
                     }
-                    KeyCode::Char('s') | KeyCode::Char('S') => app.switch_selected(),
-                    KeyCode::Char('d') | KeyCode::Char('D') => {
+                    KeyCode::Char('s') | KeyCode::Char('S') => app.toggle_sort(),
+                    KeyCode::Char('d') => {
                         if app.tab == Tab::Proxies || app.tab == Tab::Overview {
                             app.test_selected_delay();
+                        }
+                    }
+                    KeyCode::Char('D') => {
+                        if app.tab == Tab::Proxies || app.tab == Tab::Overview {
+                            app.test_all_delays();
+                        }
+                    }
+                    KeyCode::Char('p') => {
+                        if app.tab != Tab::Logs {
+                            app.cycle_proxy_mode();
+                        } else {
+                            app.log_paused = !app.log_paused;
                         }
                     }
                     KeyCode::Char('c') => {
@@ -146,11 +161,6 @@ fn run(
                     KeyCode::Char('C') => {
                         if app.tab == Tab::Connections {
                             app.close_all_connections();
-                        }
-                    }
-                    KeyCode::Char('p') => {
-                        if app.tab == Tab::Logs {
-                            app.log_paused = !app.log_paused;
                         }
                     }
                     _ => {}

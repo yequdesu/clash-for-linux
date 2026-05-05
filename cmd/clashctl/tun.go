@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -56,6 +57,13 @@ var tunCmd = &cobra.Command{
 				svc.Start()
 				return
 			}
+			if dev, err := verifyTunDevice(); err != nil {
+				ilog.Warn("TUN device not detected — %v", err)
+				ilog.Info("check: sudo setcap cap_net_admin,cap_net_raw+ep %s", cfg.KernelBin())
+				ilog.Info("check: kernel log via 'clashctl log'")
+			} else {
+				ilog.Ok("TUN device: %s", dev)
+			}
 			ilog.Ok("Tun mode enabled")
 		case "off":
 			if os.Getuid() != 0 {
@@ -97,4 +105,21 @@ func showTunStatus(cfg *config.EnvConfig) {
 	} else {
 		ilog.Info("Tun status: disabled")
 	}
+}
+
+func verifyTunDevice() (string, error) {
+	out, err := exec.Command("ip", "link", "show").Output()
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, "utun") || strings.Contains(line, "tun") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				name := strings.TrimSuffix(fields[1], ":")
+				return name, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no TUN device found")
 }

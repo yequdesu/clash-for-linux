@@ -9,9 +9,12 @@ import (
 )
 
 type Profile struct {
-	ID   int    `yaml:"id"`
-	Path string `yaml:"path"`
-	URL  string `yaml:"url"`
+	ID       int    `yaml:"id"`
+	Path     string `yaml:"path"`
+	URL      string `yaml:"url"`
+	Name     string `yaml:"name,omitempty"`
+	Updated  string `yaml:"updated,omitempty"`
+	Interval string `yaml:"interval,omitempty"`
 }
 
 type ProfilesMeta struct {

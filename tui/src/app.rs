@@ -6,7 +6,7 @@ use ratatui::Frame;
 use std::collections::HashMap;
 use std::sync::mpsc;
 
-use crate::api::{ApiClient, Connection, ProxyInfo};
+use crate::api::{ApiClient, Connection, ProfileEntry, ProxyInfo};
 use crate::background::{BackgroundEffect, NoopBackground};
 use crate::config::Config;
 use crate::event::DataEvent;
@@ -27,6 +27,13 @@ pub struct App {
     pub mode: String,
     pub upload_total: u64,
     pub download_total: u64,
+    pub prev_upload: u64,
+    pub prev_download: u64,
+    pub upload_rate: f64,
+    pub download_rate: f64,
+    pub start_time: i64,
+    pub os_info: String,
+    pub arch_info: String,
 
     pub proxies: HashMap<String, ProxyInfo>,
     pub proxy_groups: Vec<(String, String)>,
@@ -44,8 +51,15 @@ pub struct App {
     pub log_scroll: usize,
     pub log_paused: bool,
 
+    pub profiles: Vec<ProfileEntry>,
+    pub active_profile_id: i32,
+    pub selected_sub_idx: usize,
+    pub tun_enabled: bool,
+
     pub search_active: bool,
     pub search_query: String,
+    pub sort_mode: bool, // false=by name, true=by delay
+    pub proxy_mode_str: String, // Rule, Global, Direct
     pub window: WindowState,
     pub background: Box<dyn BackgroundEffect>,
 
@@ -61,6 +75,7 @@ pub struct App {
 impl App {
     pub fn new(config: Config, rt: tokio::runtime::Handle, data_tx: mpsc::Sender<DataEvent>) -> Self {
         let api = ApiClient::new(config.api_url.clone(), config.api_key.clone());
+        let profiles_meta = crate::api::read_profiles();
         Self {
             tab: Tab::Overview,
             should_quit: false,
@@ -72,6 +87,13 @@ impl App {
             mode: "Rule".into(),
             upload_total: 0,
             download_total: 0,
+            prev_upload: 0,
+            prev_download: 0,
+            upload_rate: 0.0,
+            download_rate: 0.0,
+            start_time: chrono::Utc::now().timestamp(),
+            os_info: read_os_info(),
+            arch_info: std::env::consts::ARCH.to_string(),
             proxies: HashMap::new(),
             proxy_groups: Vec::new(),
             selected_proxy_idx: 0,
@@ -85,8 +107,14 @@ impl App {
             logs: Vec::new(),
             log_scroll: 0,
             log_paused: false,
+            profiles: profiles_meta.profiles,
+            active_profile_id: profiles_meta.active_id,
+            selected_sub_idx: 0,
+            tun_enabled: crate::api::read_tun_status(),
             search_active: false,
             search_query: String::new(),
+            sort_mode: false,
+            proxy_mode_str: "Rule".into(),
             window: WindowState::load(),
             background: Box::new(NoopBackground),
             api,
@@ -167,8 +195,12 @@ impl App {
                 if self.error_msg.is_none() { self.error_msg = Some(e); }
             }
             DataEvent::Connections(Ok(resp)) => {
+                self.prev_upload = self.upload_total;
+                self.prev_download = self.download_total;
                 self.upload_total = resp.upload_total;
                 self.download_total = resp.download_total;
+                self.upload_rate = (self.upload_total.saturating_sub(self.prev_upload)) as f64;
+                self.download_rate = (self.download_total.saturating_sub(self.prev_download)) as f64;
                 let conn_len = resp.connections.len();
                 self.connections = resp.connections;
                 self.connections_active = self.connections.len();
@@ -308,6 +340,40 @@ impl App {
     pub fn on_shutdown(&mut self) {
         self.window.save();
     }
+
+    pub fn refresh_subscriptions(&mut self) {
+        let meta = crate::api::read_profiles();
+        self.profiles = meta.profiles;
+        self.active_profile_id = meta.active_id;
+    }
+
+    pub fn toggle_sort(&mut self) {
+        self.sort_mode = !self.sort_mode;
+    }
+
+    pub fn cycle_proxy_mode(&mut self) {
+        self.proxy_mode_str = match self.proxy_mode_str.as_str() {
+            "Rule" => "Global".into(),
+            "Global" => "Direct".into(),
+            _ => "Rule".into(),
+        };
+    }
+
+    pub fn test_all_delays(&mut self) {
+        let api = self.api.clone();
+        let tx = self.data_tx.clone();
+        for (group, _) in &self.proxy_groups {
+            let name = group.clone();
+            let api = api.clone();
+            let tx = tx.clone();
+            self.rt.spawn(async move {
+                match api.test_delay(&name).await {
+                    Ok(delay) => { let _ = tx.send(DataEvent::Delay(name, delay)); }
+                    Err(_) => {}
+                }
+            });
+        }
+    }
 }
 
 pub fn render(frame: &mut Frame, app: &mut App) {
@@ -363,85 +429,109 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 }
 
 fn render_overview(frame: &mut Frame, area: Rect, app: &App) {
-    if area.height < 8 { return; }
+    if area.height < 12 { return; }
 
     let rows = Layout::vertical([
-        Constraint::Length(7),
+        Constraint::Length(3),
+        Constraint::Length(6),
         Constraint::Length(3),
         Constraint::Min(3),
     ]).split(area);
 
-    // Top row: two cards
-    let top = Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).split(rows[0]);
-
-    let status_dot = if !app.version.is_empty() { "● running" } else { "○ stopped" };
+    // Row 0: Status bar
+    let status_dot = if !app.version.is_empty() { "●" } else { "○" };
+    let status_color = if !app.version.is_empty() { CLASH_THEME.accent } else { CLASH_THEME.muted };
     let ver_display = if app.version.is_empty() { "Mihomo —".to_string() } else { format!("Mihomo {}", app.version) };
-    let kernel_lines = vec![
+    let uptime = if !app.version.is_empty() {
+        let secs = (chrono::Utc::now().timestamp() - app.start_time) as u64;
+        if secs >= 3600 {
+            format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+        } else {
+            format!("{}m", secs / 60)
+        }
+    } else {
+        "—".into()
+    };
+    let status_lines = vec![
         Line::from(vec![
-            Span::styled(format!("  {}  ", status_dot), if !app.version.is_empty() { CLASH_THEME.accent } else { CLASH_THEME.muted }),
-            Span::styled(ver_display, CLASH_THEME.text),
-        ]),
-        Line::from(vec![
-            Span::styled("  Mode  ", CLASH_THEME.muted),
-            Span::styled(&app.mode, CLASH_THEME.text),
-            Span::styled("    TUN  ", CLASH_THEME.muted),
-            Span::styled("disabled", CLASH_THEME.warning),
+            Span::styled(format!(" {} ", status_dot), Style::default().fg(status_color).bold()),
+            Span::styled(format!("{}    {}  ", ver_display, app.mode), CLASH_THEME.text),
+            Span::styled("TUN ", CLASH_THEME.muted),
+            Span::styled(if app.tun_enabled { "Enabled" } else { "Disabled" },
+                if app.tun_enabled { CLASH_THEME.accent } else { CLASH_THEME.muted }),
+            Span::styled(format!("    Uptime: {}", uptime), CLASH_THEME.text),
         ]),
     ];
-    crate::widgets::card::Card::new("Status").render(frame, top[0], kernel_lines);
+    crate::widgets::card::Card::new("Status").render(frame, rows[0], status_lines);
 
-    let mut proxy_lines = vec![Line::from(Span::styled("  No proxy selected", CLASH_THEME.muted))];
-    for (name, info) in &app.proxies {
-        if info.proxy_type == "Selector" && info.now.is_some() {
-            let current = info.now.as_ref().unwrap();
-            let mut delay_str = String::from("—");
-            if let Some(d) = app.delays.get(name) {
-                delay_str = format!("{}ms", d);
-            }
-            proxy_lines = vec![
-                Line::from(vec![
-                    Span::styled("  Group  ", CLASH_THEME.muted),
-                    Span::styled(name.as_str(), CLASH_THEME.text),
-                ]),
-                Line::from(vec![
-                    Span::styled("  Node   ", CLASH_THEME.muted),
-                    Span::styled(current.as_str(), CLASH_THEME.accent),
-                ]),
-                Line::from(vec![
-                    Span::styled("  Delay  ", CLASH_THEME.muted),
-                    Span::styled(delay_str, CLASH_THEME.text),
-                ]),
-            ];
-            break;
-        }
-    }
-    crate::widgets::card::Card::new("Current Proxy").render(frame, top[1], proxy_lines);
+    // Row 1: Traffic + Current Proxy cards
+    let mid_top = Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).split(rows[1]);
 
-    // Traffic + Connections row
-    let mid = Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).split(rows[1]);
     let traffic_lines = vec![
         Line::from(vec![
-            Span::styled(format!("  ↑ {}  ↓ {}", format_bytes(app.upload_total), format_bytes(app.download_total)), CLASH_THEME.text),
+            Span::styled(format!("  ↑ {}/s  ↓ {}/s",
+                format_bytes(app.upload_rate as u64),
+                format_bytes(app.download_rate as u64)), CLASH_THEME.text),
+        ]),
+        Line::from(vec![
+            Span::styled(format!("  Total  ↑ {}  ↓ {}",
+                format_bytes(app.upload_total),
+                format_bytes(app.download_total)), CLASH_THEME.muted),
         ]),
     ];
-    crate::widgets::card::Card::new("Traffic").render(frame, mid[0], traffic_lines);
+    crate::widgets::card::Card::new("Traffic").render(frame, mid_top[0], traffic_lines);
+
+    let mut proxy_lines = vec![Line::from(Span::styled("  No proxy selected", CLASH_THEME.muted))];
+    if let Some(first) = app.proxy_groups.first() {
+        let (ref name, ref current) = *first;
+        let delay = app.delays.get(name).map(|d| format!("{}ms", d)).unwrap_or_else(|| "—".into());
+        proxy_lines = vec![
+            Line::from(vec![
+                Span::styled(format!("  {} → ", name), CLASH_THEME.muted),
+                Span::styled(current.as_str(), CLASH_THEME.accent),
+            ]),
+            Line::from(vec![
+                Span::styled("  Delay: ", CLASH_THEME.muted),
+                Span::styled(delay, CLASH_THEME.text),
+            ]),
+        ];
+    }
+    crate::widgets::card::Card::new("Current Proxy").render(frame, mid_top[1], proxy_lines);
+
+    // Row 2: Connections + System Info
+    let mid_bot = Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).split(rows[2]);
 
     let conn_lines = vec![
         Line::from(vec![
             Span::styled(format!("  Active: {}   Total: {}", app.connections_active, app.connections_total), CLASH_THEME.text),
         ]),
     ];
-    crate::widgets::card::Card::new("Connections").render(frame, mid[1], conn_lines);
+    crate::widgets::card::Card::new("Connections").render(frame, mid_bot[0], conn_lines);
 
-    // System info
     let sys_lines = vec![
         Line::from(vec![
-            Span::styled("  Proxy Port: 7890  ", CLASH_THEME.text),
-            Span::styled("API Port: 9090  ", CLASH_THEME.text),
-            Span::styled("Mode: Rule", CLASH_THEME.text),
+            Span::styled(format!("  OS: {}  ", app.os_info), CLASH_THEME.text),
+            Span::styled(format!("Arch: {}", app.arch_info), CLASH_THEME.text),
         ]),
     ];
-    crate::widgets::card::Card::new("System Info").render(frame, rows[2], sys_lines);
+    crate::widgets::card::Card::new("System Info").render(frame, mid_bot[1], sys_lines);
+
+    // Row 3: Subscription summary
+    let sub_lines = if app.profiles.is_empty() {
+        vec![Line::from(Span::styled("  No subscriptions — use 'clashctl sub add'", CLASH_THEME.muted))]
+    } else {
+        let active = app.profiles.iter().find(|p| p.id == app.active_profile_id);
+        let summary = match active {
+            Some(p) => {
+                let name = if p.name.is_empty() { &p.url } else { &p.name };
+                let updated = if p.updated.is_empty() { "—" } else { &p.updated };
+                format!("{} | Updated: {} | URL: {}", name, updated, p.url)
+            }
+            None => format!("{} subscriptions (none active)", app.profiles.len()),
+        };
+        vec![Line::from(Span::styled(format!("  {}", summary), CLASH_THEME.text))]
+    };
+    crate::widgets::card::Card::new("Subscription").render(frame, rows[3], sub_lines);
 }
 
 fn render_proxies(frame: &mut Frame, area: Rect, app: &App) {
@@ -490,24 +580,36 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_stateful_widget(table, inner, &mut app.proxy_table_state.clone());
 }
 
-fn render_subscriptions(frame: &mut Frame, area: Rect, _app: &App) {
+fn render_subscriptions(frame: &mut Frame, area: Rect, app: &App) {
     fill_area(frame, area, CLASH_THEME.surface);
 
-    // Read subscriptions metadata
-    let subs = vec![
-        ("1", "MySub", "https://sub.example.com/api/v1?token=***", "128 proxies"),
-        ("2", "Backup Server", "https://backup.example.com/sub", "96 proxies"),
-        ("3", "Local Config", "~/.clashctl/resources/configs/local.yaml", "45 proxies"),
-    ];
+    if app.profiles.is_empty() {
+        let msg = Paragraph::new("No subscriptions found — use 'clashctl sub add' to add one")
+            .style(Style::default().fg(CLASH_THEME.muted));
+        frame.render_widget(msg, area);
+        return;
+    }
 
-    let header = Row::new(vec!["ID", "Name", "URL", "Proxies"])
+    let header = Row::new(vec!["ID", "Name", "URL"])
         .style(Style::default().fg(CLASH_THEME.muted));
-    let data_rows: Vec<Row> = subs.iter().map(|(id, name, url, count)| {
-        Row::new(vec![id.to_string(), name.to_string(), url.to_string(), count.to_string()])
-            .style(Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.surface))
+    let data_rows: Vec<Row> = app.profiles.iter().enumerate().map(|(i, p)| {
+        let active_marker = if p.id == app.active_profile_id { "● " } else { "  " };
+        let name = if p.name.is_empty() { &p.url } else { &p.name };
+        let style = if i == app.selected_sub_idx {
+            Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.primary)
+        } else if p.id == app.active_profile_id {
+            Style::default().fg(CLASH_THEME.accent).bg(CLASH_THEME.surface)
+        } else {
+            Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.surface)
+        };
+        Row::new(vec![
+            format!("{}{}", active_marker, p.id),
+            name.chars().take(30).collect(),
+            p.url.chars().take(50).collect(),
+        ]).style(style)
     }).collect();
 
-    let widths = [Constraint::Length(4), Constraint::Length(16), Constraint::Ratio(1, 2), Constraint::Length(14)];
+    let widths = [Constraint::Length(6), Constraint::Length(32), Constraint::Ratio(1, 1)];
     let table = Table::new(data_rows, widths).header(header)
         .style(Style::default().bg(CLASH_THEME.surface));
 
@@ -515,18 +617,10 @@ fn render_subscriptions(frame: &mut Frame, area: Rect, _app: &App) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLASH_THEME.border))
         .title(Span::styled(" Subscriptions ", Style::default().fg(CLASH_THEME.primary).bold()))
-        .title_bottom(Span::styled(" Use 'clashctl sub' for management  ", Style::default().fg(CLASH_THEME.muted)));
+        .title_bottom(Span::styled(" ● active  |  Use 'clashctl sub' for management  ", Style::default().fg(CLASH_THEME.muted)));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(table, inner);
-
-    let note = Paragraph::new(
-        Line::from(vec![
-            Span::styled("  Tip: Use 'clashctl sub add/remove/use/update' to manage subscriptions from the CLI", CLASH_THEME.muted),
-        ])
-    );
-    let note_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
-    frame.render_widget(note, note_area);
 }
 
 fn render_connections(frame: &mut Frame, area: Rect, app: &App) {
@@ -623,11 +717,13 @@ fn render_help(frame: &mut Frame, area: Rect) {
         Line::from(vec![Span::styled("  Tab/1-5        ", CLASH_THEME.primary), Span::styled("Switch tabs", CLASH_THEME.text)]),
         Line::from(vec![Span::styled("  j/k/↑↓         ", CLASH_THEME.primary), Span::styled("Navigate lists", CLASH_THEME.text)]),
         Line::from(vec![Span::styled("  Enter           ", CLASH_THEME.primary), Span::styled("Test delay / switch node", CLASH_THEME.text)]),
-        Line::from(vec![Span::styled("  s               ", CLASH_THEME.primary), Span::styled("Switch proxy", CLASH_THEME.text)]),
-        Line::from(vec![Span::styled("  d               ", CLASH_THEME.primary), Span::styled("Test delay (Proxies tab)", CLASH_THEME.text)]),
+        Line::from(vec![Span::styled("  s               ", CLASH_THEME.primary), Span::styled("Toggle sort (Name/Delay)", CLASH_THEME.text)]),
+        Line::from(vec![Span::styled("  d               ", CLASH_THEME.primary), Span::styled("Test current group delay", CLASH_THEME.text)]),
+        Line::from(vec![Span::styled("  D               ", CLASH_THEME.primary), Span::styled("Test ALL groups delay", CLASH_THEME.text)]),
+        Line::from(vec![Span::styled("  p               ", CLASH_THEME.primary), Span::styled("Cycle proxy mode (Rule/Global/Direct)", CLASH_THEME.text)]),
         Line::from(vec![Span::styled("  c               ", CLASH_THEME.primary), Span::styled("Close connection (Conn tab)", CLASH_THEME.text)]),
         Line::from(vec![Span::styled("  C               ", CLASH_THEME.primary), Span::styled("Close all connections", CLASH_THEME.text)]),
-        Line::from(vec![Span::styled("  p               ", CLASH_THEME.primary), Span::styled("Pause/resume logs", CLASH_THEME.text)]),
+        Line::from(vec![Span::styled("  /               ", CLASH_THEME.primary), Span::styled("Search / filter", CLASH_THEME.text)]),
         Line::from(vec![Span::styled("  Ctrl+Arrows     ", CLASH_THEME.primary), Span::styled("Move window", CLASH_THEME.text)]),
         Line::from(vec![Span::styled("  =/-/0           ", CLASH_THEME.primary), Span::styled("Zoom in/out/reset", CLASH_THEME.text)]),
         Line::from(vec![Span::styled("  r/q/?           ", CLASH_THEME.primary), Span::styled("Refresh/Quit/Help", CLASH_THEME.text)]),
@@ -640,7 +736,17 @@ fn render_help(frame: &mut Frame, area: Rect) {
 fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     fill_area(frame, area, CLASH_THEME.bg);
     let error_text = app.error_msg.as_deref().unwrap_or("");
-    let status = format!(" [q] Quit  [tab] Switch  [r] Refresh  [?] Help    {}", error_text);
+    let search_info = if app.search_active {
+        format!(" [/] Search: {} | ", app.search_query)
+    } else {
+        String::new()
+    };
+    let mode_info = if app.tab == Tab::Proxies || app.tab == Tab::Overview {
+        format!("Mode: {} | Sort: {} | ", app.proxy_mode_str, if app.sort_mode { "Delay" } else { "Name" })
+    } else {
+        String::new()
+    };
+    let status = format!(" {}{}[q] Quit  [tab] Switch  [r] Refresh  [?] Help    {}", search_info, mode_info, error_text);
     let color = if app.error_msg.is_some() { CLASH_THEME.danger } else { CLASH_THEME.muted };
     let line = Line::from(Span::styled(status, Style::default().fg(color)));
     frame.render_widget(Paragraph::new(line).style(Style::default().bg(CLASH_THEME.bg)), area);
@@ -664,4 +770,15 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{} B", bytes)
     }
+}
+
+fn read_os_info() -> String {
+    if let Ok(content) = std::fs::read_to_string("/etc/os-release") {
+        for line in content.lines() {
+            if let Some(rest) = line.strip_prefix("PRETTY_NAME=") {
+                return rest.trim_matches('"').to_string();
+            }
+        }
+    }
+    "Linux".into()
 }

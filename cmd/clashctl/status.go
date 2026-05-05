@@ -23,6 +23,12 @@ var statusCmd = &cobra.Command{
 		running := svc.IsRunning()
 		if running {
 			ilog.Ok("kernel: running")
+			if pid := svc.PID(); pid > 0 {
+				ilog.Info("pid: %d", pid)
+			}
+			if uptime := svc.Uptime(); uptime != "" {
+				ilog.Info("uptime: %s", uptime)
+			}
 		} else {
 			ilog.Warn("kernel: stopped")
 		}

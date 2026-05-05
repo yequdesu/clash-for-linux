@@ -161,13 +161,24 @@ func (s *ServiceManager) startRaw() error {
 }
 
 func (s *ServiceManager) waitReady(timeout time.Duration) error {
-	port := s.readProxyPort()
-	if port == "" {
-		port = "7890"
+	apiPort := s.readAPIPort()
+	proxyPort := s.readProxyPort()
+	if apiPort == "" {
+		apiPort = "9090"
+	}
+	if proxyPort == "" {
+		proxyPort = "7890"
 	}
 	deadline := time.Now().Add(timeout)
+	apiReady := false
 	for time.Now().Before(deadline) {
-		if conn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 500*time.Millisecond); err == nil {
+		if !apiReady {
+			if conn, err := net.DialTimeout("tcp", "127.0.0.1:"+apiPort, 500*time.Millisecond); err == nil {
+				conn.Close()
+				apiReady = true
+			}
+		}
+		if conn, err := net.DialTimeout("tcp", "127.0.0.1:"+proxyPort, 500*time.Millisecond); err == nil {
 			conn.Close()
 			return nil
 		}
@@ -176,7 +187,10 @@ func (s *ServiceManager) waitReady(timeout time.Duration) error {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return fmt.Errorf("timeout waiting for kernel on :%s", port)
+	if apiReady {
+		return fmt.Errorf("timeout waiting for kernel proxy port :%s (API port :%s ready)", proxyPort, apiPort)
+	}
+	return fmt.Errorf("timeout waiting for kernel on API :%s, proxy :%s", apiPort, proxyPort)
 }
 
 func (s *ServiceManager) stopNohup() error {
@@ -207,10 +221,68 @@ func (s *ServiceManager) readProxyPort() string {
 	return ""
 }
 
+func (s *ServiceManager) readAPIPort() string {
+	data, err := os.ReadFile(s.cfg.RuntimePath())
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "external-controller:") {
+			addr := strings.TrimSpace(strings.TrimPrefix(line, "external-controller:"))
+			addr = strings.Trim(addr, `"`)
+			if idx := strings.LastIndex(addr, ":"); idx >= 0 {
+				return strings.TrimSpace(addr[idx+1:])
+			}
+		}
+	}
+	return ""
+}
+
 func (s *ServiceManager) ProxyPort() string {
 	port := s.readProxyPort()
 	if port == "" {
 		return "7890"
 	}
 	return port
+}
+
+func (s *ServiceManager) PID() int {
+	out, err := exec.Command("pgrep", "-f", s.cfg.KernelBin()).Output()
+	if err != nil {
+		return 0
+	}
+	var pid int
+	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &pid)
+	return pid
+}
+
+func (s *ServiceManager) Uptime() string {
+	pid := s.PID()
+	if pid == 0 {
+		return ""
+	}
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) < 22 {
+		return ""
+	}
+	var startTicks uint64
+	fmt.Sscanf(fields[21], "%d", &startTicks)
+	ticksPerSec := int64(100) // Linux default
+	nowTicks := time.Now().Unix()
+	startSec := int64(startTicks) / ticksPerSec
+	if startSec <= 0 {
+		return ""
+	}
+	uptime := time.Duration(nowTicks-startSec) * time.Second
+	hours := int(uptime.Hours())
+	minutes := int(uptime.Minutes()) % 60
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	}
+	return fmt.Sprintf("%dm", minutes)
 }

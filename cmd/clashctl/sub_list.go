@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -23,12 +25,80 @@ var subListCmd = &cobra.Command{
 			ilog.Info("no subscriptions")
 			return
 		}
+
+		fmt.Println()
+		printTableHeader([]string{"", "ID", "Name", "Status", "Updated", "Proxies", "URL"})
 		for _, p := range meta.Profiles {
 			marker := " "
+			status := "ready"
 			if p.ID == meta.Use {
 				marker = "*"
+				status = "active"
 			}
-			fmt.Printf(" %s [%d] %s\n", marker, p.ID, p.URL)
+			name := p.Name
+			if name == "" {
+				name = shortenURL(p.URL)
+			}
+			updated := p.Updated
+			if updated == "" {
+				updated = "—"
+			}
+			proxies := countProxies(p.Path)
+			fmt.Printf(" %s  %-3d %-20s %-8s %-14s %-7s %s\n",
+				marker, p.ID, truncStr(name, 20), status, truncStr(updated, 14), proxies, shortenURL(p.URL))
 		}
+		fmt.Println()
+		fmt.Println(" * = currently active")
 	},
+}
+
+func printTableHeader(columns []string) {
+	for i, c := range columns {
+		if i == 0 {
+			fmt.Printf(" %s ", c)
+		} else if i == len(columns)-1 {
+			fmt.Printf("%s", c)
+		} else {
+			fmt.Printf("%-*s ", len(c)+4, c)
+		}
+	}
+	fmt.Println()
+	for i, c := range columns {
+		w := len(c) + 4
+		if i == 0 {
+			fmt.Print("──")
+		} else if i == len(columns)-1 {
+			fmt.Print(strings.Repeat("─", 30))
+		} else {
+			fmt.Print(strings.Repeat("─", w))
+		}
+		if i < len(columns)-1 {
+			fmt.Print("")
+		}
+	}
+	fmt.Println()
+}
+
+func truncStr(s string, max int) string {
+	if len(s) > max {
+		return s[:max-3] + "..."
+	}
+	return s
+}
+
+func countProxies(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "—"
+	}
+	count := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "name:") && strings.Contains(line, "type:") {
+			count++
+		}
+	}
+	if count == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d", count)
 }
