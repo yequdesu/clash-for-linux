@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════
 # Linux CLI&TUI Clash — installer
-# Usage: bash install.sh [--force] [--with-tui] [--skip-cli] [--tui-only]
-
+# ═══════════════════════════════════════════════════════════════
+# Run as NORMAL USER (NOT sudo):
+#     bash install.sh
+#     bash install.sh --with-tui
+#     bash install.sh --force
+#
+# The script will ask for sudo password ONCE at the start and
+# cache it for all privileged operations (install to /usr/local/bin,
+# systemd service, setcap, etc.).
+# ═══════════════════════════════════════════════════════════════
+set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"; cd "$SCRIPT_DIR"
-
-stty sane 2>/dev/null || true
 
 _log_fatal() { printf '\r\n\033[31m[x]\033[0m %s\r\n\r\n' "$*" >&2; exit 1; }
 _log_warn()  { printf '\r\033[33m[!]\033[0m %s\r\n' "$*" >&2; }
@@ -12,8 +20,12 @@ _log_info()  { printf '\r\033[36m[i]\033[0m %s\r\n' "$*"; }
 _log_ok()    { printf '\r\033[32m[+]\033[0m %s\r\n' "$*"; }
 _log_section(){ printf '\r\n\033[1m\033[36m=== %s ===\033[0m\r\n\r\n' "$1"; }
 
-_sudo()   { [ "$(id -u)" -eq 0 ] && "$@" || sudo "$@"; }
+# ── sudo helper: if already root, run directly; otherwise use sudo ──
+_sudo() { [ "$(id -u)" -eq 0 ] && "$@" || sudo "$@"; }
 
+# ═══════════════════════════════
+#  Flags
+# ═══════════════════════════════
 FORCE=false; WITH_TUI=false; SKIP_CLI=false; TUI_ONLY=false
 for arg in "$@"; do
     case "$arg" in
@@ -21,28 +33,43 @@ for arg in "$@"; do
         --with-tui) WITH_TUI=true ;;
         --skip-cli) SKIP_CLI=true ;;
         --tui-only) TUI_ONLY=true; SKIP_CLI=true ;;
-        --help|-h)  echo "Usage: bash install.sh [--force] [--with-tui] [--skip-cli] [--tui-only]"; exit 0 ;;
+        --help|-h)
+            echo "Usage: bash install.sh [--force] [--with-tui] [--skip-cli] [--tui-only]"
+            echo ""
+            echo "Run as normal user (no sudo). The script will prompt for"
+            echo "sudo password once at the beginning."
+            exit 0
+            ;;
     esac
 done
 
-[ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] && exec su "$SUDO_USER" -c "cd '$SCRIPT_DIR' && bash install.sh $*"
+# ═══════════════════════════════
+#  Preflight: sudo credential
+# ═══════════════════════════════
+echo ""
+_log_section "Linux CLI & TUI Clash — Installer"
+_log_info "This script installs system binaries and may set up a systemd service."
+_log_info "You will be asked for your sudo password ONCE now."
 
-for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
-    [ -f "$rc" ] && sed -i '/# clashctl START/,/# clashctl END/d' "$rc" 2>/dev/null || true
-done
-rm -f "$HOME/.config/fish/conf.d/clashctl.fish" 2>/dev/null || true
+if [ "$(id -u)" -ne 0 ]; then
+    sudo -v || _log_fatal "sudo authentication failed. Please re-run and enter your password."
+    # Keep sudo alive in background during the entire script
+    ( while true; do sudo -v; sleep 60; done ) &
+    SUDO_KEEPER=$!
+    trap 'kill $SUDO_KEEPER 2>/dev/null' EXIT
+fi
 
-for name in mihomo clash; do
-    pgrep -x "$name" >/dev/null 2>&1 && { _sudo pkill -9 -x "$name" 2>/dev/null || true; sleep 0.5; }
-done
-
-# ── resolve base dir ──
-CLASH_BASE_DIR="${CLASH_BASE_DIR:-$HOME/clashctl}"
+# ═══════════════════════════════
+#  Resolve paths
+# ═══════════════════════════════
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME="$(eval echo ~"$REAL_USER")"
+CLASH_BASE_DIR="${CLASH_BASE_DIR:-$REAL_HOME/clashctl}"
 BIN_KERNEL="${CLASH_BASE_DIR}/bin/mihomo"
 KERNEL_NAME="${KERNEL_NAME:-mihomo}"
 
 # ── .env load ──
-[ -f "$SCRIPT_DIR/.env" ] && . "$SCRIPT_DIR/.env" 2>/dev/null
+[ -f "$SCRIPT_DIR/.env" ] && . "$SCRIPT_DIR/.env" 2>/dev/null || true
 KERNEL_NAME="${KERNEL_NAME:-mihomo}"
 INIT_TYPE="${INIT_TYPE:-}"
 
@@ -58,6 +85,36 @@ detect_init() {
     fi
 }
 detect_init
+
+_log_info "kernel: $KERNEL_NAME  |  init: $INIT_TYPE  |  install: $CLASH_BASE_DIR"
+
+# ═══════════════════════════════
+#  Kill stale processes
+# ═══════════════════════════════
+for name in mihomo clash; do
+    pgrep -x "$name" >/dev/null 2>&1 && { _sudo pkill -9 -x "$name" 2>/dev/null || true; sleep 0.5; }
+done
+
+# Clean old RC cruft
+for rc in "$REAL_HOME/.zshrc" "$REAL_HOME/.bashrc"; do
+    [ -f "$rc" ] && sed -i '/# clashctl START/,/# clashctl END/d' "$rc" 2>/dev/null || true
+done
+rm -f "$REAL_HOME/.config/fish/conf.d/clashctl.fish" 2>/dev/null || true
+
+# ═══════════════════════════════
+#  Reinstall check
+# ═══════════════════════════════
+if [ -d "$CLASH_BASE_DIR" ] && [ -f "$CLASH_BASE_DIR/bin/yq" ]; then
+    if $FORCE; then
+        _log_info "force reinstall — removing previous installation"
+        _sudo rm -rf "$CLASH_BASE_DIR" 2>/dev/null || true
+    else
+        _log_warn "already installed at $CLASH_BASE_DIR"
+        if $WITH_TUI; then _install_tui; fi
+        _log_info "use --force to reinstall"
+        exit 1
+    fi
+fi
 
 # ═══════════════════════════════════════════════
 #  CLI install
@@ -81,11 +138,11 @@ _install_cli() {
 
     _log_info "Go not found — installing Go 1.24.1..."
     local go_arch="linux-amd64"
-    case "$(uname -m)" in aarch64) go_arch="linux-arm64" ;; armv*) go_arch="linux-armv6l" ;; esac
-    if curl -fsSL "https://golang.google.cn/dl/go1.24.1.${go_arch}.tar.gz" -o /tmp/go.tar.gz; then
+    case "$(uname -m)" in aarch64|arm64) go_arch="linux-arm64" ;; armv*) go_arch="linux-armv6l" ;; esac
+    if curl -fsSL "https://go.dev/dl/go1.24.1.${go_arch}.tar.gz" -o /tmp/go.tar.gz; then
         _sudo tar -C /usr/local -xzf /tmp/go.tar.gz; rm -f /tmp/go.tar.gz
         export PATH="/usr/local/go/bin:$PATH"
-        _log_ok "Go installed"
+        _log_ok "Go 1.24.1 installed"
         GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" go build -ldflags="-s -w" -o /tmp/clashctl ./cmd/clashctl/ && {
             _sudo install -D /tmp/clashctl /usr/local/bin/clashctl; rm -f /tmp/clashctl
             _log_ok "clashctl installed"
@@ -116,7 +173,7 @@ _install_tui() {
         if command -v rustup >/dev/null 2>&1; then
             :
         elif curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 2>/dev/null; then
-            source "$HOME/.cargo/env"
+            source "$REAL_HOME/.cargo/env"
             _log_ok "Rust installed"
         else
             _log_warn "Rust install failed — TUI skipped"
@@ -144,45 +201,31 @@ if $TUI_ONLY; then
     exit $?
 fi
 
-if [ -d "$CLASH_BASE_DIR" ] && [ -f "$CLASH_BASE_DIR/bin/yq" ]; then
-    if $FORCE; then
-        _log_info "force reinstall — removing previous installation"
-        _sudo rm -rf "$CLASH_BASE_DIR" 2>/dev/null || true
-    else
-        _log_warn "already installed at $CLASH_BASE_DIR"
-        if $WITH_TUI; then _install_tui; fi
-        _log_info "use --force to reinstall CLI"
-        _log_info "or: bash uninstall.sh && bash install.sh"
-        exit 1
-    fi
-fi
-
-_log_section "Linux CLI&TUI Clash"
-_log_info "kernel: $KERNEL_NAME  |  init: $INIT_TYPE"
-_log_info "install: $CLASH_BASE_DIR"
-
+# ── Create directories ──
 mkdir -p "${CLASH_BASE_DIR}/bin"
 mkdir -p "${CLASH_BASE_DIR}/resources/profiles"
 mkdir -p "${CLASH_BASE_DIR}/resources/configs"
 mkdir -p "${CLASH_BASE_DIR}/logs"
 mkdir -p "${CLASH_BASE_DIR}/runtime"
 
+# ── Copy resources ──
 /bin/cp -rf "$SCRIPT_DIR/resources/." "$CLASH_BASE_DIR/resources/" 2>/dev/null || true
 /bin/cp -f "$SCRIPT_DIR/.env" "$CLASH_BASE_DIR/.env" 2>/dev/null || true
 touch "${CLASH_BASE_DIR}/resources/config.yaml"
 
-mkdir -p "$HOME/.config/clashctl"
-echo "CLASH_BASE_DIR=$CLASH_BASE_DIR" > "$HOME/.config/clashctl/install.env"
+# ── Write install markers ──
+mkdir -p "$REAL_HOME/.config/clashctl"
+echo "CLASH_BASE_DIR=$CLASH_BASE_DIR" > "$REAL_HOME/.config/clashctl/install.env"
 _sudo mkdir -p /etc/clashctl 2>/dev/null
 echo "CLASH_BASE_DIR=$CLASH_BASE_DIR" | _sudo tee /etc/clashctl/install.env >/dev/null 2>&1
 
-# ── Download kernel & resources ──
+# ── Download kernel binary ──
 download_kernel_binary() {
     local ver="${VERSION_MIHOMO:-v1.19.17}"
     local arch="linux-amd64"
     case "$(uname -m)" in
         aarch64|arm64) arch="linux-arm64" ;;
-        armv7l) arch="linux-armv7" ;;
+        armv7l)        arch="linux-armv7" ;;
     esac
     local base_url="${URL_GH_PROXY:-https://gh-proxy.org}/https://github.com/MetaCubeX/mihomo/releases/download/${ver}"
     local filename="mihomo-${arch}-${ver}.gz"
@@ -199,6 +242,7 @@ download_kernel_binary() {
     return 1
 }
 
+# ── Download yq ──
 download_yq() {
     local ver="${VERSION_YQ:-v4.49.2}"
     local arch="amd64"
@@ -216,20 +260,15 @@ download_yq() {
     return 1
 }
 
-if [ ! -f "$BIN_KERNEL" ]; then
-    download_kernel_binary
-fi
+[ ! -f "$BIN_KERNEL" ] && download_kernel_binary
+[ ! -f "${CLASH_BASE_DIR}/bin/yq" ] && download_yq
 
-if [ ! -f "${CLASH_BASE_DIR}/bin/yq" ]; then
-    download_yq
-fi
-
-# ── set capabilities ──
+# ── Set kernel capabilities (for TUN mode) ──
 command -v setcap >/dev/null 2>&1 && \
     _sudo setcap cap_net_admin,cap_net_raw+ep "$BIN_KERNEL" 2>/dev/null && \
-    _log_info "Tun capability granted" || true
+    _log_info "TUN capability granted" || true
 
-# ── install systemd service ──
+# ── Install systemd service ──
 if [ "$INIT_TYPE" = "systemd" ]; then
     _log_info "installing systemd service..."
     cat > /tmp/clashctl.service << SYSTEMD
@@ -239,7 +278,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=$USER
+User=$REAL_USER
 LimitNPROC=500
 LimitNOFILE=1000000
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
@@ -259,30 +298,37 @@ SYSTEMD
     _log_ok "systemd service installed"
 fi
 
+# ── Fix ownership if running via sudo ──
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    _sudo chown -R "$SUDO_USER:$SUDO_USER" "$CLASH_BASE_DIR" 2>/dev/null || true
+fi
+
 # ── PATH setup ──
 case ":$PATH:" in *:/usr/local/bin:*) ;; *)
-    for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
+    for rc in "$REAL_HOME/.zshrc" "$REAL_HOME/.bashrc"; do
         [ -f "$rc" ] && grep -q '/usr/local/bin' "$rc" 2>/dev/null || echo 'export PATH="/usr/local/bin:$PATH"' >> "$rc"
     done
     export PATH="/usr/local/bin:$PATH"
 esac
 
-# ── install components ──
+# ── Install components ──
 $SKIP_CLI || _install_cli
 $WITH_TUI && _install_tui
 
-# ── post-install ──
+# ── Post-install ──
 if [ -x /usr/local/bin/clashctl ]; then
     /usr/local/bin/clashctl config merge 2>/dev/null || true
     RANDOM_SECRET=$(tr -dc 'a-zA-Z0-9' < /dev/urandom 2>/dev/null | head -c8 || echo "clashctl")
     /usr/local/bin/clashctl secret "$RANDOM_SECRET" 2>/dev/null || true
     _log_ok "install complete"
 
-    # Auto-import subscriptions
-    [ -n "${CLASH_CONFIG_URL:-}" ] && { _log_info "downloading subscription..."; /usr/local/bin/clashctl sub add "$CLASH_CONFIG_URL" 2>/dev/null; }
+    [ -n "${CLASH_CONFIG_URL:-}" ] && {
+        _log_info "downloading subscription..."
+        /usr/local/bin/clashctl sub add "$CLASH_CONFIG_URL" 2>/dev/null || true
+    }
     for f in "${CLASH_BASE_DIR}/resources/configs"/*.yaml "${CLASH_BASE_DIR}/resources/configs"/*.yml; do
         [ -f "$f" ] || continue
-        /usr/local/bin/clashctl sub add "file://$f" 2>/dev/null
+        /usr/local/bin/clashctl sub add "file://$f" 2>/dev/null || true
     done
 
     echo ''
