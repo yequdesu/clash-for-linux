@@ -1,0 +1,22 @@
+# Build output
+/bin/
+/tui/target/
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (local)
+.env.local
+*.env.local
+
+# Logs
+*.log
+logs/

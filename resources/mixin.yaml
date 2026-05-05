@@ -1,0 +1,50 @@
+# Linux CLI&TUI Clash — mixin.yaml
+# This file overrides/merges into the subscription config before kernel launch.
+# Edit with: clashctl config edit
+
+mixed-port: 7890
+socks-port: 7891
+port: 7892
+mode: rule
+log-level: info
+ipv6: false
+allow-lan: false
+
+external-controller: 0.0.0.0:9090
+secret: ""
+
+tun:
+  enable: false
+  stack: gvisor
+  auto-route: true
+  auto-detect-interface: true
+  dns-hijack:
+    - any:53
+
+dns:
+  enable: true
+  enhanced-mode: fake-ip
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  fallback:
+    - 8.8.8.8
+    - 1.1.1.1
+
+rules:
+  prefix:
+    - DOMAIN-SUFFIX,local,DIRECT
+    - IP-CIDR,10.0.0.0/8,DIRECT
+  suffix:
+    - MATCH,Proxy
+
+proxies:
+  prefix: []
+  suffix: []
+  override: []
+
+proxy-groups:
+  prefix: []
+  suffix: []
+  override: []
+  inject: {}
