@@ -156,9 +156,8 @@ _download_yq() {
 #  Function: install CLI (clashctl)
 # ═══════════════════════════════════════════════
 _install_cli() {
-    if [ -f bin/clashctl ]; then
-        _sudo install -D bin/clashctl /usr/local/bin/clashctl
-        _log_ok "clashctl installed (pre-built)"
+    if [ -x /usr/local/bin/clashctl ]; then
+        _log_info "clashctl already installed"
         return 0
     fi
 
@@ -194,12 +193,6 @@ _install_cli() {
 _install_tui() {
     echo ""
     _log_section "Installing TUI Dashboard"
-
-    if [ -f bin/clash-tui ]; then
-        _sudo install -D bin/clash-tui /usr/local/bin/clash-tui
-        _log_ok "clash-tui installed (pre-built)"
-        return 0
-    fi
 
     if [ -x /usr/local/bin/clash-tui ]; then
         _log_info "clash-tui already installed"
