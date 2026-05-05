@@ -5,6 +5,7 @@
 # Run as NORMAL USER (NOT sudo):
 #     bash install.sh
 #     bash install.sh --with-tui
+#     bash install.sh --tui-only
 #     bash install.sh --force
 #
 # The script will ask for sudo password ONCE at the start and
@@ -20,7 +21,7 @@ _log_info()  { printf '\r\033[36m[i]\033[0m %s\r\n' "$*"; }
 _log_ok()    { printf '\r\033[32m[+]\033[0m %s\r\n' "$*"; }
 _log_section(){ printf '\r\n\033[1m\033[36m=== %s ===\033[0m\r\n\r\n' "$1"; }
 
-# ── sudo helper: if already root, run directly; otherwise use sudo ──
+# ── sudo helper ──
 _sudo() { [ "$(id -u)" -eq 0 ] && "$@" || sudo "$@"; }
 
 # ═══════════════════════════════
@@ -30,14 +31,19 @@ FORCE=false; WITH_TUI=false; SKIP_CLI=false; TUI_ONLY=false
 for arg in "$@"; do
     case "$arg" in
         --force)    FORCE=true ;;
-        --with-tui) WITH_TUI=true ;;
+        --with-tui|--tui) WITH_TUI=true ;;
         --skip-cli) SKIP_CLI=true ;;
         --tui-only) TUI_ONLY=true; SKIP_CLI=true ;;
         --help|-h)
-            echo "Usage: bash install.sh [--force] [--with-tui] [--skip-cli] [--tui-only]"
+            echo "Usage: bash install.sh [flags]"
             echo ""
-            echo "Run as normal user (no sudo). The script will prompt for"
-            echo "sudo password once at the beginning."
+            echo "Flags:"
+            echo "  --with-tui (or --tui)    Also build and install the TUI dashboard"
+            echo "  --tui-only               Only install the TUI (skip CLI)"
+            echo "  --force                  Force reinstall, overwrite existing"
+            echo "  --skip-cli               Skip CLI build (use pre-built or skip)"
+            echo ""
+            echo "Run as normal user. Password asked once at the beginning."
             exit 0
             ;;
     esac
@@ -101,25 +107,54 @@ for rc in "$REAL_HOME/.zshrc" "$REAL_HOME/.bashrc"; do
 done
 rm -f "$REAL_HOME/.config/fish/conf.d/clashctl.fish" 2>/dev/null || true
 
-# ═══════════════════════════════
-#  Reinstall check
-# ═══════════════════════════════
-if [ -d "$CLASH_BASE_DIR" ] && [ -f "$CLASH_BASE_DIR/bin/yq" ]; then
-    if $FORCE; then
-        _log_info "force reinstall — removing previous installation"
-        _sudo rm -rf "$CLASH_BASE_DIR" 2>/dev/null || true
-    else
-        _log_warn "already installed at $CLASH_BASE_DIR"
-        if $WITH_TUI; then _install_tui; fi
-        _log_info "use --force to reinstall"
-        exit 1
+# ═══════════════════════════════════════════════
+#  Function: download kernel binary
+# ═══════════════════════════════════════════════
+_download_kernel() {
+    local ver="${VERSION_MIHOMO:-v1.19.17}"
+    local arch="linux-amd64"
+    case "$(uname -m)" in
+        aarch64|arm64) arch="linux-arm64" ;;
+        armv7l)        arch="linux-armv7" ;;
+    esac
+    local base_url="${URL_GH_PROXY:-https://gh-proxy.org}/https://github.com/MetaCubeX/mihomo/releases/download/${ver}"
+    local filename="mihomo-${arch}-${ver}.gz"
+    _log_info "downloading $KERNEL_NAME ${ver}..."
+    if curl -fsSL "${base_url}/${filename}" -o /tmp/mihomo.gz; then
+        gunzip -f /tmp/mihomo.gz
+        _sudo install -D /tmp/mihomo "$BIN_KERNEL"
+        _sudo chmod 755 "$BIN_KERNEL"
+        rm -f /tmp/mihomo
+        _log_ok "$KERNEL_NAME ${ver} installed"
+        return 0
     fi
-fi
+    _log_warn "kernel download failed — please install manually"
+    return 1
+}
 
 # ═══════════════════════════════════════════════
-#  CLI install
+#  Function: download yq
 # ═══════════════════════════════════════════════
+_download_yq() {
+    local ver="${VERSION_YQ:-v4.49.2}"
+    local arch="amd64"
+    case "$(uname -m)" in aarch64|arm64) arch="arm64" ;; esac
+    local url="https://github.com/mikefarah/yq/releases/download/${ver}/yq_linux_${arch}"
+    _log_info "downloading yq ${ver}..."
+    if curl -fsSL "$url" -o /tmp/yq; then
+        _sudo install -D /tmp/yq "${CLASH_BASE_DIR}/bin/yq"
+        _sudo chmod 755 "${CLASH_BASE_DIR}/bin/yq"
+        rm -f /tmp/yq
+        _log_ok "yq ${ver} installed"
+        return 0
+    fi
+    _log_warn "yq download failed"
+    return 1
+}
 
+# ═══════════════════════════════════════════════
+#  Function: install CLI (clashctl)
+# ═══════════════════════════════════════════════
 _install_cli() {
     if [ -f bin/clashctl ]; then
         _sudo install -D bin/clashctl /usr/local/bin/clashctl
@@ -154,10 +189,12 @@ _install_cli() {
 }
 
 # ═══════════════════════════════════════════════
-#  TUI install
+#  Function: install TUI (clash-tui)
 # ═══════════════════════════════════════════════
-
 _install_tui() {
+    echo ""
+    _log_section "Installing TUI Dashboard"
+
     if [ -f bin/clash-tui ]; then
         _sudo install -D bin/clash-tui /usr/local/bin/clash-tui
         _log_ok "clash-tui installed (pre-built)"
@@ -171,18 +208,22 @@ _install_tui() {
 
     if ! command -v cargo >/dev/null 2>&1; then
         if command -v rustup >/dev/null 2>&1; then
-            :
+            _log_info "rustup found, ensuring toolchain..."
+            rustup default stable 2>/dev/null || true
         elif curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 2>/dev/null; then
             source "$REAL_HOME/.cargo/env"
             _log_ok "Rust installed"
         else
-            _log_warn "Rust install failed — TUI skipped"
+            _log_warn "Rust install failed — install rustup manually, then re-run"
             return 1
         fi
     fi
 
-    _log_info "building clash-tui..."
-    ( cd "$SCRIPT_DIR/tui" && cargo build --release 2>&1 | tail -3 )
+    # Ensure cargo is in PATH
+    [ -f "$REAL_HOME/.cargo/env" ] && source "$REAL_HOME/.cargo/env"
+
+    _log_info "building clash-tui (this may take 2-5 minutes)..."
+    ( cd "$SCRIPT_DIR/tui" && cargo build --release 2>&1 | tail -5 )
     if [ -f tui/target/release/clash-tui ]; then
         _sudo install -D tui/target/release/clash-tui /usr/local/bin/clash-tui
         _log_ok "clash-tui installed"
@@ -193,9 +234,27 @@ _install_tui() {
 }
 
 # ═══════════════════════════════════════════════
-#  Main
+#  Reinstall check (must be AFTER fn defs)
+# ═══════════════════════════════════════════════
+if [ -d "$CLASH_BASE_DIR" ] && [ -f "$CLASH_BASE_DIR/bin/yq" ]; then
+    if $FORCE; then
+        _log_info "force reinstall — removing previous installation"
+        _sudo rm -rf "$CLASH_BASE_DIR" 2>/dev/null || true
+    else
+        _log_warn "already installed at $CLASH_BASE_DIR"
+        if $WITH_TUI; then
+            _install_tui
+        fi
+        _log_info "use --force to reinstall"
+        exit 1
+    fi
+fi
+
+# ═══════════════════════════════════════════════
+#  Main install flow
 # ═══════════════════════════════════════════════
 
+# --tui-only: just install TUI and exit
 if $TUI_ONLY; then
     _install_tui
     exit $?
@@ -219,49 +278,9 @@ echo "CLASH_BASE_DIR=$CLASH_BASE_DIR" > "$REAL_HOME/.config/clashctl/install.env
 _sudo mkdir -p /etc/clashctl 2>/dev/null
 echo "CLASH_BASE_DIR=$CLASH_BASE_DIR" | _sudo tee /etc/clashctl/install.env >/dev/null 2>&1
 
-# ── Download kernel binary ──
-download_kernel_binary() {
-    local ver="${VERSION_MIHOMO:-v1.19.17}"
-    local arch="linux-amd64"
-    case "$(uname -m)" in
-        aarch64|arm64) arch="linux-arm64" ;;
-        armv7l)        arch="linux-armv7" ;;
-    esac
-    local base_url="${URL_GH_PROXY:-https://gh-proxy.org}/https://github.com/MetaCubeX/mihomo/releases/download/${ver}"
-    local filename="mihomo-${arch}-${ver}.gz"
-    _log_info "downloading $KERNEL_NAME ${ver}..."
-    if curl -fsSL "${base_url}/${filename}" -o /tmp/mihomo.gz; then
-        gunzip -f /tmp/mihomo.gz
-        _sudo install -D /tmp/mihomo "$BIN_KERNEL"
-        _sudo chmod 755 "$BIN_KERNEL"
-        rm -f /tmp/mihomo
-        _log_ok "$KERNEL_NAME ${ver} installed"
-        return 0
-    fi
-    _log_warn "kernel download failed — please install manually"
-    return 1
-}
-
-# ── Download yq ──
-download_yq() {
-    local ver="${VERSION_YQ:-v4.49.2}"
-    local arch="amd64"
-    case "$(uname -m)" in aarch64|arm64) arch="arm64" ;; esac
-    local url="https://github.com/mikefarah/yq/releases/download/${ver}/yq_linux_${arch}"
-    _log_info "downloading yq ${ver}..."
-    if curl -fsSL "$url" -o /tmp/yq; then
-        _sudo install -D /tmp/yq "${CLASH_BASE_DIR}/bin/yq"
-        _sudo chmod 755 "${CLASH_BASE_DIR}/bin/yq"
-        rm -f /tmp/yq
-        _log_ok "yq ${ver} installed"
-        return 0
-    fi
-    _log_warn "yq download failed"
-    return 1
-}
-
-[ ! -f "$BIN_KERNEL" ] && download_kernel_binary
-[ ! -f "${CLASH_BASE_DIR}/bin/yq" ] && download_yq
+# ── Download resources ──
+[ ! -f "$BIN_KERNEL" ] && _download_kernel
+[ ! -f "${CLASH_BASE_DIR}/bin/yq" ] && _download_yq
 
 # ── Set kernel capabilities (for TUN mode) ──
 command -v setcap >/dev/null 2>&1 && \
@@ -298,7 +317,7 @@ SYSTEMD
     _log_ok "systemd service installed"
 fi
 
-# ── Fix ownership if running via sudo ──
+# ── Fix ownership ──
 if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
     _sudo chown -R "$SUDO_USER:$SUDO_USER" "$CLASH_BASE_DIR" 2>/dev/null || true
 fi
@@ -315,7 +334,7 @@ esac
 $SKIP_CLI || _install_cli
 $WITH_TUI && _install_tui
 
-# ── Post-install ──
+# ── Post-install config ──
 if [ -x /usr/local/bin/clashctl ]; then
     /usr/local/bin/clashctl config merge 2>/dev/null || true
     RANDOM_SECRET=$(tr -dc 'a-zA-Z0-9' < /dev/urandom 2>/dev/null | head -c8 || echo "clashctl")
@@ -332,12 +351,12 @@ if [ -x /usr/local/bin/clashctl ]; then
     done
 
     echo ''
-    _log_info "usage:"
+    _log_info "quick start:"
     echo '  clashctl start             start proxy'
     echo '  clashctl sub add <url>     add subscription'
     echo '  eval $(clashctl env)       load proxy env'
-    echo '  clashctl tui               launch dashboard'
+    echo '  clashctl tui               launch TUI dashboard'
     [ -x /usr/local/bin/clash-tui ] && echo '  clash-tui                  launch TUI directly'
 else
-    _log_warn "clashctl not installed — run with Go: bash install.sh"
+    _log_warn "clashctl not installed — build manually with Go: bash install.sh"
 fi
