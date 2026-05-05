@@ -262,6 +262,7 @@ func (s *ServiceManager) Uptime() string {
 	if pid == 0 {
 		return ""
 	}
+	// starttime (field 22) is clock ticks since system boot, NOT epoch
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
 		return ""
@@ -270,15 +271,30 @@ func (s *ServiceManager) Uptime() string {
 	if len(fields) < 22 {
 		return ""
 	}
-	var startTicks uint64
-	fmt.Sscanf(fields[21], "%d", &startTicks)
-	ticksPerSec := int64(100) // Linux default
-	nowTicks := time.Now().Unix()
-	startSec := int64(startTicks) / ticksPerSec
-	if startSec <= 0 {
+	// Find starttime — it's after the `)` which may contain spaces (comm field)
+	// The stat format is: pid (comm) state ... the 22nd field after comm is starttime
+	closeParen := strings.LastIndex(string(data), ")")
+	if closeParen < 0 {
 		return ""
 	}
-	uptime := time.Duration(nowTicks-startSec) * time.Second
+	afterComm := strings.Fields(string(data)[closeParen+2:])
+	if len(afterComm) < 20 {
+		return ""
+	}
+	var startTicks uint64
+	fmt.Sscanf(afterComm[19], "%d", &startTicks) // starttime is field 20 after comm
+	ticksPerSec := int64(100)
+
+	// Read system uptime to compute boot time
+	uptimeData, _ := os.ReadFile("/proc/uptime")
+	var sysUptime float64
+	fmt.Sscanf(string(uptimeData), "%f", &sysUptime)
+
+	nowSec := time.Now().Unix()
+	bootTime := nowSec - int64(sysUptime)
+	startSec := bootTime + int64(startTicks)/ticksPerSec
+
+	uptime := time.Duration(nowSec-startSec) * time.Second
 	hours := int(uptime.Hours())
 	minutes := int(uptime.Minutes()) % 60
 	if hours > 0 {

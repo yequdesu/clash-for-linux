@@ -57,6 +57,26 @@ for bin in clashctl clash-tui; do
     fi
 done
 
+# ── Prompt to keep kernel/yq binaries ──
+for bin in mihomo yq; do
+    local_path="${CLASH_BASE_DIR}/bin/${bin}"
+    system_path="/usr/local/bin/${bin}"
+    if [ -f "$local_path" ]; then
+        printf '\r\033[36m[i]\033[0m Keep %s binary for future use? [Y/n] ' "$bin"
+        read -r answer
+        case "${answer:-y}" in
+            [Yy]|yes|YES)
+                _sudo cp "$local_path" "$system_path" 2>/dev/null || true
+                _sudo chmod 755 "$system_path" 2>/dev/null || true
+                _log_ok "kept $bin at $system_path"
+                ;;
+            *)
+                _log_info "removing $bin binary"
+                ;;
+        esac
+    fi
+done
+
 # ── Clean shell RC ──
 for rc in "$REAL_HOME/.zshrc" "$REAL_HOME/.bashrc"; do
     if [ -f "$rc" ]; then

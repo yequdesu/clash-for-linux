@@ -30,35 +30,39 @@ if command -v clashctl >/dev/null 2>&1; then
 fi
 
 # ── Git pull ──
-CHANGED=""
-if [ -d .git ]; then
-    git fetch origin 2>/dev/null || true
-    CHANGED=$(git diff --name-only HEAD origin/main 2>/dev/null || git diff --name-only HEAD origin/master 2>/dev/null || echo "")
-    if [ -n "$CHANGED" ]; then
-        _log_info "pulling updates..."
-        git pull 2>/dev/null || _log_warn "git pull failed — update manually"
-    else
-        _log_info "already up to date"
-    fi
+if [ -d .git ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    _log_info "pulling updates..."
+    git pull 2>/dev/null || _log_warn "git pull failed — continuing with local source"
+else
+    _log_info "not a git repository — rebuilding from local source"
 fi
 
-# ── Rebuild CLI ──
-if echo "$CHANGED" | grep -q '\.go$'; then
+# ── Always rebuild CLI ──
+if command -v go >/dev/null 2>&1; then
     _log_info "rebuilding clashctl..."
-    go build -ldflags="-s -w" -o /tmp/clashctl ./cmd/clashctl/ && {
+    GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" go build -ldflags="-s -w" -o /tmp/clashctl ./cmd/clashctl/ && {
         _sudo install -D /tmp/clashctl /usr/local/bin/clashctl; rm -f /tmp/clashctl
         _log_ok "clashctl updated"
-    }
+    } || _log_warn "clashctl build failed — re-run after fixing Go"
+else
+    _log_warn "Go not found — skipping CLI rebuild"
 fi
 
-# ── Rebuild TUI ──
-if echo "$CHANGED" | grep -q '\.rs$'; then
-    _log_info "rebuilding clash-tui..."
-    ( cd tui && cargo build --release 2>&1 | tail -3 )
-    if [ -f tui/target/release/clash-tui ]; then
-        _sudo install -D tui/target/release/clash-tui /usr/local/bin/clash-tui
-        _log_ok "clash-tui updated"
+# ── Always rebuild TUI ──
+if command -v cargo >/dev/null 2>&1 || command -v rustup >/dev/null 2>&1; then
+    if [ -f "$HOME/.cargo/env" ]; then source "$HOME/.cargo/env"; fi
+    if command -v cargo >/dev/null 2>&1; then
+        _log_info "rebuilding clash-tui..."
+        ( cd tui && cargo build --release 2>&1 | tail -3 )
+        if [ -f tui/target/release/clash-tui ]; then
+            _sudo install -D tui/target/release/clash-tui /usr/local/bin/clash-tui
+            _log_ok "clash-tui updated"
+        else
+            _log_warn "clash-tui build failed"
+        fi
     fi
+else
+    _log_info "cargo not found — skipping TUI rebuild (use 'bash install_tui.sh')"
 fi
 
 # ── Restart with updated binary ──

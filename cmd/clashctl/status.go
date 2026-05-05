@@ -129,6 +129,7 @@ func readRuntimeInfo(cfg *config.EnvConfig) runtimeInfo {
 			}
 		case strings.HasPrefix(line, "secret:"):
 			info.secret = strings.TrimSpace(strings.TrimPrefix(line, "secret:"))
+			info.secret = strings.Trim(info.secret, `"'`)
 		}
 	}
 	return info

@@ -134,14 +134,19 @@ pub fn read_tun_status() -> bool {
         for base in &["clashctl", ".clashctl"] {
             let p = PathBuf::from(&home).join(base).join("resources").join("runtime.yaml");
             if let Ok(content) = fs::read_to_string(&p) {
+                let mut in_tun = false;
                 for line in content.lines() {
                     let trimmed = line.trim();
-                    if trimmed.starts_with("tun:") || trimmed == "tun:" {
+                    if trimmed == "tun:" {
+                        in_tun = true;
                         continue;
                     }
-                    if trimmed.starts_with("enable:") || trimmed.starts_with("  enable:") {
-                        let val = trimmed.split(':').nth(1).unwrap_or("false").trim();
-                        return val == "true";
+                    if in_tun && !trimmed.starts_with(' ') && trimmed.contains(':') {
+                        in_tun = false;
+                        continue;
+                    }
+                    if in_tun && (trimmed == "enable: true" || trimmed.starts_with("enable: true")) {
+                        return true;
                     }
                 }
             }

@@ -39,7 +39,6 @@ func resolveBaseDir() string {
 	if dir := os.Getenv("CLASH_BASE_DIR"); dir != "" {
 		return expandHome(dir)
 	}
-	home, _ := os.UserHomeDir()
 
 	if data, err := os.ReadFile("/etc/clashctl/install.env"); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
@@ -51,9 +50,8 @@ func resolveBaseDir() string {
 	}
 
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && os.Getuid() == 0 {
-		origHome := "/home/" + sudoUser
-		if _, err := os.Stat(origHome); err == nil {
-			markerFile := filepath.Join(origHome, ".config", "clashctl", "install.env")
+		for _, homeBase := range []string{"/home", "/root"} {
+			markerFile := filepath.Join(homeBase, sudoUser, ".config", "clashctl", "install.env")
 			if f, err := os.Open(markerFile); err == nil {
 				defer f.Close()
 				sc := bufio.NewScanner(f)
@@ -66,6 +64,8 @@ func resolveBaseDir() string {
 			}
 		}
 	}
+
+	home, _ := os.UserHomeDir()
 
 	markerFile := filepath.Join(home, ".config", "clashctl", "install.env")
 	if f, err := os.Open(markerFile); err == nil {

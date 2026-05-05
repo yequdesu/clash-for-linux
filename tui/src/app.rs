@@ -138,6 +138,11 @@ impl App {
         self.fetch_proxies();
         self.fetch_connections();
         self.fetch_version();
+        self.refresh_subscriptions();
+        self.tun_enabled = crate::api::read_tun_status();
+        if self.tick_count % 3 == 0 && !self.proxy_groups.is_empty() {
+            self.test_selected_delay();
+        }
         if self.tab == Tab::Logs && !self.log_paused {
             self.fetch_logs();
         }

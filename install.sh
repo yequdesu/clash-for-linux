@@ -108,52 +108,22 @@ done
 rm -f "$REAL_HOME/.config/fish/conf.d/clashctl.fish" 2>/dev/null || true
 
 # ═══════════════════════════════════════════════
-#  Mirror selection — find the fastest GitHub mirror
+#  Mirror fallback — try direct GitHub first, then gh-proxy.org
 # ═══════════════════════════════════════════════
-GH_MIRROR=""
-_select_mirror() {
-    [ -n "$GH_MIRROR" ] && return
-
-    local mirrors=(
-        "https://gh-proxy.org"
-        "https://ghproxy.com"
-        "https://mirror.ghproxy.com"
-    )
-
-    _log_info "testing GitHub mirror connectivity..."
-    local best_mirror="" best_time=999999
-    for m in "${mirrors[@]}"; do
-        local start=$(date +%s%3N 2>/dev/null || echo 0)
-        if curl -fsSL -m 5 -o /dev/null "${m}/" 2>/dev/null; then
-            local end=$(date +%s%3N 2>/dev/null || echo 0)
-            local elapsed=$((end - start))
-            _log_info "  ${m} — ${elapsed}ms"
-            if [ "$elapsed" -lt "$best_time" ]; then
-                best_time=$elapsed
-                best_mirror="$m"
-            fi
-        else
-            _log_info "  ${m} — unreachable"
-        fi
-    done
-
-    if [ -n "$best_mirror" ]; then
-        GH_MIRROR="$best_mirror"
-        _log_ok "selected mirror: ${GH_MIRROR}"
-    else
-        _log_warn "no mirror reachable — using direct GitHub (may be slow in mainland China)"
-        GH_MIRROR=""
+_gh_download() {
+    local raw_url="$1"
+    local output="$2"
+    local desc="$3"
+    _log_info "downloading ${desc}..."
+    if curl -fSL --progress-bar "$raw_url" -o "$output" 2>/dev/null; then
+        return 0
     fi
-}
-
-# Helper: prefix a raw GitHub URL with the selected mirror
-_gh_url() {
-    local raw="$1"
-    if [ -n "$GH_MIRROR" ]; then
-        echo "${GH_MIRROR}/${raw}"
-    else
-        echo "$raw"
+    _log_info "direct GitHub failed, trying gh-proxy.org..."
+    if curl -fSL --progress-bar "https://gh-proxy.org/${raw_url}" -o "$output"; then
+        return 0
     fi
+    _log_warn "${desc} download failed"
+    return 1
 }
 
 # ═══════════════════════════════════════════════
@@ -168,9 +138,7 @@ _download_kernel() {
     esac
     local filename="mihomo-${arch}-${ver}.gz"
     local raw_url="https://github.com/MetaCubeX/mihomo/releases/download/${ver}/${filename}"
-    local dl_url=$(_gh_url "$raw_url")
-    _log_info "downloading $KERNEL_NAME ${ver}..."
-    if curl -fSL --progress-bar "$dl_url" -o /tmp/mihomo.gz; then
+    if _gh_download "$raw_url" /tmp/mihomo.gz "$KERNEL_NAME ${ver}"; then
         gunzip -f /tmp/mihomo.gz
         _sudo install -D /tmp/mihomo "$BIN_KERNEL"
         _sudo chmod 755 "$BIN_KERNEL"
@@ -178,7 +146,6 @@ _download_kernel() {
         _log_ok "$KERNEL_NAME ${ver} installed"
         return 0
     fi
-    _log_warn "kernel download failed — please install manually"
     return 1
 }
 
@@ -190,16 +157,13 @@ _download_yq() {
     local arch="amd64"
     case "$(uname -m)" in aarch64|arm64) arch="arm64" ;; esac
     local raw_url="https://github.com/mikefarah/yq/releases/download/${ver}/yq_linux_${arch}"
-    local dl_url=$(_gh_url "$raw_url")
-    _log_info "downloading yq ${ver}..."
-    if curl -fSL --progress-bar "$dl_url" -o /tmp/yq; then
+    if _gh_download "$raw_url" /tmp/yq "yq ${ver}"; then
         _sudo install -D /tmp/yq "${CLASH_BASE_DIR}/bin/yq"
         _sudo chmod 755 "${CLASH_BASE_DIR}/bin/yq"
         rm -f /tmp/yq
         _log_ok "yq ${ver} installed"
         return 0
     fi
-    _log_warn "yq download failed"
     return 1
 }
 
@@ -216,13 +180,7 @@ _download_geodata() {
             _log_info "geodata ${f} already exists, skipping"
             continue
         fi
-        _log_info "downloading ${f}..."
-        local dl_url=$(_gh_url "${raw_base}/${f}")
-        if curl -fSL --progress-bar "$dl_url" -o "${dest}/${f}"; then
-            _log_ok "${f} installed"
-        else
-            _log_warn "${f} download failed — kernel may still work without it"
-        fi
+        _gh_download "${raw_base}/${f}" "${dest}/${f}" "${f}" || true
     done
 }
 
@@ -346,7 +304,6 @@ _sudo mkdir -p /etc/clashctl 2>/dev/null
 echo "CLASH_BASE_DIR=$CLASH_BASE_DIR" | _sudo tee /etc/clashctl/install.env >/dev/null 2>&1
 
 # ── Download resources ──
-_select_mirror
 [ ! -f "$BIN_KERNEL" ] && _download_kernel
 [ ! -f "${CLASH_BASE_DIR}/bin/yq" ] && _download_yq
 _download_geodata
