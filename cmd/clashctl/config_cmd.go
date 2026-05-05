@@ -24,7 +24,7 @@ var configCmd = &cobra.Command{
 				ilog.Warn("editor failed: %v", err)
 				return
 			}
-			if err := config.MergeConfig(cfg); err != nil {
+			if err := config.MergeConfig(cfg, false); err != nil {
 				ilog.Warn("merge failed: %v", err)
 				return
 			}
@@ -44,7 +44,8 @@ var configCmd = &cobra.Command{
 			}
 			fmt.Print(data)
 		case "merge":
-			if err := config.MergeConfig(cfg); err != nil {
+			autoFix, _ := cmd.Flags().GetBool("autofix")
+			if err := config.MergeConfig(cfg, autoFix); err != nil {
 				ilog.Warn("merge failed: %v", err)
 				return
 			}
@@ -53,4 +54,8 @@ var configCmd = &cobra.Command{
 			ilog.Warn("usage: clashctl config <edit|view|raw|merge>")
 		}
 	},
+}
+
+func init() {
+	configCmd.Flags().Bool("autofix", false, "auto-fix proxy group reference mismatches")
 }

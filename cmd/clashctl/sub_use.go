@@ -44,7 +44,7 @@ func switchSubscription(cfg *config.EnvConfig, id int) {
 		ilog.Warn("write config: %v", err)
 		return
 	}
-	if err := config.MergeConfig(cfg); err != nil {
+	if err := config.MergeConfig(cfg, false); err != nil {
 		ilog.Warn("merge failed: %v", err)
 		return
 	}

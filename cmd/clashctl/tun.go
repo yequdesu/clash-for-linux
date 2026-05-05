@@ -33,7 +33,7 @@ var tunCmd = &cobra.Command{
 				ilog.Warn("set tun failed: %v", err)
 				return
 			}
-			if err := config.MergeConfig(cfg); err != nil {
+			if err := config.MergeConfig(cfg, false); err != nil {
 				ilog.Warn("merge: %v", err)
 				return
 			}
@@ -52,7 +52,7 @@ var tunCmd = &cobra.Command{
 					ilog.Warn("Tun start failed: %v", err)
 				}
 				exec.Command(cfg.YQBin(), "-i", ".tun.enable = false", cfg.MixinPath()).Run()
-				config.MergeConfig(cfg)
+				config.MergeConfig(cfg, false)
 				svc.Start()
 				return
 			}
@@ -62,7 +62,7 @@ var tunCmd = &cobra.Command{
 				ilog.Fatal("Tun mode requires root. Run with sudo.")
 			}
 			exec.Command(cfg.YQBin(), "-i", ".tun.enable = false", cfg.MixinPath()).Run()
-			config.MergeConfig(cfg)
+			config.MergeConfig(cfg, false)
 			svc := kernel.NewServiceManager(cfg)
 			svc.Stop()
 			if err := svc.Start(); err != nil {

@@ -35,8 +35,12 @@ rules:
   prefix:
     - DOMAIN-SUFFIX,local,DIRECT
     - IP-CIDR,10.0.0.0/8,DIRECT
-  suffix:
-    - MATCH,Proxy
+  suffix: []
+  # To add a catch-all rule, first confirm the proxy group name in your subscription,
+  # then uncomment and edit the line below. Run 'clashctl config merge' to validate.
+  # Example: if your subscription defines a group named "SSRDOG":
+  # suffix:
+  #   - MATCH,SSRDOG
 
 proxies:
   prefix: []
