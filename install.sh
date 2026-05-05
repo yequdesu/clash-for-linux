@@ -121,7 +121,7 @@ _select_mirror() {
     )
 
     _log_info "testing GitHub mirror connectivity..."
-    local best_mirror="" best_time=999
+    local best_mirror="" best_time=999999
     for m in "${mirrors[@]}"; do
         local start=$(date +%s%3N 2>/dev/null || echo 0)
         if curl -fsSL -m 5 -o /dev/null "${m}/" 2>/dev/null; then
