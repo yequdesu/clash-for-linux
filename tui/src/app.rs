@@ -258,9 +258,7 @@ impl App {
                 self.connections = conns;
                 self.connections_total = self.connections.len();
                 self.connections_active = self.connections.iter()
-                    .filter(|c| {
-                        c.download_speed.unwrap_or(0) > 0 || c.upload_speed.unwrap_or(0) > 0
-                    })
+                    .filter(|c| c.dl_speed() > 0 || c.ul_speed() > 0)
                     .count();
             }
             DataEvent::ConnectionsFetched(Err(_)) => {}
@@ -953,10 +951,10 @@ fn render_connections(frame: &mut Frame, area: Rect, app: &mut App) {
     let rows: Vec<Vec<String>> = app.connections.iter()
         .map(|c| {
             vec![
-                crate::widgets::table::truncate(&c.host.clone().unwrap_or_default(), 25),
-                c.conn_type.clone().unwrap_or_default(),
-                c.chain.as_ref().map(|ch| ch.join(" → ")).unwrap_or_default(),
-                format_speed(c.download_speed.unwrap_or(0)),
+                crate::widgets::table::truncate(&c.host(), 25),
+                c.conn_type(),
+                c.chain_str(),
+                format_speed(c.dl_speed()),
             ]
         })
         .collect();

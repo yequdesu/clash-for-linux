@@ -44,16 +44,43 @@ pub struct TrafficInfo {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Connection {
     pub id: String,
-    pub host: Option<String>,
+    pub metadata: Option<ConnectionMetadata>,
+    #[serde(default)]
+    pub upload: u64,
+    #[serde(default)]
+    pub download: u64,
+    pub start: Option<String>,
+    #[serde(default)]
+    pub chains: Vec<String>,
+    pub rule: Option<String>,
+    #[serde(rename = "rulePayload")]
+    pub rule_payload: Option<String>,
+    #[serde(rename = "uploadSpeed")]
+    pub upload_speed: Option<u64>,
+    #[serde(rename = "downloadSpeed")]
+    pub download_speed: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConnectionMetadata {
     pub network: Option<String>,
     #[serde(rename = "type")]
     pub conn_type: Option<String>,
-    pub chain: Option<Vec<String>>,
-    #[serde(rename = "downloadSpeed")]
-    pub download_speed: Option<u64>,
-    #[serde(rename = "uploadSpeed")]
-    pub upload_speed: Option<u64>,
-    pub start: Option<String>,
+    pub host: Option<String>,
+}
+
+impl Connection {
+    pub fn host(&self) -> String {
+        self.metadata.as_ref().and_then(|m| m.host.clone()).unwrap_or_default()
+    }
+    pub fn conn_type(&self) -> String {
+        self.metadata.as_ref().and_then(|m| m.conn_type.clone()).unwrap_or_default()
+    }
+    pub fn chain_str(&self) -> String {
+        if self.chains.is_empty() { String::new() } else { self.chains.join(" → ") }
+    }
+    pub fn dl_speed(&self) -> u64 { self.download_speed.unwrap_or(0) }
+    pub fn ul_speed(&self) -> u64 { self.upload_speed.unwrap_or(0) }
 }
 
 #[derive(Debug, Clone, Deserialize)]
