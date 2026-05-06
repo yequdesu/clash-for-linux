@@ -54,31 +54,28 @@ download_file() {
     local output="$2"
     local desc="$3"
     
-    # 1. 尝试直连 (短超时)
-    echo -ne "  ${GRAY}${desc}... [direct] ${NC}"
-    if curl -fSL --connect-timeout 5 --max-time 10 "$url" -o "$output" 2>/dev/null; then
-        printf "\r%-80s\r" " "
+    # 1. 尝试直连
+    echo -e "  ${GRAY}↓ ${desc} [direct]${NC}"
+    if curl -fSL --connect-timeout 5 --max-time 10 "$url" -o "$output"; then
         echo -e "  ${GREEN}✓${NC} ${desc} ${GRAY}($(du -h "$output" 2>/dev/null | cut -f1 || echo 'ok'))${NC}"
         return 0
     fi
+    echo -e "  ${YELLOW}⚠ direct failed${NC}"
     
-    # 2. 逐镜像降级 (长超时, 支持大文件)
+    # 2. 逐镜像降级
     for mirror in "${MIRROR_LIST[@]}"; do
         local mirror_url="${mirror}/${url}"
-        echo -ne "\r  ${GRAY}${desc}... [${mirror##*/}] ${NC}"
-        if curl -fSL --connect-timeout 10 --max-time 300 "$mirror_url" -o "$output" 2>/dev/null; then
-            printf "\r%-80s\r" " "
+        echo -e "  ${GRAY}↓ ${desc} [${mirror##*/}]${NC}"
+        echo -e "    ${GRAY}${mirror_url}${NC}"
+        if curl -fSL --connect-timeout 10 --max-time 300 "$mirror_url" -o "$output"; then
             echo -e "  ${GREEN}✓${NC} ${desc} ${GRAY}($(du -h "$output" 2>/dev/null | cut -f1 || echo 'ok'))${NC}"
             return 0
         fi
+        echo -e "  ${YELLOW}⚠ ${mirror##*/} failed${NC}"
     done
     
-    # 3. 全部失败 — 清行后显示详情
-    printf "\r%-80s\r" " "
-    echo -e "  ${RED}✗${NC} ${desc} ${RED}failed${NC}"
-    for mirror in "${MIRROR_LIST[@]}"; do
-        echo -e "    ${GRAY}→ ${mirror}/${url}${NC}"
-    done
+    # 3. 全部失败
+    echo -e "  ${RED}✗${NC} ${desc} ${RED}all attempts failed${NC}"
     return 1
 }
 
@@ -431,25 +428,23 @@ build_cli() {
     cd "${SCRIPT_DIR}"
     
     echo -e "  ${GRAY}下载 Go 依赖...${NC}"
-    if ! go mod download 2>/dev/null; then
+    if ! go mod download; then
         echo -e "  ${YELLOW}⚠ proxy.golang.org 不可达, 尝试国内源...${NC}"
         
         local goproxy_ok=false
         for goproxy in "https://goproxy.cn,direct" "https://goproxy.io,direct" "https://mirrors.aliyun.com/goproxy/,direct"; do
-            echo -ne "  ${GRAY}  → ${goproxy%%,*}... ${NC}"
-            if GOPROXY="$goproxy" go mod download 2>/dev/null; then
+            echo -e "  ${GRAY}→ ${goproxy%%,*}... ${NC}"
+            if GOPROXY="$goproxy" go mod download; then
                 export GOPROXY="$goproxy"
-                printf "\r%-80s\r" " "
                 echo -e "  ${GREEN}✓${NC} 依赖就绪 ${GRAY}(${goproxy%%,*})${NC}"
                 goproxy_ok=true
                 break
             fi
-            printf "\r%-80s\r" " "
         done
         
         if ! $goproxy_ok; then
             echo -e "${RED}✗ Go 模块下载失败 (所有源均不可达)${NC}"
-            echo -e "  ${YELLOW}  手动设置: go env -w GOPROXY=https://goproxy.cn,direct${NC}"
+            echo -e "  ${YELLOW}  手动: go env -w GOPROXY=https://goproxy.cn,direct${NC}"
             cd - >/dev/null
             return
         fi
