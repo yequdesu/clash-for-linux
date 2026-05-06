@@ -1,24 +1,10 @@
-# ================================
-# Linux CLI&TUI Clash — mixin.yaml
-# 此文件的配置会覆盖/合并到订阅配置中
-# ================================
-
-# —— 端口 ——
 mixed-port: 7897
-socks-port: 7898
-port: 7899
-
-# —— 模式 ——
 mode: rule
 log-level: info
 ipv6: false
 allow-lan: false
-
-# —— API ——
 external-controller: 127.0.0.1:9090
 secret: ""
-
-# —— TUN ——
 tun:
   enable: false
   stack: gvisor
@@ -26,8 +12,6 @@ tun:
   auto-detect-interface: true
   dns-hijack:
     - any:53
-
-# —— DNS ——
 dns:
   enable: true
   enhanced-mode: fake-ip
@@ -37,13 +21,3 @@ dns:
   fallback:
     - 8.8.8.8
     - 1.1.1.1
-
-# —— 规则前缀 (插入到订阅规则之前) ——
-rules:
-  prefix:
-    - DOMAIN-SUFFIX,local,DIRECT
-    - IP-CIDR,10.0.0.0/8,DIRECT
-
-# —— 规则后缀 (插入到订阅规则之后) ——
-  suffix:
-    - MATCH,Proxy
