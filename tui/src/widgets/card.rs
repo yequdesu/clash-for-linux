@@ -49,6 +49,7 @@ impl<'a> Card<'a> {
     }
 }
 
+#[allow(dead_code)]
 pub fn status_line(status: &str, label: &str) -> Line<'static> {
     let d = if matches!(status, "running" | "ok" | "active" | "Active") { "●" } else { "○" };
 
