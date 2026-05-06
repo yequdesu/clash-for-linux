@@ -121,8 +121,8 @@ func runConfigValidate(cmd *cobra.Command, args []string) {
 
 	fmt.Print("↓ Validating configuration... ")
 
-	cmd := exec.Command(mihomoPath, "-d", clashResourcesDir, "-f", runtimePath, "-t")
-	out, err := cmd.CombinedOutput()
+	mihomoCmd := exec.Command(mihomoPath, "-d", clashResourcesDir, "-f", runtimePath, "-t")
+	out, err := mihomoCmd.CombinedOutput()
 	output := string(out)
 
 	if err != nil {
