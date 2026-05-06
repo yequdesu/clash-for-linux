@@ -676,17 +676,18 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
     crate::widgets::card::Card::new("System Info")
         .render(frame, sys[0], sys_lines);
 
-    let mem_ratio = if app.memory_limit > 0 {
-        (app.memory_bytes as f64 / app.memory_limit as f64 * 100.0) as u64
-    } else {
-        0
-    };
-    let mem_lines = vec![
-        Line::from(Span::styled(
+    let mem_lines = if app.memory_limit > 0 {
+        let mem_ratio = (app.memory_bytes as f64 / app.memory_limit as f64 * 100.0) as u64;
+        vec![Line::from(Span::styled(
             format!("  {} / {} ({:.1}%)", format_bytes(app.memory_bytes), format_bytes(app.memory_limit), mem_ratio),
             Style::default().fg(CLASH_THEME.text),
-        )),
-    ];
+        ))]
+    } else {
+        vec![Line::from(Span::styled(
+            format!("  {}", format_bytes(app.memory_bytes)),
+            Style::default().fg(CLASH_THEME.text),
+        ))]
+    };
     if app.memory_limit > 0 {
         crate::widgets::gauge::render_gauge(
             frame,
