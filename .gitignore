@@ -7,7 +7,6 @@ target/
 *.dylib
 
 # Go
-go.sum
 
 # Rust
 tui/target/

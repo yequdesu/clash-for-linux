@@ -199,6 +199,11 @@ create_dirs() {
 download_mihomo() {
     step_title "下载 Mihomo 内核"
     
+    if [ -f "${CLASH_BIN_DIR}/mihomo" ]; then
+        echo -e "  ${GREEN}✓${NC} Mihomo ${GRAY}(already cached)${NC}"
+        return
+    fi
+    
     local filename="mihomo-linux-${ARCH}-${VERSION_MIHOMO}.gz"
     local url="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION_MIHOMO}/${filename}"
     
@@ -211,22 +216,28 @@ download_mihomo() {
         fi
     fi
     
-    echo -ne "  ${GRAY}解压... ${NC}"
+    echo -e "  ${GRAY}解压...${NC}"
     gunzip -f "/tmp/${filename}"
     local extracted="/tmp/${filename%.gz}"
     if [ -f "$extracted" ]; then
         mv "$extracted" "${CLASH_BIN_DIR}/mihomo"
         chmod +x "${CLASH_BIN_DIR}/mihomo"
-        echo -e "${GREEN}✓ Mihomo 内核就绪${NC}"
+        echo -e "  ${GREEN}✓ Mihomo 内核就绪${NC}"
     else
-        echo -e "${RED}✗ 解压失败, 未找到: ${extracted}${NC}"
+        echo -e "  ${RED}✗ 解压失败, 未找到: ${extracted}${NC}"
     fi
     
+    rm -f "/tmp/${filename}" "/tmp/${extracted##*/}"
     rm -f "/tmp/${filename}" "/tmp/${filename%.gz}"
 }
 
 download_yq() {
     step_title "下载 yq YAML 工具"
+    
+    if [ -f "${CLASH_BIN_DIR}/yq" ]; then
+        echo -e "  ${GREEN}✓${NC} yq ${GRAY}(already cached)${NC}"
+        return
+    fi
     
     local yq_version="v4.44.3"
     local yq_arch="$ARCH"
@@ -457,7 +468,7 @@ build_cli() {
     fi
     
     echo -e "  ${GRAY}编译 clashctl...${NC}"
-    if go build -v -ldflags="-s -w" -o "${CLASH_BIN_DIR}/clashctl" ./cmd/clashctl/ 2>&1 | tail -3; then
+    if GONOSUMCHECK=* GOFLAGS=-mod=mod go build -v -ldflags="-s -w" -o "${CLASH_BIN_DIR}/clashctl" ./cmd/clashctl/ 2>&1 | tail -3; then
         echo -e "${GREEN}✓ clashctl 编译成功${NC}"
         
         echo -e "${YELLOW}⚠ 复制到 /usr/local/bin 需要 sudo 权限${NC}"

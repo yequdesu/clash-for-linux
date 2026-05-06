@@ -114,7 +114,7 @@ rebuild_cli() {
     echo -e "  ${GRAY}下载依赖...${NC}"
     go mod download 2>/dev/null || true
     echo -e "  ${GRAY}编译...${NC}"
-    go build -v -ldflags="-s -w" -o "$go_bin" ./cmd/clashctl/ 2>&1 | tail -3 && {
+    GONOSUMCHECK=* GOFLAGS=-mod=mod go build -v -ldflags="-s -w" -o "$go_bin" ./cmd/clashctl/ 2>&1 | tail -3 && {
         echo -e "${GREEN}✓ clashctl 编译成功${NC}"
         
         echo -e "${YELLOW}⚠ 更新 /usr/local/bin/clashctl 需要 sudo 权限${NC}"
