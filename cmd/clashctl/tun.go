@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/yequdesu/clashctl/internal/config"
@@ -77,9 +78,15 @@ func applyTUNMode(enable bool) error {
 }
 
 func verifyTUN() {
-	out, err := runCmd("bash", "-c", "ip link show 2>/dev/null | grep -qi tun && echo found")
-	if err == nil && out == "found" {
-		fmt.Printf("  %s TUN interface detected\n", green("✓"))
+	out, err := runCmd("bash", "-c", "ip link show 2>/dev/null | grep -i 'tun\\|utun' | head -3")
+	if err == nil && out != "" {
+		lines := strings.Split(out, "\n")
+		for _, line := range lines {
+			fmt.Printf("  %s %s\n", green("✓"), strings.TrimSpace(line))
+		}
+	} else {
+		fmt.Printf("  %s No TUN device detected (may need root/setcap)\n", yellow("⚠"))
+		fmt.Println("  Run: sudo setcap cap_net_admin,cap_net_raw+ep ~/.clashctl/bin/mihomo")
 	}
 }
 

@@ -167,7 +167,7 @@ func runStatus(cmd *cobra.Command, args []string) {
 	}
 	fmt.Printf("TUN: %s  %s\n", tunDot, tunText)
 
-	fmt.Printf("Connections: %d active / %d total\n",
+	fmt.Printf("Connections: %s active / %s total\n",
 		cyan(fmt.Sprintf("%d", info.ActiveConns)),
 		cyan(fmt.Sprintf("%d", info.TotalConns)))
 
