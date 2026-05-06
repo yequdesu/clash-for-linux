@@ -94,16 +94,24 @@ fn run(
                         KeyCode::Esc => {
                             app.search_active = false;
                             app.search_query.clear();
+                            continue;
                         }
                         KeyCode::Backspace => {
                             app.search_query.pop();
+                            if app.search_query.is_empty() {
+                                app.search_active = false;
+                            }
+                            continue;
                         }
                         KeyCode::Char(c) => {
                             app.search_query.push(c);
+                            continue;
                         }
-                        _ => {}
+                        _ => {
+                            app.search_active = false;
+                            // fall through to process the key normally
+                        }
                     }
-                    continue;
                 }
 
                 // Confirmation mode

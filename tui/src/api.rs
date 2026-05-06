@@ -137,6 +137,28 @@ impl ApiClient {
         resp.json::<T>().await.map_err(|e| e.to_string())
     }
 
+    async fn put_no_body(&self, path: &str, body: &str) -> Result<(), String> {
+        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
+        let mut req = self.client.put(&url).body(body.to_string());
+        if !self.api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", self.api_key));
+        }
+        req = req.header("Content-Type", "application/json");
+        req.send().await.map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    async fn patch_no_body(&self, path: &str, body: &str) -> Result<(), String> {
+        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
+        let mut req = self.client.patch(&url).body(body.to_string());
+        if !self.api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", self.api_key));
+        }
+        req = req.header("Content-Type", "application/json");
+        req.send().await.map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub async fn get_version(&self) -> Result<String, String> {
         #[derive(Deserialize)]
         struct VersionResp {
@@ -174,8 +196,7 @@ impl ApiClient {
 
     pub async fn switch_proxy(&self, group: &str, proxy: &str) -> Result<(), String> {
         let body = format!(r#"{{"name":"{}"}}"#, proxy);
-        let _v: serde_json::Value = self.put(&format!("/proxies/{}", group), &body).await?;
-        Ok(())
+        self.put_no_body(&format!("/proxies/{}", group), &body).await
     }
 
     pub async fn test_delay(&self, proxy: &str, url: &str, timeout: u64) -> Result<i64, String> {
@@ -190,8 +211,7 @@ impl ApiClient {
 
     pub async fn set_mode(&self, mode: &str) -> Result<(), String> {
         let body = format!(r#"{{"mode":"{}"}}"#, mode);
-        let _v: serde_json::Value = self.put("/configs", &body).await?;
-        Ok(())
+        self.patch_no_body("/configs", &body).await
     }
 
     pub async fn close_connection(&self, id: &str) -> Result<(), String> {
@@ -258,6 +278,7 @@ impl ProxiesResponse {
                 groups.push(group);
             }
         }
+        groups.sort_by(|a, b| a.name.cmp(&b.name));
         groups
     }
 }

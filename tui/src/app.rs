@@ -33,6 +33,7 @@ pub struct App {
     pub proxy_groups: Vec<ProxyGroup>,
     pub proxy_selected: usize,
     pub proxy_group_selected: usize,
+    pub proxy_scroll_offset: usize,
     pub proxy_state: TableState,
 
     pub connections: Vec<Connection>,
@@ -91,6 +92,7 @@ impl App {
             proxy_groups: Vec::new(),
             proxy_selected: 0,
             proxy_group_selected: 0,
+            proxy_scroll_offset: 0,
             proxy_state: TableState::default(),
 
             connections: Vec::new(),
@@ -260,6 +262,9 @@ impl App {
             }
             DataEvent::ModeSet(Ok(())) => {
                 self.refresh_data();
+            }
+            DataEvent::ModeSet(Err(e)) => {
+                self.error_msg = Some(format!("Mode change failed: {}", e));
             }
             DataEvent::ProxySwitched(Ok(())) => {
                 self.refresh_data();
@@ -663,20 +668,66 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    // Render groups starting from the selected group, fitting as many as possible
-    let mut offset_y = 0u16;
     let selected_gi = app.proxy_group_selected.min(app.proxy_groups.len().saturating_sub(1));
+    let total_groups = app.proxy_groups.len();
 
-    for gi in selected_gi..app.proxy_groups.len() {
+    // Clamp scroll offset
+    app.proxy_scroll_offset = app.proxy_scroll_offset.min(total_groups.saturating_sub(1));
+
+    // Calculate which groups are visible
+    let mut visible_groups: Vec<usize> = Vec::new();
+    let mut offset_y = 0u16;
+    for gi in app.proxy_scroll_offset..total_groups {
+        let proxy_count = app.proxy_groups[gi].proxies.len() as u16;
+        let group_height = 3 + proxy_count;
+        if offset_y + group_height > content.height {
+            break;
+        }
+        visible_groups.push(gi);
+        offset_y += group_height;
+    }
+
+    // Auto-scroll if selected group is not visible
+    if selected_gi < app.proxy_scroll_offset {
+        app.proxy_scroll_offset = selected_gi;
+    } else if !visible_groups.contains(&selected_gi) && selected_gi >= app.proxy_scroll_offset {
+        // Scroll forward until selected group is visible
+        let mut trial_offset = selected_gi;
+        loop {
+            let mut y = 0u16;
+            let mut found = false;
+            for gi in trial_offset..total_groups {
+                let proxy_count = app.proxy_groups[gi].proxies.len() as u16;
+                let group_height = 3 + proxy_count;
+                if y + group_height > content.height {
+                    break;
+                }
+                if gi == selected_gi {
+                    found = true;
+                    break;
+                }
+                y += group_height;
+            }
+            if found || trial_offset == 0 {
+                app.proxy_scroll_offset = trial_offset;
+                break;
+            }
+            trial_offset = trial_offset.saturating_sub(1);
+        }
+    }
+
+    // Re-render with final scroll offset
+    let mut offset_y = 0u16;
+    for gi in app.proxy_scroll_offset..total_groups {
         let group = &app.proxy_groups[gi];
         let proxy_count = group.proxies.len() as u16;
-        let group_height = 3 + proxy_count; // header(1) + top_border(1) + proxies + bottom_border(1)
+        let group_height = 3 + proxy_count;
 
-        if offset_y + group_height > content.height && gi > selected_gi {
+        if offset_y + group_height > content.height {
             break;
         }
 
-        // Group header: "♯ NAME                                                      [测试]"
+        // Group header
         let group_header_y = content.y + offset_y;
         let header_text = format!(" ♯ {}", group.name);
         let test_label = if group.group_type == "Selector" { "[测试]" } else { "[auto]" };
@@ -695,7 +746,7 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
         );
         offset_y += 1;
 
-        // Bordered box for group proxies
+        // Bordered box
         let box_area = Rect::new(
             content.x,
             content.y + offset_y,
@@ -709,9 +760,8 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
         frame.render_widget(box_block, box_area);
 
         let inner = box_area.inner(Margin::new(1, 0));
-        offset_y += 1; // top border
+        offset_y += 1;
 
-        // Render proxies inside the box
         let max_items = (inner.height as usize).min(group.proxies.len());
         for (pi, proxy) in group.proxies.iter().take(max_items).enumerate() {
             let item_y = inner.y + pi as u16;
@@ -745,7 +795,6 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
                 Rect::new(inner.x, item_y, inner.width, 1),
             );
 
-            // Delay bar
             if proxy.delay > 0 {
                 let bar_x = inner.x + 44;
                 let bar_w = inner.width.saturating_sub(44);
@@ -761,10 +810,9 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
             offset_y += 1;
         }
 
-        offset_y += 1; // bottom border
+        offset_y += 1;
     }
 
-    // Help bar
     render_proxies_help(frame, chunks[2]);
 }
 
