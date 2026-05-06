@@ -764,8 +764,8 @@ fn render_proxy_groups(frame: &mut Frame, area: Rect, app: &App, start_gi: usize
         );
         y += 1;
 
-        // Box
-        let box_h = (n + 2).min(area.height.saturating_sub(y));
+        // Box: n proxy lines + 1 bottom border = n + 1 lines
+        let box_h = (n + 1).min(area.height.saturating_sub(y));
         let box_block = Block::default()
             .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
             .border_style(Style::default().fg(CLASH_THEME.border))
