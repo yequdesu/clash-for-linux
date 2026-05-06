@@ -50,58 +50,36 @@ MIRROR_LIST=(
     "https://ghproxy.net"
 )
 
-detect_network() {
-    echo ""
-    echo -e "${BLUE}[网络检测] 测试 GitHub 连通性...${NC}"
-    
-    if curl -fsSL --connect-timeout 5 --max-time 10 "https://github.com" -o /dev/null 2>/dev/null; then
-        echo -e "  ${GREEN}✓ GitHub 直连可用${NC}"
-        GITHUB_MIRROR=""
-        return
-    fi
-    
-    echo -e "  ${YELLOW}⚠ GitHub 直连不可达, 尝试镜像...${NC}"
-    for mirror in "${MIRROR_LIST[@]}"; do
-        if curl -fsSL --connect-timeout 5 --max-time 10 "${mirror}/https://github.com" -o /dev/null 2>/dev/null; then
-            echo -e "  ${GREEN}✓ 镜像可用: ${mirror}${NC}"
-            GITHUB_MIRROR="$mirror"
-            return
-        fi
-    done
-    
-    echo -e "  ${RED}✗ 所有镜像也不可达${NC}"
-    echo -e "  ${YELLOW}  请手动设置 GH_PROXY 环境变量后重试${NC}"
-    echo -e "  ${YELLOW}  示例: export GH_PROXY=https://your-proxy.com${NC}"
-}
-
-github_url() {
-    local url="$1"
-    if [ -n "$GITHUB_MIRROR" ]; then
-        echo "${GITHUB_MIRROR}/${url}"
-    else
-        echo "$url"
-    fi
-}
-
-# ========== 通用下载函数 ==========
+# ========== 智能下载 (直连 → 镜像自动降级) ==========
 download_file() {
     local url="$1"
     local output="$2"
     local desc="$3"
     
-    local display_url="$url"
-    
     echo -ne "  ${GRAY}${desc}... ${NC}"
     
-    if curl -fSL --progress-bar --connect-timeout 30 --max-time 180 "$url" -o "$output" 2>&1; then
-        echo -e "\r  ${GREEN}✓${NC} ${desc} ${GRAY}($(du -h "$output" 2>/dev/null | cut -f1 || echo 'ok'))${NC}"
+    # 1. 尝试直连 (短超时)
+    if curl -fSL --progress-bar --connect-timeout 5 --max-time 15 "$url" -o "$output" 2>/dev/null; then
+        echo -e "\r  ${GREEN}✓${NC} ${desc} ${GRAY}($(du -h "$output" 2>/dev/null | cut -f1 || echo 'ok'))${NC} [direct]"
         return 0
-    else
-        local code=$?
-        echo -e "\r  ${RED}✗${NC} ${desc} ${RED}failed (exit: ${code})${NC}"
-        echo -e "    ${GRAY}URL: ${display_url}${NC}"
-        return 1
     fi
+    
+    # 2. 逐镜像降级
+    for mirror in "${MIRROR_LIST[@]}"; do
+        local mirror_url="${mirror}/${url}"
+        if curl -fSL --progress-bar --connect-timeout 10 --max-time 180 "$mirror_url" -o "$output" 2>/dev/null; then
+            GITHUB_MIRROR="$mirror"
+            echo -e "\r  ${GREEN}✓${NC} ${desc} ${GRAY}($(du -h "$output" 2>/dev/null | cut -f1 || echo 'ok'))${NC} [${mirror##*/}]"
+            return 0
+        fi
+    done
+    
+    # 3. 全部失败
+    local code=$?
+    echo -e "\r  ${RED}✗${NC} ${desc} ${RED}failed${NC}"
+    echo -e "    ${GRAY}直连: ${url}${NC}"
+    echo -e "    ${GRAY}镜像: ${MIRROR_LIST[*]}${NC}"
+    return 1
 }
 
 # ========== 函数 ==========
@@ -221,8 +199,7 @@ download_mihomo() {
     step_title "下载 Mihomo 内核"
     
     local filename="mihomo-linux-${ARCH}-${VERSION_MIHOMO}.gz"
-    local url
-    url=$(github_url "https://github.com/MetaCubeX/mihomo/releases/download/${VERSION_MIHOMO}/${filename}")
+    local url="https://github.com/MetaCubeX/mihomo/releases/download/${VERSION_MIHOMO}/${filename}"
     
     if ! download_file "$url" "/tmp/${filename}" "Mihomo ${VERSION_MIHOMO} (${ARCH})"; then
         if ask_confirm "是否继续安装? (Mihomo内核将需要手动下载)"; then
@@ -261,8 +238,7 @@ download_yq() {
     esac
     
     local filename="yq_linux_${yq_arch}.tar.gz"
-    local url
-    url=$(github_url "https://github.com/mikefarah/yq/releases/download/${yq_version}/${filename}")
+    local url="https://github.com/mikefarah/yq/releases/download/${yq_version}/${filename}"
     
     if ! download_file "$url" "/tmp/yq.tar.gz" "yq ${yq_version} (${yq_arch})"; then
         echo -e "${YELLOW}⚠ yq 下载失败, 将使用内置简化合并${NC}"
@@ -308,8 +284,7 @@ download_rules() {
     for entry in "${rules[@]}"; do
         local name="${entry%%:*}"
         local dest="${entry##*:}"
-        local url
-        url=$(github_url "${base_url}/${name}")
+        local url="${base_url}/${name}"
         
         if [ -f "$dest" ]; then
             echo -e "  ${GREEN}✓${NC} ${name} ${GRAY}(already exists)${NC}"
@@ -651,7 +626,6 @@ main() {
         fi
     fi
     
-    detect_network
     install_system_deps
     detect_arch
     create_dirs
