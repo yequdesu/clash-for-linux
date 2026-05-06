@@ -166,9 +166,6 @@ fn run(
 
                     // ===== Tab-specific keys =====
                     // Proxies Tab
-                    KeyCode::Char('s') if app.tab == Tab::Proxies => {
-                        // Toggle sort (not yet implemented, placeholder)
-                    }
                     KeyCode::Char('d') if app.tab == Tab::Proxies => {
                         test_current_group(app);
                     }

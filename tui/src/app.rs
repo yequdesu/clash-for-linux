@@ -628,9 +628,10 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
-    let header = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(3),
+    let chunks = Layout::vertical([
+        Constraint::Length(1),  // mode bar
+        Constraint::Min(3),     // content area
+        Constraint::Length(1),  // help bar
     ])
     .split(area);
 
@@ -645,68 +646,110 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
             Span::styled("Global", if app.kernel_mode == "global" { active } else { muted }),
             Span::styled(" ", muted),
             Span::styled("Direct", if app.kernel_mode == "direct" { active } else { muted }),
-            Span::styled("  |  ● ● ●  |  Search: /  |  Sort: delay ▼", muted),
+            Span::styled("  |  ● ● ●  |  Search: /", muted),
         ]
     };
-    let mode_line = Line::from(mode_spans);
-    frame.render_widget(Paragraph::new(mode_line).style(Style::default().bg(CLASH_THEME.bg)), header[0]);
+    frame.render_widget(
+        Paragraph::new(Line::from(mode_spans)).style(Style::default().bg(CLASH_THEME.bg)),
+        chunks[0],
+    );
 
-    let list = header[1];
+    let content = chunks[1];
 
     if app.proxy_groups.is_empty() {
         let msg = Span::styled("  No proxy groups available", CLASH_THEME.muted);
-        frame.render_widget(Paragraph::new(Line::from(msg)), list);
+        frame.render_widget(Paragraph::new(Line::from(msg)), content);
+        render_proxies_help(frame, chunks[2]);
         return;
     }
 
-    let _group_height = 5u16;
+    // Render groups starting from the selected group, fitting as many as possible
     let mut offset_y = 0u16;
-    for (gi, group) in app.proxy_groups.iter().enumerate() {
-        if offset_y + 2 >= list.height {
+    let selected_gi = app.proxy_group_selected.min(app.proxy_groups.len().saturating_sub(1));
+
+    for gi in selected_gi..app.proxy_groups.len() {
+        let group = &app.proxy_groups[gi];
+        let proxy_count = group.proxies.len() as u16;
+        let group_height = 3 + proxy_count; // header(1) + top_border(1) + proxies + bottom_border(1)
+
+        if offset_y + group_height > content.height && gi > selected_gi {
             break;
         }
 
-        let group_header = Rect::new(list.x, list.y + offset_y, list.width, 1);
-        let title = format!(" ♯ {}", group.name);
+        // Group header: "♯ NAME                                                      [测试]"
+        let group_header_y = content.y + offset_y;
+        let header_text = format!(" ♯ {}", group.name);
+        let test_label = if group.group_type == "Selector" { "[测试]" } else { "[auto]" };
+        let header_width = content.width.saturating_sub(2) as usize;
+        let padded_header = {
+            let label_len = test_label.len() + header_text.len();
+            let pad = header_width.saturating_sub(label_len);
+            format!("{}{}{}", header_text, " ".repeat(pad), test_label)
+        };
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(title, Style::default().fg(CLASH_THEME.primary).bold()))),
-            group_header,
+            Paragraph::new(Line::from(Span::styled(
+                padded_header,
+                Style::default().fg(CLASH_THEME.primary).bold(),
+            ))),
+            Rect::new(content.x, group_header_y, content.width, 1),
         );
         offset_y += 1;
 
-        let item_count = group.proxies.len().min((list.height.saturating_sub(offset_y)) as usize);
-        for (pi, proxy) in group.proxies.iter().take(item_count).enumerate() {
-            if offset_y >= list.height {
-                break;
-            }
-            let item_y = list.y + offset_y;
-            let marker = if proxy.name == group.now { "●" } else { "○" };
-            let marker_color = if proxy.name == group.now { CLASH_THEME.accent } else { CLASH_THEME.muted };
+        // Bordered box for group proxies
+        let box_area = Rect::new(
+            content.x,
+            content.y + offset_y,
+            content.width,
+            (proxy_count + 2).min(content.height.saturating_sub(offset_y)),
+        );
+        let box_block = Block::default()
+            .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+            .border_style(Style::default().fg(CLASH_THEME.border))
+            .style(Style::default().bg(CLASH_THEME.surface));
+        frame.render_widget(box_block, box_area);
+
+        let inner = box_area.inner(Margin::new(1, 0));
+        offset_y += 1; // top border
+
+        // Render proxies inside the box
+        let max_items = (inner.height as usize).min(group.proxies.len());
+        for (pi, proxy) in group.proxies.iter().take(max_items).enumerate() {
+            let item_y = inner.y + pi as u16;
+
+            let is_active = proxy.name == group.now;
+            let is_selected = gi == app.proxy_group_selected && pi == app.proxy_selected;
+            let marker = if is_active { "●" } else { "○" };
+            let marker_color = if is_active { CLASH_THEME.accent } else { CLASH_THEME.muted };
+
             let delay_str = if proxy.delay > 0 {
                 format!("{}ms", proxy.delay)
             } else {
                 "—".into()
             };
+
+            let name_part = crate::widgets::table::truncate(&proxy.name, 26);
+            let type_part = crate::widgets::table::truncate(&proxy.proxy_type, 7);
             let line = format!(
-                " {} {:30} {:8} {:>6}",
-                marker,
-                crate::widgets::table::truncate(&proxy.name, 28),
-                crate::widgets::table::truncate(&proxy.proxy_type, 7),
-                delay_str,
+                " {} {:28} {:8} {:>6}",
+                marker, name_part, type_part, delay_str,
             );
 
-            let highlight = gi == app.proxy_group_selected && pi == app.proxy_selected;
-            let style = if highlight {
+            let style = if is_selected {
                 Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.primary)
             } else {
                 Style::default().fg(marker_color).bg(CLASH_THEME.surface)
             };
 
-            // Render delay bar
-            if app.tab == Tab::Proxies && proxy.delay > 0 {
-                let bar_x = list.x + 50;
-                let bar_w = list.width.saturating_sub(52);
-                if bar_w > 0 {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(line, style))),
+                Rect::new(inner.x, item_y, inner.width, 1),
+            );
+
+            // Delay bar
+            if proxy.delay > 0 {
+                let bar_x = inner.x + 44;
+                let bar_w = inner.width.saturating_sub(44);
+                if bar_w > 4 {
                     crate::widgets::gauge::render_delay_bar(
                         frame,
                         Rect::new(bar_x, item_y, bar_w, 1),
@@ -715,13 +758,25 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
                 }
             }
 
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(line, style))),
-                Rect::new(list.x, item_y, list.width, 1),
-            );
             offset_y += 1;
         }
+
+        offset_y += 1; // bottom border
     }
+
+    // Help bar
+    render_proxies_help(frame, chunks[2]);
+}
+
+fn render_proxies_help(frame: &mut Frame, area: Rect) {
+    let help = Line::from(Span::styled(
+        " Enter:switch  d:test delay  D:test all  p:cycle mode  /:search",
+        Style::default().fg(CLASH_THEME.muted),
+    ));
+    frame.render_widget(
+        Paragraph::new(help).style(Style::default().bg(CLASH_THEME.bg)),
+        area,
+    );
 }
 
 fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
