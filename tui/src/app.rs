@@ -241,10 +241,13 @@ impl App {
             }
             DataEvent::VersionFetched(Err(e)) => {
                 self.kernel_running = false;
-                self.error_msg = Some(format!("API error: {}", e));
+                self.log_api_error(format!("Version fetch failed: {}", e));
             }
             DataEvent::ProxiesFetched(Ok(resp)) => {
                 self.proxy_groups = resp.get_groups();
+            }
+            DataEvent::ProxiesFetched(Err(e)) => {
+                self.log_api_error(format!("Proxies fetch failed: {}", e));
             }
             DataEvent::TrafficFetched(Ok(t)) => {
                 let down = t.down;
@@ -254,6 +257,9 @@ impl App {
                     self.traffic_history.remove(0);
                 }
             }
+            DataEvent::TrafficFetched(Err(e)) => {
+                self.log_api_error(format!("Traffic fetch failed: {}", e));
+            }
             DataEvent::ConnectionsFetched(Ok(conns)) => {
                 self.connections = conns;
                 self.connections_total = self.connections.len();
@@ -261,32 +267,40 @@ impl App {
                     .filter(|c| c.dl_speed() > 0 || c.ul_speed() > 0)
                     .count();
             }
-            DataEvent::ConnectionsFetched(Err(_)) => {}
+            DataEvent::ConnectionsFetched(Err(e)) => {
+                self.log_api_error(format!("Connections fetch failed: {}", e));
+            }
             DataEvent::MemoryFetched(Ok(m)) => {
                 self.memory_bytes = m.inuse.unwrap_or(0);
                 self.memory_limit = m.oslimit.unwrap_or(0);
+            }
+            DataEvent::MemoryFetched(Err(e)) => {
+                self.log_api_error(format!("Memory fetch failed: {}", e));
             }
             DataEvent::ConfigFetched(Ok(c)) => {
                 self.kernel_mode = c.mode.unwrap_or_else(|| "rule".into());
                 self.tun_enabled = c.tun.as_ref().and_then(|t| t.enable).unwrap_or(false);
             }
+            DataEvent::ConfigFetched(Err(e)) => {
+                self.log_api_error(format!("Config fetch failed: {}", e));
+            }
             DataEvent::ModeSet(Ok(())) => {
                 self.refresh_data();
             }
             DataEvent::ModeSet(Err(e)) => {
-                self.error_msg = Some(format!("Mode change failed: {}", e));
+                self.log_api_error(format!("Mode change failed: {}", e));
             }
             DataEvent::ProxySwitched(Ok(())) => {
                 self.refresh_data();
             }
             DataEvent::ProxySwitched(Err(e)) => {
-                self.error_msg = Some(e);
+                self.log_api_error(format!("Proxy switch failed: {}", e));
             }
             DataEvent::ConnectionClosed(Ok(())) => {
                 self.refresh_data();
             }
             DataEvent::ConnectionClosed(Err(e)) => {
-                self.error_msg = Some(e);
+                self.log_api_error(format!("Connection close failed: {}", e));
             }
             DataEvent::LogsFetched(Ok(lines)) => {
                 if !self.log_paused {
@@ -295,6 +309,9 @@ impl App {
                         self.logs.drain(0..self.logs.len() - 1000);
                     }
                 }
+            }
+            DataEvent::LogsFetched(Err(e)) => {
+                // File read errors are logged just once (don't flood)
             }
             DataEvent::DelayTested(name, Ok(delay)) => {
                 for group in &mut self.proxy_groups {
@@ -305,9 +322,20 @@ impl App {
                     }
                 }
             }
-            DataEvent::DelayTested(_, Err(_)) => {}
+            DataEvent::DelayTested(name, Err(e)) => {
+                self.log_api_error(format!("Delay test for {} failed: {}", name, e));
+            }
             _ => {}
         }
+    }
+
+    fn log_api_error(&mut self, msg: String) {
+        let line = format!("[TUI] {}", msg);
+        self.logs.push(line);
+        if self.logs.len() > 1000 {
+            self.logs.drain(0..self.logs.len() - 1000);
+        }
+        self.error_msg = Some(msg);
     }
 
     pub fn next_tab(&mut self) {
@@ -992,13 +1020,15 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &App) {
         .take(log_area.height as usize)
         .filter(|line| {
             if app.log_level_filter == "ALL" { return true; }
-            line.to_uppercase().contains(&app.log_level_filter)
+            line.starts_with("[TUI]") || line.to_uppercase().contains(&app.log_level_filter)
         })
         .cloned()
         .collect();
 
     let lines: Vec<Line> = shown.iter().map(|l| {
-        let color = if l.contains("ERROR") || l.contains("fail") {
+        let color = if l.starts_with("[TUI]") {
+            CLASH_THEME.warning
+        } else if l.contains("ERROR") || l.contains("fail") {
             CLASH_THEME.danger
         } else if l.contains("WARN") || l.contains("timeout") {
             CLASH_THEME.warning
