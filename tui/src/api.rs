@@ -276,23 +276,30 @@ impl ApiClient {
         }
     }
 
-    pub async fn get_subscriptions(&self) -> Result<Vec<SubscriptionInfo>, String> {
+    pub async fn get_subscriptions(&self) -> Result<(Vec<SubscriptionInfo>, usize), String> {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
         let path = format!("{}/.clashctl/resources/profiles.yaml", home);
         let content = tokio::fs::read_to_string(&path).await
             .map_err(|e| format!("Cannot read {}: {}", path, e))?;
 
         let mut subs = Vec::new();
+        let mut active_id = 0usize;
+        let mut in_profile = false;
         let mut current_id = 0usize;
         let mut current_name = String::new();
         let mut current_url = String::new();
         let mut current_updated = String::new();
 
         for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("  - id:") {
-                // Save previous
-                if current_id > 0 {
+            let raw = line;
+            let indent = raw.len() - raw.trim_start().len();
+            let trimmed = raw.trim_start();
+
+            if indent == 0 && trimmed.starts_with("use:") {
+                active_id = trimmed.strip_prefix("use:").unwrap_or("0").trim().parse().unwrap_or(0);
+            } else if indent <= 4 && trimmed.starts_with("- id:") {
+                // Save previous profile
+                if in_profile && current_id > 0 {
                     subs.push(SubscriptionInfo {
                         id: current_id,
                         name: current_name.clone(),
@@ -302,24 +309,24 @@ impl ApiClient {
                         proxies_count: 0,
                     });
                 }
-                current_id = trimmed.strip_prefix("  - id:").unwrap_or("0").trim().parse().unwrap_or(0);
+                in_profile = true;
+                current_id = trimmed.strip_prefix("- id:").unwrap_or("0").trim().parse().unwrap_or(0);
                 current_name.clear();
                 current_url.clear();
                 current_updated.clear();
-            } else if trimmed.starts_with("    name:") {
-                current_name = trimmed.strip_prefix("    name:").unwrap_or("").trim().trim_matches('"').to_string();
-            } else if trimmed.starts_with("    url:") {
-                current_url = trimmed.strip_prefix("    url:").unwrap_or("").trim().to_string();
-            } else if trimmed.starts_with("    updated:") {
-                let ts: i64 = trimmed.strip_prefix("    updated:").unwrap_or("0").trim().parse().unwrap_or(0);
+            } else if in_profile && trimmed.starts_with("name:") {
+                current_name = trimmed.strip_prefix("name:").unwrap_or("").trim().trim_matches('"').to_string();
+            } else if in_profile && trimmed.starts_with("url:") {
+                current_url = trimmed.strip_prefix("url:").unwrap_or("").trim().to_string();
+            } else if in_profile && trimmed.starts_with("updated:") {
+                let ts: i64 = trimmed.strip_prefix("updated:").unwrap_or("0").trim().parse().unwrap_or(0);
                 if ts > 0 {
-                    // Convert Unix timestamp to readable
-                    current_updated = format!("{}", ts);
+                    current_updated = ts.to_string();
                 }
             }
         }
         // Save last
-        if current_id > 0 {
+        if in_profile && current_id > 0 {
             subs.push(SubscriptionInfo {
                 id: current_id,
                 name: current_name,
@@ -329,7 +336,7 @@ impl ApiClient {
                 proxies_count: 0,
             });
         }
-        Ok(subs)
+        Ok((subs, active_id))
     }
 
     pub async fn get_config(&self) -> Result<RuntimeConfig, String> {

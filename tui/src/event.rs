@@ -18,7 +18,7 @@ pub enum DataEvent {
     ConfigFetched(Result<crate::api::RuntimeConfig, String>),
     VersionFetched(Result<String, String>),
     LogsFetched(Result<Vec<String>, String>),
-    SubscriptionsFetched(Result<Vec<crate::api::SubscriptionInfo>, String>),
+    SubscriptionsFetched(Result<(Vec<crate::api::SubscriptionInfo>, usize), String>),
     ModeSet(Result<(), String>),
     ProxySwitched(Result<(), String>),
     DelayTested(String, Result<i64, String>),

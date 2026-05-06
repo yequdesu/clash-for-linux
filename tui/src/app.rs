@@ -54,6 +54,7 @@ pub struct App {
 
     pub subscriptions: Vec<crate::api::SubscriptionInfo>,
     pub sub_selected: usize,
+    pub sub_active_id: usize,
 
     pub memory_bytes: u64,
     pub memory_limit: u64,
@@ -115,6 +116,7 @@ impl App {
 
             subscriptions: Vec::new(),
             sub_selected: 0,
+            sub_active_id: 0,
 
             memory_bytes: 0,
             memory_limit: 0,
@@ -323,8 +325,9 @@ impl App {
             DataEvent::LogsFetched(Err(e)) => {
                 self.log_api_error(format!("Log file read failed: {}", e));
             }
-            DataEvent::SubscriptionsFetched(Ok(subs)) => {
+            DataEvent::SubscriptionsFetched(Ok((subs, active_id))) => {
                 self.subscriptions = subs;
+                self.sub_active_id = active_id;
             }
             DataEvent::SubscriptionsFetched(Err(e)) => {
                 self.log_api_error(format!("Subscription read failed: {}", e));
@@ -930,43 +933,58 @@ fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    let mut offset_y = 0u16;
+    let active_id = app.sub_active_id;
+
+    let mut y = 0u16;
     for (i, sub) in app.subscriptions.iter().enumerate() {
-        if offset_y + 5 > list.height {
+        let needed = 4u16; // header + 2 detail lines + separator
+        if y + needed > list.height {
             break;
         }
 
-        let marker = if i == 0 { "●" } else { " " };
-        let highlight = i == app.sub_selected;
-        let bg = if highlight { CLASH_THEME.primary } else { CLASH_THEME.surface };
+        let is_active = sub.id == active_id;
+        let is_sel = i == app.sub_selected;
+        let marker = if is_active { "●" } else { " " };
+        let bg = if is_sel { CLASH_THEME.primary } else { CLASH_THEME.surface };
 
-        let header = format!("  {} ID {} │ {}", marker, sub.id, sub.name);
+        // Header: marker ID │ Name
+        let hdr = format!("  {} ID {} │ {}", marker, sub.id, sub.name);
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(header.clone(), Style::default().fg(CLASH_THEME.text).bg(bg)))),
-            Rect::new(list.x, list.y + offset_y, list.width, 1),
+            Paragraph::new(Line::from(Span::styled(hdr.clone(), Style::default().fg(CLASH_THEME.text).bg(bg)))),
+            Rect::new(list.x, list.y + y, list.width, 1),
         );
-        offset_y += 1;
+        y += 1;
 
-        let details = format!(
-            "  URL: {}  │  Proxies: {}  │  Updated: {}  │  Status: {}",
-            crate::widgets::table::truncate(&sub.url, 30),
-            sub.proxies_count,
-            sub.updated,
-            sub.status,
-        );
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(details, Style::default().fg(CLASH_THEME.muted).bg(bg)))),
-            Rect::new(list.x, list.y + offset_y, list.width, 1),
-        );
-        offset_y += 1;
+        // Detail box
+        let box_h = 2u16.min(list.height.saturating_sub(y));
+        if box_h > 0 {
+            let box_block = Block::default()
+                .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                .border_style(Style::default().fg(CLASH_THEME.border))
+                .style(Style::default().bg(bg));
+            let box_area = Rect::new(list.x, list.y + y, list.width, box_h);
+            frame.render_widget(box_block, box_area);
 
-        // Separator
-        let sep = "─".repeat(list.width.saturating_sub(2) as usize);
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(sep, Style::default().fg(CLASH_THEME.border).bg(CLASH_THEME.bg)))),
-            Rect::new(list.x + 1, list.y + offset_y, list.width.saturating_sub(2), 1),
-        );
-        offset_y += 1;
+            let inner = box_area.inner(Margin::new(1, 0));
+            let url_short = crate::widgets::table::truncate(&sub.url, 40);
+            let d1 = format!("  URL: {} │ Proxies: {} │ Status: {}", url_short, sub.proxies_count, sub.status);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(d1, Style::default().fg(CLASH_THEME.muted).bg(bg)))),
+                Rect::new(inner.x, inner.y, inner.width, 1),
+            );
+            if box_h > 1 {
+                let updated = if sub.updated != "0" && !sub.updated.is_empty() {
+                    format!("Updated: {}", sub.updated)
+                } else {
+                    "Updated: —".into()
+                };
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(format!("  {}", updated), Style::default().fg(CLASH_THEME.muted).bg(bg)))),
+                    Rect::new(inner.x, inner.y + 1, inner.width, 1),
+                );
+            }
+            y += box_h;
+        }
     }
 }
 
