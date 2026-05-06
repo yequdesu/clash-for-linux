@@ -8,6 +8,10 @@
 
 set -euo pipefail
 
+# ========== 清除系统代理 (mihomo 可能未运行) ==========
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY
+export http_proxy="" https_proxy="" HTTP_PROXY="" HTTPS_PROXY="" all_proxy="" ALL_PROXY="" no_proxy="" NO_PROXY=""
+
 RED='\033[31m'
 GREEN='\033[32m'
 YELLOW='\033[33m'
