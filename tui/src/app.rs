@@ -793,22 +793,25 @@ fn render_proxy_groups(frame: &mut Frame, area: Rect, app: &App, scroll_line: us
             );
         }
 
-        // Box
-        let box_y0 = screen_y0 + 1;
-        let box_y0_clamped = box_y0.max(ay);
-        let box_max = ay + ah;
-        let box_h = ((n + 1) as isize).min(box_max - box_y0_clamped).max(0) as u16;
-        if box_h > 0 && box_y0_clamped < box_max {
+        // Box: virtual lines [gs+1, gs+1+n+1)
+        let box_virt_start = gs + 1;
+        let box_virt_end = gs + 1 + n + 1;
+        let vis_s = scroll_line.max(box_virt_start);
+        let vis_e = (scroll_line + area.height as usize).min(box_virt_end);
+
+        if vis_s < vis_e {
+            let box_screen_y = (vis_s - scroll_line) as u16 + area.y;
+            let box_h = (vis_e - vis_s) as u16;
+
             let box_block = Block::default()
                 .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
                 .border_style(Style::default().fg(CLASH_THEME.border))
                 .style(Style::default().bg(CLASH_THEME.surface));
-            let box_area = Rect::new(x, box_y0_clamped as u16, w, box_h);
+            let box_area = Rect::new(x, box_screen_y, w, box_h);
             frame.render_widget(box_block, box_area);
             let inner = box_area.inner(Margin::new(1, 0));
 
-            // Skip proxies scrolled above visible area
-            let skip = if box_y0 < ay { (ay - box_y0) as usize } else { 0 };
+            let skip = vis_s - box_virt_start;
             let limit = (inner.height as usize).min(n.saturating_sub(skip));
             for pi in skip..skip + limit {
                 let proxy = &group.proxies[pi];
