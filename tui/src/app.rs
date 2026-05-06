@@ -215,12 +215,19 @@ impl App {
             });
         }
 
-        // Fetch logs
+        // Fetch logs from file
         {
-            let api = api.clone();
             let tx = tx.clone();
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            let log_path = format!("{}/.clashctl/logs/mihomo.log", home);
             self.rt.spawn(async move {
-                let result = api.get_logs().await;
+                let result = tokio::task::spawn_blocking(move || -> Result<Vec<String>, String> {
+                    let content = std::fs::read_to_string(&log_path)
+                        .map_err(|e| format!("Cannot read log: {}", e))?;
+                    let lines: Vec<&str> = content.lines().collect();
+                    let start = lines.len().saturating_sub(500);
+                    Ok(lines[start..].iter().map(|s| s.to_string()).collect())
+                }).await.map_err(|e| e.to_string()).and_then(|r| r);
                 let _ = tx.send(DataEvent::LogsFetched(result));
             });
         }
