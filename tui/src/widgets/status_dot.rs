@@ -16,7 +16,7 @@ pub fn status_dot(frame: &mut Frame, area: Rect, online: bool, tick_count: u64) 
             (129.0 * alpha) as u8,
         )
     } else {
-        CLASH_THEME.muted
+        CLASH_THEME.danger
     };
 
     let symbol = if online { "●" } else { "○" };

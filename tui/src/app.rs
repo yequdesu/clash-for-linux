@@ -256,6 +256,7 @@ impl App {
                     })
                     .count();
             }
+            DataEvent::ConnectionsFetched(Err(_)) => {}
             DataEvent::MemoryFetched(Ok(m)) => {
                 self.memory_bytes = m.inuse.unwrap_or(0);
                 self.memory_limit = m.oslimit.unwrap_or(0);
@@ -284,12 +285,9 @@ impl App {
             }
             DataEvent::LogsFetched(Ok(lines)) => {
                 if !self.log_paused {
-                    for line in lines {
-                        self.logs.push(line);
-                    }
+                    self.logs = lines;
                     if self.logs.len() > 1000 {
-                        let excess = self.logs.len() - 1000;
-                        self.logs.drain(0..excess);
+                        self.logs.drain(0..self.logs.len() - 1000);
                     }
                 }
             }
@@ -507,15 +505,15 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
     };
 
     // Status row
-    let status_text = if app.kernel_running {
-        format!(" ● Running    {}    {} mode", app.kernel_version, app.kernel_mode)
+    let (status_dot, status_color, status_text) = if app.kernel_running {
+        ("●", CLASH_THEME.accent, format!(" Running    {}    {} mode", app.kernel_version, app.kernel_mode))
     } else {
-        " ○ Stopped    Kernel not connected".to_string()
+        ("○", CLASH_THEME.danger, " Stopped    Kernel not connected".to_string())
     };
-    let status_line = Line::from(Span::styled(
-        format!(" {}", status_text),
-        Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.surface),
-    ));
+    let status_line = Line::from(vec![
+        Span::styled(format!(" {} ", status_dot), Style::default().fg(status_color).bg(CLASH_THEME.surface)),
+        Span::styled(status_text, Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.surface)),
+    ]);
     crate::widgets::card::Card::new("Status")
         .render(frame, rows[0], vec![status_line]);
 
@@ -1087,7 +1085,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     let status_dot_str = if app.kernel_running { "●" } else { "○" };
-    let _status_color = if app.kernel_running { CLASH_THEME.accent } else { CLASH_THEME.muted }; 
+    let status_color = if app.kernel_running { CLASH_THEME.accent } else { CLASH_THEME.danger };
     let status_text = if app.kernel_running { "Running" } else { "Stopped" };
 
     let full = format!(
@@ -1096,7 +1094,12 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         format_speed(app.traffic.up),
         format_speed(app.traffic.down),
     );
-    let line = Line::from(Span::styled(full, Style::default().fg(CLASH_THEME.muted)));
+    let line = Line::from(vec![
+        Span::styled(format!(" {} {} ", status_dot_str, status_text), Style::default().fg(status_color)),
+        Span::styled(format!("| ↑ {} ↓ {} | [q] Quit  [tab] Switch  [r] Refresh  [?] Help",
+            format_speed(app.traffic.up), format_speed(app.traffic.down)),
+            Style::default().fg(CLASH_THEME.muted)),
+    ]);
     frame.render_widget(Paragraph::new(line).style(Style::default().bg(CLASH_THEME.bg)), area);
 
     // Status dot

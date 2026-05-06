@@ -273,6 +273,14 @@ fn run(
                             Tab::Logs => {
                                 app.log_scroll = app.log_scroll.saturating_add(3);
                             }
+                            Tab::Connections => {
+                                app.connection_selected = (app.connection_selected + 1)
+                                    .min(app.connections.len().saturating_sub(1));
+                            }
+                            Tab::Subscriptions => {
+                                app.sub_selected = (app.sub_selected + 1)
+                                    .min(app.subscriptions.len().saturating_sub(1));
+                            }
                             _ => {}
                         }
                     }
@@ -284,12 +292,31 @@ fn run(
                             Tab::Logs => {
                                 app.log_scroll = app.log_scroll.saturating_sub(3);
                             }
+                            Tab::Connections => {
+                                app.connection_selected = app.connection_selected.saturating_sub(1);
+                            }
+                            Tab::Subscriptions => {
+                                app.sub_selected = app.sub_selected.saturating_sub(1);
+                            }
                             _ => {}
                         }
                     }
                     MouseEventKind::Down(crossterm_event::MouseButton::Left) => {
-                        if app.tab == Tab::Proxies {
-                            handle_proxy_click(app, mouse.column, mouse.row);
+                        match app.tab {
+                            Tab::Proxies => handle_proxy_click(app, mouse.column, mouse.row),
+                            Tab::Connections => {
+                                let idx = app.connection_selected;
+                                if idx < app.connections.len() {
+                                    let id = app.connections[idx].id.clone();
+                                    let api = app.api.clone();
+                                    let tx = app.data_tx.clone();
+                                    let _ = app.rt.spawn(async move {
+                                        let result = api.close_connection(&id).await;
+                                        let _ = tx.send(DataEvent::ConnectionClosed(result));
+                                    });
+                                }
+                            }
+                            _ => {}
                         }
                     }
                     _ => {}
