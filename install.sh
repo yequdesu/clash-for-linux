@@ -45,9 +45,9 @@ TOTAL=10
 GITHUB_DIRECT="https://github.com"
 GITHUB_MIRROR=""
 MIRROR_LIST=(
+    "https://gh-proxy.org"
     "https://gh-proxy.com"
     "https://ghproxy.net"
-    "https://gh.api.99988866.xyz"
 )
 
 detect_network() {

@@ -23,6 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # ========== 网络检测 & 镜像 ==========
 GITHUB_MIRROR=""
 MIRROR_LIST=(
+    "https://gh-proxy.org"
     "https://gh-proxy.com"
     "https://ghproxy.net"
 )
