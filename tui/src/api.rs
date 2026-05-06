@@ -266,8 +266,74 @@ impl ApiClient {
     }
 
     pub async fn get_connections(&self) -> Result<Vec<Connection>, String> {
-        let resp: ConnectionsResponse = self.get("/connections").await?;
-        Ok(resp.connections)
+        let v: serde_json::Value = self.get("/connections").await?;
+        match v.get("connections") {
+            Some(serde_json::Value::Array(arr)) => {
+                serde_json::from_value::<Vec<Connection>>(serde_json::Value::Array(arr.clone()))
+                    .map_err(|e| format!("{}", e))
+            }
+            _ => Ok(Vec::new()), // null or missing when no connections
+        }
+    }
+
+    pub async fn get_subscriptions(&self) -> Result<Vec<SubscriptionInfo>, String> {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        let path = format!("{}/.clashctl/resources/profiles.yaml", home);
+        let content = tokio::fs::read_to_string(&path).await
+            .map_err(|e| format!("Cannot read {}: {}", path, e))?;
+
+        let mut subs = Vec::new();
+        let mut current_id = 0usize;
+        let mut current_name = String::new();
+        let mut current_url = String::new();
+        let mut current_updated = String::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("  - id:") {
+                // Save previous
+                if current_id > 0 {
+                    subs.push(SubscriptionInfo {
+                        id: current_id,
+                        name: current_name.clone(),
+                        url: current_url.clone(),
+                        status: String::from("ready"),
+                        updated: current_updated.clone(),
+                        proxies_count: 0,
+                    });
+                }
+                current_id = trimmed.strip_prefix("  - id:").unwrap_or("0").trim().parse().unwrap_or(0);
+                current_name.clear();
+                current_url.clear();
+                current_updated.clear();
+            } else if trimmed.starts_with("    name:") {
+                current_name = trimmed.strip_prefix("    name:").unwrap_or("").trim().trim_matches('"').to_string();
+            } else if trimmed.starts_with("    url:") {
+                current_url = trimmed.strip_prefix("    url:").unwrap_or("").trim().to_string();
+            } else if trimmed.starts_with("    updated:") {
+                let ts: i64 = trimmed.strip_prefix("    updated:").unwrap_or("0").trim().parse().unwrap_or(0);
+                if ts > 0 {
+                    // Convert Unix timestamp to readable
+                    current_updated = format!("{}", ts);
+                }
+            }
+        }
+        // Save last
+        if current_id > 0 {
+            subs.push(SubscriptionInfo {
+                id: current_id,
+                name: current_name,
+                url: current_url,
+                status: String::from("ready"),
+                updated: current_updated,
+                proxies_count: 0,
+            });
+        }
+        Ok(subs)
+    }
+
+    pub async fn get_config(&self) -> Result<RuntimeConfig, String> {
+        self.get("/configs").await
     }
 
     pub async fn get_memory(&self) -> Result<MemoryInfo, String> {
@@ -276,10 +342,6 @@ impl ApiClient {
             inuse: v.get("inuse").and_then(|v| v.as_u64()),
             oslimit: v.get("oslimit").and_then(|v| v.as_u64()),
         })
-    }
-
-    pub async fn get_config(&self) -> Result<RuntimeConfig, String> {
-        self.get("/configs").await
     }
 
     pub async fn switch_proxy(&self, group: &str, proxy: &str) -> Result<(), String> {

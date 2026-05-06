@@ -231,6 +231,16 @@ impl App {
                 let _ = tx.send(DataEvent::LogsFetched(result));
             });
         }
+
+        // Fetch subscriptions from profiles.yaml
+        {
+            let api = api.clone();
+            let tx = tx.clone();
+            self.rt.spawn(async move {
+                let result = api.get_subscriptions().await;
+                let _ = tx.send(DataEvent::SubscriptionsFetched(result));
+            });
+        }
     }
 
     pub fn apply_data_event(&mut self, event: DataEvent) {
@@ -311,7 +321,13 @@ impl App {
                 }
             }
             DataEvent::LogsFetched(Err(e)) => {
-                // File read errors are logged just once (don't flood)
+                self.log_api_error(format!("Log file read failed: {}", e));
+            }
+            DataEvent::SubscriptionsFetched(Ok(subs)) => {
+                self.subscriptions = subs;
+            }
+            DataEvent::SubscriptionsFetched(Err(e)) => {
+                self.log_api_error(format!("Subscription read failed: {}", e));
             }
             DataEvent::DelayTested(name, Ok(delay)) => {
                 for group in &mut self.proxy_groups {
