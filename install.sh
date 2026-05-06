@@ -41,9 +41,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STEP=0
 TOTAL=10
 
-# ========== 网络检测 & 镜像 ==========
-GITHUB_DIRECT="https://github.com"
-GITHUB_MIRROR=""
+# ========== 镜像列表 ==========
 MIRROR_LIST=(
     "https://gh-proxy.org"
     "https://gh-proxy.com"
@@ -58,27 +56,25 @@ download_file() {
     
     echo -ne "  ${GRAY}${desc}... ${NC}"
     
-    # 1. 尝试直连 (短超时)
-    if curl -fSL --progress-bar --connect-timeout 5 --max-time 15 "$url" -o "$output" 2>/dev/null; then
-        echo -e "\r  ${GREEN}✓${NC} ${desc} ${GRAY}($(du -h "$output" 2>/dev/null | cut -f1 || echo 'ok'))${NC} [direct]"
+    # 1. 尝试直连 (极短超时, 不可达快速跳过)
+    if curl -fSL --connect-timeout 3 --max-time 8 "$url" -o "$output" 2>/dev/null; then
+        echo -e "\r  ${GREEN}✓${NC} ${desc} ${GRAY}($(du -h "$output" 2>/dev/null | cut -f1 || echo 'ok'))${NC} ${GRAY}[direct]${NC}"
         return 0
     fi
     
-    # 2. 逐镜像降级
+    # 2. 逐镜像降级 (长超时, 支持大文件)
     for mirror in "${MIRROR_LIST[@]}"; do
         local mirror_url="${mirror}/${url}"
-        if curl -fSL --progress-bar --connect-timeout 10 --max-time 180 "$mirror_url" -o "$output" 2>/dev/null; then
-            GITHUB_MIRROR="$mirror"
-            echo -e "\r  ${GREEN}✓${NC} ${desc} ${GRAY}($(du -h "$output" 2>/dev/null | cut -f1 || echo 'ok'))${NC} [${mirror##*/}]"
+        echo -ne "\r  ${GRAY}${desc}... ${mirror##*/} ${NC}"
+        if curl -fSL --connect-timeout 10 --max-time 300 "$mirror_url" -o "$output" 2>/dev/null; then
+            echo -e "\r  ${GREEN}✓${NC} ${desc} ${GRAY}($(du -h "$output" 2>/dev/null | cut -f1 || echo 'ok'))${NC} ${GRAY}[${mirror##*/}]${NC}"
             return 0
         fi
     done
     
     # 3. 全部失败
-    local code=$?
     echo -e "\r  ${RED}✗${NC} ${desc} ${RED}failed${NC}"
-    echo -e "    ${GRAY}直连: ${url}${NC}"
-    echo -e "    ${GRAY}镜像: ${MIRROR_LIST[*]}${NC}"
+    echo -e "    ${GRAY}URL: ${url}${NC}"
     return 1
 }
 
@@ -430,15 +426,18 @@ build_cli() {
     
     cd "${SCRIPT_DIR}"
     
-    echo -e "  ${GRAY}下载依赖...${NC}"
-    if ! go mod download -x 2>&1 | tail -1; then
-        echo -e "${RED}✗ Go 模块下载失败${NC}"
-        echo -e "${YELLOW}  可能原因:${NC}"
-        echo -e "${YELLOW}    1. Go 代理不可用 → 设置: go env -w GOPROXY=https://goproxy.cn,direct${NC}"
-        echo -e "${YELLOW}    2. 网络问题${NC}"
-        cd - >/dev/null
-        return
+    echo -e "  ${GRAY}下载 Go 依赖...${NC}"
+    if ! go mod download 2>/dev/null; then
+        echo -e "  ${YELLOW}⚠ proxy.golang.org 不可达, 切换到国内源...${NC}"
+        export GOPROXY=https://goproxy.cn,direct
+        if ! go mod download 2>/dev/null; then
+            echo -e "${RED}✗ Go 模块下载失败${NC}"
+            echo -e "${YELLOW}  手动设置: go env -w GOPROXY=https://goproxy.cn,direct${NC}"
+            cd - >/dev/null
+            return
+        fi
     fi
+    echo -e "  ${GREEN}✓${NC} 依赖就绪"
     
     echo -e "  ${GRAY}编译 clashctl...${NC}"
     if go build -v -ldflags="-s -w" -o "${CLASH_BIN_DIR}/clashctl" ./cmd/clashctl/ 2>&1 | tail -3; then
