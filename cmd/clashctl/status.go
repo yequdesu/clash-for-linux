@@ -107,7 +107,7 @@ func runStatus(cmd *cobra.Command, args []string) {
 
 	// Get subscription info
 	profilesCfg, _ := config.LoadProfiles(filepath.Join(clashResourcesDir, "profiles.yaml"))
-	if cfg, _ := config.GetActiveProfile(profilesCfg); cfg != nil {
+	if cfg := config.GetActiveProfile(profilesCfg); cfg != nil {
 		info.SubscriptionName = cfg.Name
 		info.SubscriptionID = cfg.ID
 	}

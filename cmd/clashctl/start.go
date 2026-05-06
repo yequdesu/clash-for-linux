@@ -129,7 +129,7 @@ func runStart(cmd *cobra.Command, args []string) {
 	}
 
 	// Show active subscription
-	if cfg, _ := config.GetActiveProfile(profilesCfg); cfg != nil {
+	if cfg := config.GetActiveProfile(profilesCfg); cfg != nil {
 		fmt.Printf("  %s Current subscription: %s\n", cyan("→"), bold(cfg.Name))
 	}
 }

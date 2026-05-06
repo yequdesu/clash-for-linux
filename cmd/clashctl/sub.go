@@ -307,7 +307,6 @@ func runSubUse(cmd *cobra.Command, args []string) {
 
 func runSubUpdate(cmd *cobra.Command, args []string) {
 	profilesPath := filepath.Join(clashResourcesDir, "profiles.yaml")
-	profilesDir := filepath.Join(clashResourcesDir, "profiles")
 
 	profilesCfg, err := config.LoadProfiles(profilesPath)
 	if err != nil || len(profilesCfg.Profiles) == 0 {
