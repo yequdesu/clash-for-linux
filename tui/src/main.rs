@@ -139,13 +139,15 @@ fn run(
 
                     // Tab-specific g/G (Proxies: navigate groups; others: scroll)
                     KeyCode::Char('g') if app.tab == Tab::Proxies => {
-                        app.proxy_group_selected = (app.proxy_group_selected + 1).min(
-                            app.proxy_groups.len().saturating_sub(1));
+                        app.proxy_group_selected = 0;
                         app.proxy_selected = 0;
                     }
                     KeyCode::Char('G') if app.tab == Tab::Proxies => {
                         app.proxy_group_selected = app.proxy_groups.len().saturating_sub(1);
-                        app.proxy_selected = 0;
+                        if !app.proxy_groups.is_empty() {
+                            let g = &app.proxy_groups[app.proxy_group_selected];
+                            app.proxy_selected = g.proxies.len().saturating_sub(1);
+                        }
                     }
                     KeyCode::Char('g') => {
                         app.log_scroll = 0;
@@ -173,7 +175,7 @@ fn run(
                     KeyCode::Char('D') if app.tab == Tab::Proxies => {
                         test_all_delays(app);
                     }
-                    KeyCode::Char('p') if app.tab == Tab::Proxies => {
+                    KeyCode::Char('p') if app.tab == Tab::Proxies || app.tab == Tab::Overview => {
                         cycle_proxy_mode(app);
                     }
                     KeyCode::Enter if app.tab == Tab::Proxies => {

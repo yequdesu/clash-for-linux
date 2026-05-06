@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
@@ -20,9 +21,20 @@ func init() {
 }
 
 func runTUI(cmd *cobra.Command, args []string) {
-	tuiPath := "/usr/local/bin/clash-tui"
-	if !fileExists(tuiPath) {
-		fmt.Printf("%s clash-tui binary not found at %s\n", yellow("⚠"), tuiPath)
+	tuiCandidates := []string{
+		"/usr/local/bin/clash-tui",
+		filepath.Join(clashBinDir, "clash-tui"),
+	}
+
+	var tuiPath string
+	for _, p := range tuiCandidates {
+		if fileExists(p) {
+			tuiPath = p
+			break
+		}
+	}
+	if tuiPath == "" {
+		fmt.Printf("%s clash-tui binary not found\n", yellow("⚠"))
 		fmt.Println("To install TUI, run: bash install.sh")
 		fmt.Println("Or compile with: cd tui && cargo build --release")
 		os.Exit(1)

@@ -311,9 +311,15 @@ impl App {
     pub fn select_down(&mut self) {
         match self.tab {
             Tab::Proxies => {
-                if !self.proxy_groups.is_empty() {
-                    let g = &self.proxy_groups[self.proxy_group_selected.min(self.proxy_groups.len() - 1)];
-                    self.proxy_selected = (self.proxy_selected + 1).min(g.proxies.len().saturating_sub(1));
+                if self.proxy_groups.is_empty() {
+                    return;
+                }
+                let g = &self.proxy_groups[self.proxy_group_selected.min(self.proxy_groups.len() - 1)];
+                if self.proxy_selected + 1 < g.proxies.len() {
+                    self.proxy_selected += 1;
+                } else if self.proxy_group_selected + 1 < self.proxy_groups.len() {
+                    self.proxy_group_selected += 1;
+                    self.proxy_selected = 0;
                 }
             }
             Tab::Connections => {
@@ -332,7 +338,16 @@ impl App {
     pub fn select_up(&mut self) {
         match self.tab {
             Tab::Proxies => {
-                self.proxy_selected = self.proxy_selected.saturating_sub(1);
+                if self.proxy_groups.is_empty() {
+                    return;
+                }
+                if self.proxy_selected > 0 {
+                    self.proxy_selected -= 1;
+                } else if self.proxy_group_selected > 0 {
+                    self.proxy_group_selected -= 1;
+                    let g = &self.proxy_groups[self.proxy_group_selected];
+                    self.proxy_selected = g.proxies.len().saturating_sub(1);
+                }
             }
             Tab::Connections => {
                 self.connection_selected = self.connection_selected.saturating_sub(1);
@@ -457,8 +472,9 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
 
     // Traffic + Current Proxy row
     let mid = Layout::horizontal([
-        Constraint::Ratio(1, 3),
-        Constraint::Ratio(2, 3),
+        Constraint::Ratio(1, 4),
+        Constraint::Ratio(2, 4),
+        Constraint::Ratio(1, 4),
     ])
     .split(rows[1]);
 
@@ -512,6 +528,43 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
     }
     crate::widgets::card::Card::new("Current Proxy")
         .render(frame, mid[1], proxy_lines);
+
+    // Proxy Mode card
+    let mode_lines = vec![
+        Line::from(""),
+        Line::from({
+            let rule_style = if app.kernel_mode == "rule" {
+                Style::default().fg(CLASH_THEME.accent).bold()
+            } else {
+                Style::default().fg(CLASH_THEME.muted)
+            };
+            let global_style = if app.kernel_mode == "global" {
+                Style::default().fg(CLASH_THEME.accent).bold()
+            } else {
+                Style::default().fg(CLASH_THEME.muted)
+            };
+            let direct_style = if app.kernel_mode == "direct" {
+                Style::default().fg(CLASH_THEME.accent).bold()
+            } else {
+                Style::default().fg(CLASH_THEME.muted)
+            };
+            vec![
+                Span::styled("  [", Style::default().fg(CLASH_THEME.muted)),
+                Span::styled("Rule", rule_style),
+                Span::styled("] ", Style::default().fg(CLASH_THEME.muted)),
+                Span::styled("Global", global_style),
+                Span::styled(" ", Style::default().fg(CLASH_THEME.muted)),
+                Span::styled("Direct", direct_style),
+            ]
+        }),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  p: cycle mode",
+            Style::default().fg(CLASH_THEME.muted),
+        )),
+    ];
+    crate::widgets::card::Card::new("Proxy Mode")
+        .render(frame, mid[2], mode_lines);
 
     // System Info + Memory row
     let sys = Layout::horizontal([
@@ -582,10 +635,20 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
     .split(area);
 
     // Mode bar
-    let mode_line = Line::from(Span::styled(
-        format!(" Mode: [{}] Global Direct  |  ● ● ●  |  Search: /  |  Sort: delay ▼", app.kernel_mode),
-        Style::default().fg(CLASH_THEME.muted),
-    ));
+    let mode_spans = {
+        let muted = Style::default().fg(CLASH_THEME.muted);
+        let active = Style::default().fg(CLASH_THEME.accent).bold();
+        vec![
+            Span::styled(" Mode: [", muted),
+            Span::styled("Rule", if app.kernel_mode == "rule" { active } else { muted }),
+            Span::styled("] ", muted),
+            Span::styled("Global", if app.kernel_mode == "global" { active } else { muted }),
+            Span::styled(" ", muted),
+            Span::styled("Direct", if app.kernel_mode == "direct" { active } else { muted }),
+            Span::styled("  |  ● ● ●  |  Search: /  |  Sort: delay ▼", muted),
+        ]
+    };
+    let mode_line = Line::from(mode_spans);
     frame.render_widget(Paragraph::new(mode_line).style(Style::default().bg(CLASH_THEME.bg)), header[0]);
 
     let list = header[1];

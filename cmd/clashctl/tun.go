@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/yequdesu/clashctl/internal/config"
+	"github.com/yequdesu/clashctl/internal/kernel"
 )
 
 var tunCmd = &cobra.Command{
@@ -21,7 +22,7 @@ var tunOnCmd = &cobra.Command{
 	Short: "Enable TUN mode",
 	Long: `Enable TUN mode - requires sudo/root privileges.
 
-This will modify mixin.yaml to set tun.enable=true, then restart the kernel.
+This will modify mixin.yaml to set tun.enable=true, merge config, then restart the kernel.
 After enabling, all system traffic will be routed through the proxy.`,
 	Run: runTUNOn,
 }
@@ -47,6 +48,41 @@ func init() {
 	rootCmd.AddCommand(tunCmd)
 }
 
+func applyTUNMode(enable bool) error {
+	mixinPath := filepath.Join(clashResourcesDir, "mixin.yaml")
+	configPath := filepath.Join(clashResourcesDir, "config.yaml")
+	runtimePath := filepath.Join(clashResourcesDir, "runtime.yaml")
+
+	if !fileExists(mixinPath) {
+		return fmt.Errorf("mixin.yaml not found")
+	}
+
+	if err := config.SetTUNMode(mixinPath, enable); err != nil {
+		return fmt.Errorf("failed to set TUN mode: %v", err)
+	}
+
+	fmt.Print("↓ Merging configuration... ")
+	if err := config.MergeConfig(configPath, mixinPath, runtimePath); err != nil {
+		return fmt.Errorf("\nconfig merge failed: %v", err)
+	}
+	fmt.Println(green("✓ Done"))
+
+	fmt.Print("↓ Validating configuration... ")
+	if err := kernel.ValidateConfig(clashResourcesDir, runtimePath, clashBinDir); err != nil {
+		return fmt.Errorf("\nconfig validation failed: %v", err)
+	}
+	fmt.Println(green("✓ Done"))
+
+	return nil
+}
+
+func verifyTUN() {
+	out, err := runCmd("bash", "-c", "ip link show 2>/dev/null | grep -qi tun && echo found")
+	if err == nil && out == "found" {
+		fmt.Printf("  %s TUN interface detected\n", green("✓"))
+	}
+}
+
 func runTUNOn(cmd *cobra.Command, args []string) {
 	mixinPath := filepath.Join(clashResourcesDir, "mixin.yaml")
 
@@ -66,6 +102,7 @@ func runTUNOn(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Apply TUN config
 	fmt.Print("↓ Enabling TUN mode... ")
 	if err := config.SetTUNMode(mixinPath, true); err != nil {
 		fmt.Printf("\n%s Failed to enable TUN: %v\n", red("✗"), err)
@@ -73,8 +110,25 @@ func runTUNOn(cmd *cobra.Command, args []string) {
 	}
 	fmt.Println(green("✓ Done"))
 
+	if err := applyTUNMode(true); err != nil {
+		fmt.Printf("\n%s %v\n", red("✗"), err)
+		return
+	}
+
+	// Restart kernel
+	if isRunning() {
+		fmt.Println("↓ Restarting kernel...")
+		runStop(nil, nil)
+		runStart(nil, nil)
+	} else {
+		fmt.Println("↓ Starting kernel...")
+		runStart(nil, nil)
+	}
+
+	fmt.Printf("\n%s TUN mode enabled\n", green("✓"))
+	verifyTUN()
 	fmt.Println()
-	fmt.Println("TUN mode enabled. Run 'clashctl restart' to apply changes.")
+	fmt.Println("Tips: Ensure proxy mode is not DIRECT (use 'clashctl node switch GLOBAL <node>' or TUI).")
 }
 
 func runTUNOff(cmd *cobra.Command, args []string) {
@@ -92,8 +146,22 @@ func runTUNOff(cmd *cobra.Command, args []string) {
 	}
 	fmt.Println(green("✓ Done"))
 
-	fmt.Println()
-	fmt.Println("TUN mode disabled. Run 'clashctl restart' to apply changes.")
+	if err := applyTUNMode(false); err != nil {
+		fmt.Printf("\n%s %v\n", red("✗"), err)
+		return
+	}
+
+	// Restart kernel
+	if isRunning() {
+		fmt.Println("↓ Restarting kernel...")
+		runStop(nil, nil)
+		runStart(nil, nil)
+	} else {
+		fmt.Println("↓ Starting kernel...")
+		runStart(nil, nil)
+	}
+
+	fmt.Printf("\n%s TUN mode disabled\n", green("✓"))
 }
 
 func runTUNStatus(cmd *cobra.Command, args []string) {
@@ -105,9 +173,25 @@ func runTUNStatus(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Also check via API if kernel is running
+	if isRunning() {
+		envConfig, _ := config.LoadEnv(getEnvFilePath())
+		port := envConfig.GetPort()
+		apiClient := kernel.NewAPIClient(fmt.Sprintf("http://127.0.0.1:%d", port), readSecret())
+		runtimeConfig, err := apiClient.GetConfig()
+		if err == nil && runtimeConfig.TUN != nil {
+			if runtimeConfig.TUN.Enable {
+				fmt.Printf("%s TUN mode: %s (kernel)\n", green("●"), green("Enabled"))
+			} else {
+				fmt.Printf("%s TUN mode: %s (kernel)\n", gray("○"), "Disabled")
+			}
+			return
+		}
+	}
+
 	if enabled {
-		fmt.Printf("%s TUN mode: %s\n", green("●"), green("Enabled"))
+		fmt.Printf("%s TUN mode: %s (config)\n", green("●"), green("Enabled"))
 	} else {
-		fmt.Printf("%s TUN mode: %s\n", gray("○"), "Disabled")
+		fmt.Printf("%s TUN mode: %s (config)\n", gray("○"), "Disabled")
 	}
 }
