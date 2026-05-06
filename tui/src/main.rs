@@ -25,8 +25,6 @@ fn handle_proxy_click(app: &mut App, col: u16, row: u16) {
     // Click on mode bar → switch mode by column
     if row == app.proxy_mode_y {
         let rel = col.saturating_sub(app.proxy_content_x);
-        // " Mode: [Rule] Global Direct  |  p: switch mode"
-        //  0123456789...
         if rel >= 7 && rel <= 13 {
             set_proxy_mode(app, "rule");
         } else if rel >= 16 && rel <= 21 {
@@ -38,28 +36,29 @@ fn handle_proxy_click(app: &mut App, col: u16, row: u16) {
     }
 
     // Click in content area → find proxy at position
-    if row < app.proxy_content_y {
+    if row < app.proxy_content_y || row >= app.proxy_content_y + app.proxy_content_h {
         return;
     }
-    let mut rel_y = row.saturating_sub(app.proxy_content_y);
+    let abs_line = row as usize - app.proxy_content_y as usize + app.proxy_scroll_offset;
 
-    for gi in app.proxy_scroll_offset..app.proxy_groups.len() {
-        let n = app.proxy_groups[gi].proxies.len() as u16;
-        let gh = 2u16 + n;
+    if abs_line < 2 {
+        return; // header or divider
+    }
 
-        if rel_y < gh {
-            if rel_y >= 1 && rel_y <= n {
-                // Clicked on a proxy line
-                let pi = (rel_y - 1) as usize;
-                if pi < app.proxy_groups[gi].proxies.len() {
-                    app.proxy_group_selected = gi;
-                    app.proxy_selected = pi;
-                }
+    let mut line = abs_line - 2;
+    for gi in 0..app.proxy_groups.len() {
+        let n = app.proxy_groups[gi].proxies.len();
+        let group_lines = 1 + n + 1; // header + proxies + border
+
+        if line < group_lines {
+            if line >= 1 && line <= n {
+                let pi = line - 1;
+                app.proxy_group_selected = gi;
+                app.proxy_selected = pi;
             }
-            // Click on header (rel_y == 0) or bottom border → ignore
             break;
         }
-        rel_y = rel_y.saturating_sub(gh);
+        line -= group_lines;
     }
 }
 
@@ -170,10 +169,11 @@ fn run(
                     KeyCode::Down | KeyCode::Char('j') => app.select_down(),
                     KeyCode::Up | KeyCode::Char('k') => app.select_up(),
 
-                    // Tab-specific g/G (Proxies: navigate groups; others: scroll)
+                    // Tab-specific g/G (Proxies: top/bottom; others: scroll)
                     KeyCode::Char('g') if app.tab == Tab::Proxies => {
                         app.proxy_group_selected = 0;
                         app.proxy_selected = 0;
+                        app.proxy_scroll_offset = 0;
                     }
                     KeyCode::Char('G') if app.tab == Tab::Proxies => {
                         app.proxy_group_selected = app.proxy_groups.len().saturating_sub(1);
@@ -181,6 +181,7 @@ fn run(
                             let g = &app.proxy_groups[app.proxy_group_selected];
                             app.proxy_selected = g.proxies.len().saturating_sub(1);
                         }
+                        app.ensure_proxy_visible();
                     }
                     KeyCode::Char('g') => {
                         app.log_scroll = 0;
@@ -267,8 +268,7 @@ fn run(
                     MouseEventKind::ScrollDown => {
                         match app.tab {
                             Tab::Proxies => {
-                                app.proxy_scroll_offset = (app.proxy_scroll_offset + 1)
-                                    .min(app.proxy_groups.len().saturating_sub(1));
+                                app.proxy_scroll_offset = app.proxy_scroll_offset.saturating_add(3);
                             }
                             Tab::Logs => {
                                 app.log_scroll = app.log_scroll.saturating_add(3);
@@ -279,7 +279,7 @@ fn run(
                     MouseEventKind::ScrollUp => {
                         match app.tab {
                             Tab::Proxies => {
-                                app.proxy_scroll_offset = app.proxy_scroll_offset.saturating_sub(1);
+                                app.proxy_scroll_offset = app.proxy_scroll_offset.saturating_sub(3);
                             }
                             Tab::Logs => {
                                 app.log_scroll = app.log_scroll.saturating_sub(3);

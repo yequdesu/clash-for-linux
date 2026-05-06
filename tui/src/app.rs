@@ -377,58 +377,41 @@ impl App {
         self.window.save();
     }
 
-    fn ensure_proxy_visible(&mut self) {
-        let total = self.proxy_groups.len();
-        if total == 0 {
+    pub fn ensure_proxy_visible(&mut self) {
+        let total_groups = self.proxy_groups.len();
+        if total_groups == 0 {
             return;
         }
-        let sel_gi = self.proxy_group_selected.min(total.saturating_sub(1));
-        self.proxy_scroll_offset = self.proxy_scroll_offset.min(total.saturating_sub(1));
+        let sel_gi = self.proxy_group_selected.min(total_groups.saturating_sub(1));
+        let sel_pi = self.proxy_selected.min(
+            self.proxy_groups[sel_gi].proxies.len().saturating_sub(1),
+        );
 
-        let view_h = self.proxy_content_h.max(1);
-
-        // Compute group heights
-        let heights: Vec<u16> = self.proxy_groups.iter()
-            .map(|g| 2u16 + g.proxies.len() as u16)
-            .collect();
-
-        // Compute visible range from current scroll position
-        let mut last_vis = self.proxy_scroll_offset;
-        let mut used = 0u16;
-        for gi in self.proxy_scroll_offset..total {
-            let h = heights[gi];
-            if used + h > view_h {
-                break;
-            }
-            used += h;
-            last_vis = gi;
+        // Compute selected proxy's absolute line number
+        // Line 0 = table header, Line 1 = divider, Line 2 = first group header
+        let mut abs_line = 2usize; // skip header + divider
+        for gi in 0..sel_gi {
+            abs_line += 1 + self.proxy_groups[gi].proxies.len() + 1;
         }
+        // Group header
+        abs_line += 1;
+        // Proxy offset
+        abs_line += sel_pi;
 
-        // Scroll up if selected is above viewport
-        if sel_gi < self.proxy_scroll_offset {
-            self.proxy_scroll_offset = sel_gi;
-            return;
-        }
+        let view_h = self.proxy_content_h.max(1) as usize;
 
-        // Scroll down if selected is below visible range
-        if sel_gi > last_vis {
-            for off in self.proxy_scroll_offset..=sel_gi {
-                let mut lv = off;
-                let mut u = 0u16;
-                for gi in off..total {
-                    let h = heights[gi];
-                    if u + h > view_h {
-                        break;
-                    }
-                    u += h;
-                    lv = gi;
-                }
-                if lv >= sel_gi {
-                    self.proxy_scroll_offset = off;
-                    break;
-                }
-            }
+        // Total virtual lines
+        let total_lines: usize = 2 + self.proxy_groups.iter()
+            .map(|g| 1 + g.proxies.len() + 1)
+            .sum::<usize>();
+        let max_scroll = total_lines.saturating_sub(view_h);
+
+        if abs_line < self.proxy_scroll_offset {
+            self.proxy_scroll_offset = abs_line;
+        } else if abs_line >= self.proxy_scroll_offset + view_h {
+            self.proxy_scroll_offset = (abs_line + 1).saturating_sub(view_h).min(max_scroll);
         }
+        self.proxy_scroll_offset = self.proxy_scroll_offset.min(max_scroll);
     }
 }
 
@@ -717,8 +700,13 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    let total = app.proxy_groups.len();
-    app.proxy_scroll_offset = app.proxy_scroll_offset.min(total.saturating_sub(1));
+    // Compute total virtual lines
+    let total_lines: usize = 2 + app.proxy_groups.iter()
+        .map(|g| 1 + g.proxies.len() + 1)
+        .sum::<usize>();
+
+    let max_scroll = total_lines.saturating_sub(app.proxy_content_h as usize);
+    app.proxy_scroll_offset = app.proxy_scroll_offset.min(max_scroll);
 
     render_proxy_groups(frame, content, app, app.proxy_scroll_offset);
     render_proxies_help(frame, help_area);
@@ -742,76 +730,123 @@ fn render_proxies_mode_bar(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-fn render_proxy_groups(frame: &mut Frame, area: Rect, app: &App, start_gi: usize) {
-    let mut y = 0u16;
-    for gi in start_gi..app.proxy_groups.len() {
+fn render_proxy_groups(frame: &mut Frame, area: Rect, app: &App, scroll_line: usize) {
+    if area.height < 2 {
+        return;
+    }
+    let x = area.x;
+    let w = area.width;
+
+    // Table header (always at line 0 of virtual content)
+    let header_y = area.y as i32 - scroll_line as i32 + 0i32;
+    if header_y >= area.y as i32 && header_y < (area.y + area.height) as i32 {
+        let hdr = Line::from(Span::styled(
+            " ♯    Proxy Node                          Type       Delay",
+            Style::default().fg(CLASH_THEME.muted),
+        ));
+        frame.render_widget(
+            Paragraph::new(hdr).style(Style::default().bg(CLASH_THEME.bg)),
+            Rect::new(x, header_y as u16, w, 1),
+        );
+    }
+
+    let divider_y = area.y as i32 - scroll_line as i32 + 1i32;
+    if divider_y >= area.y as i32 && divider_y < (area.y + area.height) as i32 {
+        let div = "─".repeat(w.saturating_sub(2) as usize);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(div, Style::default().fg(CLASH_THEME.border)))),
+            Rect::new(x + 1, divider_y as u16, w.saturating_sub(2), 1),
+        );
+    }
+
+    // Compute cumulative line positions
+    // Line 0 = header, Line 1 = divider, Line 2 = first group header
+    let mut group_start_lines: Vec<usize> = Vec::new();
+    let mut next_line = 2usize;
+    for gi in 0..app.proxy_groups.len() {
+        group_start_lines.push(next_line);
+        // group_header(1) + box(proxies + bottom_border = n + 1)
+        next_line += 1 + (app.proxy_groups[gi].proxies.len() + 1);
+    }
+
+    // Render groups that intersect visible area
+    for gi in 0..app.proxy_groups.len() {
+        let gs = group_start_lines[gi];
         let group = &app.proxy_groups[gi];
-        let n = group.proxies.len() as u16;
-        let gh = 2u16 + n;
-        if y + gh > area.height {
-            break;
+        let n = group.proxies.len();
+        // Lines: group header(1) + box(proxies + bottom = n + 1) = n + 2
+        let ge = gs + 1 + n + 1; // exclusive end
+
+        let vis_start = scroll_line;
+        let vis_end = scroll_line + area.height as usize;
+        if ge <= vis_start || gs >= vis_end {
+            continue; // group not visible
         }
 
+        let screen_y0 = area.y as i32 + gs as i32 - scroll_line as i32;
+
         // Group header
-        let hdr_text = format!(" ♯ {}", group.name);
-        let tag = if group.group_type == "Selector" { "[test]" } else { "[auto]" };
-        let hdr_w = area.width.saturating_sub(2) as usize;
-        let pad = hdr_w.saturating_sub(hdr_text.len() + tag.len());
-        let full_hdr = format!("{}{}{}", hdr_text, " ".repeat(pad), tag);
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(full_hdr, Style::default().fg(CLASH_THEME.primary).bold()))),
-            Rect::new(area.x, area.y + y, area.width, 1),
-        );
-        y += 1;
-
-        // Box: n proxy lines + 1 bottom border = n + 1 lines
-        let box_h = (n + 1).min(area.height.saturating_sub(y));
-        let box_block = Block::default()
-            .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-            .border_style(Style::default().fg(CLASH_THEME.border))
-            .style(Style::default().bg(CLASH_THEME.surface));
-        let box_area = Rect::new(area.x, area.y + y, area.width, box_h);
-        frame.render_widget(box_block, box_area);
-        let inner = box_area.inner(Margin::new(1, 0));
-
-        let limit = (inner.height as usize).min(group.proxies.len());
-        for (pi, proxy) in group.proxies.iter().take(limit).enumerate() {
-            let row = inner.y + pi as u16;
-            let is_active = proxy.name == group.now;
-            let is_sel = gi == app.proxy_group_selected && pi == app.proxy_selected;
-            let marker = if is_active { "●" } else { "○" };
-            let mc = if is_active { CLASH_THEME.accent } else { CLASH_THEME.muted };
-
-            let delay_s = if proxy.delay > 0 { format!("{}ms", proxy.delay) } else { "—".into() };
-            let name = crate::widgets::table::truncate(&proxy.name, 22);
-            let ptype = crate::widgets::table::truncate(&proxy.proxy_type, 6);
-            let line = format!(" {} {:24} {:8} {:>6}", marker, name, ptype, delay_s);
-
-            let style = if is_sel {
-                Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.primary)
-            } else {
-                Style::default().fg(mc).bg(CLASH_THEME.surface)
-            };
+        let gh_y = screen_y0;
+        if gh_y >= area.y as i32 && gh_y < (area.y + area.height) as i32 {
+            let hdr = format!(" [♯ {}]", group.name);
             frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(line, style))),
-                Rect::new(inner.x, row, inner.width, 1),
+                Paragraph::new(Line::from(Span::styled(hdr, Style::default().fg(CLASH_THEME.primary).bold()))),
+                Rect::new(x, gh_y as u16, w, 1),
             );
+        }
 
-            if proxy.delay > 0 {
-                let bx = inner.x + 44;
-                let bw = inner.width.saturating_sub(46);
-                if bw > 4 {
-                    crate::widgets::gauge::render_delay_bar(frame, Rect::new(bx, row, bw, 1), proxy.delay);
+        // Box
+        let box_y0 = screen_y0 + 1;
+        let box_y0_u = (box_y0.max(area.y as i32)) as u16;
+        let box_h = ((n + 1) as i32).min((area.y + area.height) as i32 - box_y0).max(0) as u16;
+        if box_h > 0 {
+            let box_block = Block::default()
+                .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                .border_style(Style::default().fg(CLASH_THEME.border))
+                .style(Style::default().bg(CLASH_THEME.surface));
+            let box_area = Rect::new(x, box_y0_u, w, box_h);
+            frame.render_widget(box_block, box_area);
+            let inner = box_area.inner(Margin::new(1, 0));
+
+            let limit = (inner.height as usize).min(n);
+            for pi in 0..limit {
+                let proxy = &group.proxies[pi];
+                let row = inner.y + pi as u16;
+                let is_active = proxy.name == group.now;
+                let is_sel = gi == app.proxy_group_selected && pi == app.proxy_selected;
+                let marker = if is_active { "●" } else { "○" };
+                let mc = if is_active { CLASH_THEME.accent } else { CLASH_THEME.muted };
+
+                let delay_s = if proxy.delay > 0 { format!("{}ms", proxy.delay) } else { "—  ".into() };
+                let name = crate::widgets::table::truncate(&proxy.name, 34);
+                let ptype = crate::widgets::table::truncate(&proxy.proxy_type, 8);
+                let line = format!("   {} {:36} {:10} {:>6}", marker, name, ptype, delay_s);
+
+                let style = if is_sel {
+                    Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.primary)
+                } else {
+                    Style::default().fg(mc).bg(CLASH_THEME.surface)
+                };
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(line, style))),
+                    Rect::new(inner.x, row, inner.width, 1),
+                );
+
+                if proxy.delay > 0 {
+                    let bx = inner.x + 64;
+                    let bw = inner.width.saturating_sub(66);
+                    if bw > 4 {
+                        crate::widgets::gauge::render_delay_bar(frame, Rect::new(bx, row, bw, 1), proxy.delay);
+                    }
                 }
             }
         }
-        y += box_h;
     }
 }
 
 fn render_proxies_help(frame: &mut Frame, area: Rect) {
     let help = Line::from(Span::styled(
-        " Enter:switch  d:test  D:test all  p:mode  g/G:top/bottom  scroll:wheel  click:select",
+        " ● = active  ○ = others  |  Enter:switch  d:test  D:test all  p:mode  g/G:top/bottom",
         Style::default().fg(CLASH_THEME.muted),
     ));
     frame.render_widget(
