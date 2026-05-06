@@ -33,6 +33,7 @@ pub struct App {
     pub proxy_groups: Vec<ProxyGroup>,
     pub proxy_selected: usize,
     pub proxy_group_selected: usize,
+    pub proxy_scroll_offset: usize,
     pub proxy_state: TableState,
 
     pub connections: Vec<Connection>,
@@ -88,6 +89,7 @@ impl App {
             proxy_groups: Vec::new(),
             proxy_selected: 0,
             proxy_group_selected: 0,
+            proxy_scroll_offset: 0,
             proxy_state: TableState::default(),
 
             connections: Vec::new(),
@@ -660,16 +662,54 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    let selected_gi = app.proxy_group_selected.min(app.proxy_groups.len().saturating_sub(1));
+    let total_groups = app.proxy_groups.len();
+    let selected_gi = app.proxy_group_selected.min(total_groups.saturating_sub(1));
 
-    // Render groups starting from selected_gi, fitting as many as possible below
+    // Clamp scroll offset
+    app.proxy_scroll_offset = app.proxy_scroll_offset.min(total_groups.saturating_sub(1));
+
+    // Compute group heights and cumulative offsets
+    let mut group_heights: Vec<u16> = Vec::new();
+    let mut cum_y: Vec<u16> = Vec::new();
+    let mut total_height = 0u16;
+    for gi in 0..total_groups {
+        let h = 3u16 + app.proxy_groups[gi].proxies.len() as u16;
+        group_heights.push(h);
+        cum_y.push(total_height);
+        total_height += h;
+    }
+
+    // Auto-scroll to keep selected group visible
+    let sel_group_start = cum_y[selected_gi];
+    let sel_group_end = sel_group_start + group_heights[selected_gi];
+    let view_start = cum_y[app.proxy_scroll_offset];
+    let view_end = view_start + content.height;
+
+    if sel_group_start < view_start {
+        // Scroll up: selected group is above viewport
+        app.proxy_scroll_offset = selected_gi;
+    } else if sel_group_end > view_end {
+        // Scroll down: selected group extends below viewport.
+        // Advance scroll until the selected group's bottom fits.
+        let mut new_offset = app.proxy_scroll_offset;
+        loop {
+            let vo_start = cum_y[new_offset];
+            let vo_end = vo_start + content.height;
+            if sel_group_end <= vo_end || new_offset >= total_groups.saturating_sub(1) {
+                break;
+            }
+            new_offset += 1;
+        }
+        app.proxy_scroll_offset = new_offset;
+    }
+
+    // Render from proxy_scroll_offset
     let mut offset_y = 0u16;
-    for gi in selected_gi..app.proxy_groups.len() {
+    for gi in app.proxy_scroll_offset..total_groups {
         let group = &app.proxy_groups[gi];
-        let proxy_count = group.proxies.len() as u16;
-        let group_height = 3 + proxy_count;
+        let group_height = group_heights[gi];
 
-        if offset_y + group_height > content.height && gi > selected_gi {
+        if offset_y + group_height > content.height {
             break;
         }
 
@@ -692,7 +732,7 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
         );
         offset_y += 1;
 
-        // Bordered box
+        let proxy_count = group.proxies.len() as u16;
         let box_area = Rect::new(
             content.x,
             content.y + offset_y,
@@ -741,7 +781,7 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
                 Rect::new(inner.x, item_y, inner.width, 1),
             );
 
-            // Delay bar starts after text column (marker 2 + name 24 + type 8 + delay 7 ≈ 41)
+            // Delay bar starts after text
             if proxy.delay > 0 {
                 let bar_x = inner.x + 44;
                 let bar_w = inner.width.saturating_sub(46);
