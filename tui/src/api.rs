@@ -344,7 +344,24 @@ impl ApiClient {
     }
 
     pub async fn get_memory(&self) -> Result<MemoryInfo, String> {
-        let v: serde_json::Value = self.get_first_json("/memory").await?;
+        // /memory streams NDJSON; first line is often 0, read multiple and take last
+        let url = format!("{}/memory", self.base_url.trim_end_matches('/'));
+        let mut req = self.client.get(&url);
+        if !self.api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", self.api_key));
+        }
+        let mut resp = req.send().await.map_err(|e| e.to_string())?;
+        let mut lines = String::new();
+        // Read up to 3 chunks, taking the last valid JSON line
+        for _ in 0..3 {
+            match resp.chunk().await.map_err(|e| e.to_string())? {
+                Some(chunk) => lines.push_str(&String::from_utf8_lossy(&chunk)),
+                None => break,
+            }
+        }
+        let last = lines.lines().filter(|l| l.contains("inuse")).last().unwrap_or("{\"inuse\":0,\"oslimit\":0}");
+        let v: serde_json::Value = serde_json::from_str(last)
+            .map_err(|e| format!("{} — line: {}", e, &last[..last.len().min(200)]))?;
         Ok(MemoryInfo {
             inuse: v.get("inuse").and_then(|v| v.as_u64()),
             oslimit: v.get("oslimit").and_then(|v| v.as_u64()),

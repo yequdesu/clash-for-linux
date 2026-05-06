@@ -618,10 +618,6 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(CLASH_THEME.accent),
         )));
         proxy_lines.push(Line::from(""));
-        proxy_lines.push(Line::from(Span::styled(
-            "  p: cycle mode",
-            Style::default().fg(CLASH_THEME.muted),
-        )));
     } else {
         proxy_lines.push(Line::from(Span::styled("  No proxies", CLASH_THEME.muted)));
     }
@@ -656,10 +652,6 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
             Span::styled("Direct", direct_style),
         ]}),
         Line::from(""),
-        Line::from(Span::styled(
-            "  p: cycle mode",
-            Style::default().fg(CLASH_THEME.muted),
-        )),
     ];
     crate::widgets::card::Card::new("Proxy Mode")
         .render(frame, mid[2], mode_lines);
@@ -709,8 +701,7 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
         .render(frame, sys[1], mem_lines);
 
     // Subscription card
-    let sub_lines = if !app.subscriptions.is_empty() {
-        let s = &app.subscriptions[app.sub_selected.min(app.subscriptions.len() - 1)];
+    let sub_lines = if let Some(s) = app.subscriptions.iter().find(|s| s.id == app.sub_active_id) {
         vec![Line::from(Span::styled(
             format!("  ● {} ({} proxies)  —  {}", s.name, s.proxies_count, s.updated),
             Style::default().fg(CLASH_THEME.text),

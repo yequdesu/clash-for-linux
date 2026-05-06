@@ -159,7 +159,13 @@ fn run(
                 // Global keys
                 match key.code {
                     KeyCode::Char('q') => app.should_quit = true,
-                    KeyCode::Esc => app.should_quit = true,
+                    KeyCode::Esc => {
+                        if app.error_msg.is_some() {
+                            app.error_msg = None;
+                        } else {
+                            app.should_quit = true;
+                        }
+                    }
                     KeyCode::Tab | KeyCode::Right => app.next_tab(),
                     KeyCode::Left => app.prev_tab(),
                     KeyCode::Char('?') => app.show_help = !app.show_help,
@@ -214,7 +220,7 @@ fn run(
                     KeyCode::Char('D') if app.tab == Tab::Proxies => {
                         test_all_delays(app);
                     }
-                    KeyCode::Char('p') if app.tab == Tab::Proxies || app.tab == Tab::Overview => {
+                    KeyCode::Char('p') if app.tab == Tab::Proxies => {
                         cycle_proxy_mode(app);
                     }
                     KeyCode::Enter if app.tab == Tab::Proxies => {
@@ -370,6 +376,10 @@ fn test_current_group(app: &App) {
     }
     let g = &app.proxy_groups[app.proxy_group_selected.min(app.proxy_groups.len() - 1)];
     for proxy in &g.proxies {
+        let ptype = proxy.proxy_type.to_lowercase();
+        if ptype == "reject" || ptype == "direct" {
+            continue;
+        }
         let api = app.api.clone();
         let tx = app.data_tx.clone();
         let name = proxy.name.clone();
@@ -383,6 +393,10 @@ fn test_current_group(app: &App) {
 fn test_all_delays(app: &App) {
     for group in &app.proxy_groups {
         for proxy in &group.proxies {
+            let ptype = proxy.proxy_type.to_lowercase();
+            if ptype == "reject" || ptype == "direct" {
+                continue;
+            }
             let api = app.api.clone();
             let tx = app.data_tx.clone();
             let name = proxy.name.clone();
