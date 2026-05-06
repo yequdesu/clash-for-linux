@@ -807,10 +807,12 @@ fn render_proxy_groups(frame: &mut Frame, area: Rect, app: &App, scroll_line: us
             frame.render_widget(box_block, box_area);
             let inner = box_area.inner(Margin::new(1, 0));
 
-            let limit = (inner.height as usize).min(n);
-            for pi in 0..limit {
+            // Skip proxies scrolled above visible area
+            let skip = if box_y0 < ay { (ay - box_y0) as usize } else { 0 };
+            let limit = (inner.height as usize).min(n.saturating_sub(skip));
+            for pi in skip..skip + limit {
                 let proxy = &group.proxies[pi];
-                let row = inner.y + pi as u16;
+                let row = inner.y + (pi - skip) as u16;
                 let is_active = proxy.name == group.now;
                 let is_sel = gi == app.proxy_group_selected && pi == app.proxy_selected;
                 let marker = if is_active { "●" } else { "○" };

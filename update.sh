@@ -25,36 +25,6 @@ CLASH_BASE_DIR="${HOME}/.clashctl"
 CLASH_BIN_DIR="${CLASH_BASE_DIR}/bin"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# ========== 网络检测 & 镜像 ==========
-GITHUB_MIRROR=""
-MIRROR_LIST=(
-    "https://gh-proxy.org"
-    "https://gh-proxy.com"
-    "https://ghproxy.net"
-)
-
-detect_network() {
-    if curl -fsSL --connect-timeout 5 --max-time 10 "https://github.com" -o /dev/null 2>/dev/null; then
-        GITHUB_MIRROR=""
-        return
-    fi
-    for mirror in "${MIRROR_LIST[@]}"; do
-        if curl -fsSL --connect-timeout 5 --max-time 10 "${mirror}/https://github.com" -o /dev/null 2>/dev/null; then
-            GITHUB_MIRROR="$mirror"
-            return
-        fi
-    done
-}
-
-github_api_url() {
-    local url="$1"
-    if [ -n "$GITHUB_MIRROR" ]; then
-        echo "${GITHUB_MIRROR}/${url}"
-    else
-        echo "$url"
-    fi
-}
-
 ask_confirm() {
     local prompt="$1"
     local default="${2:-N}"
@@ -69,7 +39,7 @@ ask_confirm() {
 }
 
 stop_kernel() {
-    echo -e "${BLUE}[1/6] 停止内核...${NC}"
+    echo -e "${BLUE}[1/5] 停止内核...${NC}"
     if command -v clashctl &>/dev/null; then
         clashctl stop 2>/dev/null || true
     elif [ -f "${CLASH_BIN_DIR}/clashctl" ]; then
@@ -81,7 +51,7 @@ stop_kernel() {
 
 update_source() {
     echo ""
-    echo -e "${BLUE}[2/6] 更新源码...${NC}"
+    echo -e "${BLUE}[2/5] 更新源码...${NC}"
     
     if [ ! -d "${SCRIPT_DIR}/.git" ]; then
         echo -e "${YELLOW}⚠ 非 Git 仓库, 跳过源码更新${NC}"
@@ -97,7 +67,7 @@ update_source() {
 
 rebuild_cli() {
     echo ""
-    echo -e "${BLUE}[3/6] 重新编译 CLI...${NC}"
+    echo -e "${BLUE}[3/5] 重新编译 CLI...${NC}"
     
     local go_bin="${CLASH_BIN_DIR}/clashctl"
     
@@ -130,7 +100,7 @@ rebuild_cli() {
 
 rebuild_tui() {
     echo ""
-    echo -e "${BLUE}[4/6] 重新编译 TUI (可选)...${NC}"
+    echo -e "${BLUE}[4/5] 重新编译 TUI (可选)...${NC}"
     
     if [ ! -f "${SCRIPT_DIR}/tui/Cargo.toml" ]; then
         echo -e "${GRAY}TUI 源码不存在, 跳过${NC}"
@@ -160,49 +130,9 @@ rebuild_tui() {
     fi
 }
 
-check_kernel_update() {
-    echo ""
-    echo -e "${BLUE}[5/6] 检查 Mihomo 内核更新...${NC}"
-    
-    local current_version=""
-    if command -v clashctl &>/dev/null; then
-        current_version=$(clashctl status 2>/dev/null | grep "Kernel:" | awk '{print $2}' || echo "")
-    fi
-    
-    detect_network
-    local api_url
-    api_url=$(github_api_url "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest")
-    local latest_version=""
-    
-    latest_version=$(curl -fsSL --connect-timeout 10 "$api_url" 2>/dev/null | \
-        grep -oP '"tag_name":\s*"\K[^"]+' | head -1) || true
-    
-    if [ -z "$latest_version" ]; then
-        echo -e "${YELLOW}⚠ 无法获取最新版本信息${NC}"
-        echo -e "${YELLOW}  GitHub API 可能无法访问${NC}"
-        return
-    fi
-    
-    echo -e "  当前版本: ${CYAN}${current_version:-未知}${NC}"
-    echo -e "  最新版本: ${CYAN}${latest_version}${NC}"
-    
-    if [ "$current_version" = "$latest_version" ] && [ -n "$current_version" ]; then
-        echo -e "${GREEN}✓ 已是最新版本${NC}"
-        return
-    fi
-    
-    if ask_confirm "是否下载新版内核?"; then
-        if command -v clashctl &>/dev/null; then
-            clashctl upgrade-kernel
-        else
-            echo -e "${YELLOW}  clashctl 未安装, 无法自动升级内核${NC}"
-        fi
-    fi
-}
-
 restart_kernel() {
     echo ""
-    echo -e "${BLUE}[6/6] 重启内核...${NC}"
+    echo -e "${BLUE}[5/5] 重启内核...${NC}"
     
     if ask_confirm "是否重启代理?" "Y"; then
         if command -v clashctl &>/dev/null; then
@@ -226,7 +156,6 @@ main() {
     update_source
     rebuild_cli
     rebuild_tui
-    check_kernel_update
     restart_kernel
     
     echo ""
