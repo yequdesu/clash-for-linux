@@ -38,6 +38,7 @@ pub struct App {
     pub proxy_content_y: u16,
     pub proxy_content_x: u16,
     pub proxy_content_w: u16,
+    pub proxy_content_h: u16,
     pub proxy_mode_y: u16,
 
     pub connections: Vec<Connection>,
@@ -98,6 +99,7 @@ impl App {
             proxy_content_y: 0,
             proxy_content_x: 0,
             proxy_content_w: 0,
+            proxy_content_h: 0,
             proxy_mode_y: 0,
 
             connections: Vec::new(),
@@ -328,6 +330,7 @@ impl App {
                     self.proxy_group_selected += 1;
                     self.proxy_selected = 0;
                 }
+                self.ensure_proxy_visible();
             }
             Tab::Connections => {
                 self.connection_selected = (self.connection_selected + 1).min(self.connections.len().saturating_sub(1));
@@ -355,6 +358,7 @@ impl App {
                     let g = &self.proxy_groups[self.proxy_group_selected];
                     self.proxy_selected = g.proxies.len().saturating_sub(1);
                 }
+                self.ensure_proxy_visible();
             }
             Tab::Connections => {
                 self.connection_selected = self.connection_selected.saturating_sub(1);
@@ -371,6 +375,60 @@ impl App {
 
     pub fn on_shutdown(&mut self) {
         self.window.save();
+    }
+
+    fn ensure_proxy_visible(&mut self) {
+        let total = self.proxy_groups.len();
+        if total == 0 {
+            return;
+        }
+        let sel_gi = self.proxy_group_selected.min(total.saturating_sub(1));
+        self.proxy_scroll_offset = self.proxy_scroll_offset.min(total.saturating_sub(1));
+
+        let view_h = self.proxy_content_h.max(1);
+
+        // Compute group heights
+        let heights: Vec<u16> = self.proxy_groups.iter()
+            .map(|g| 2u16 + g.proxies.len() as u16)
+            .collect();
+
+        // Compute visible range from current scroll position
+        let mut last_vis = self.proxy_scroll_offset;
+        let mut used = 0u16;
+        for gi in self.proxy_scroll_offset..total {
+            let h = heights[gi];
+            if used + h > view_h {
+                break;
+            }
+            used += h;
+            last_vis = gi;
+        }
+
+        // Scroll up if selected is above viewport
+        if sel_gi < self.proxy_scroll_offset {
+            self.proxy_scroll_offset = sel_gi;
+            return;
+        }
+
+        // Scroll down if selected is below visible range
+        if sel_gi > last_vis {
+            for off in self.proxy_scroll_offset..=sel_gi {
+                let mut lv = off;
+                let mut u = 0u16;
+                for gi in off..total {
+                    let h = heights[gi];
+                    if u + h > view_h {
+                        break;
+                    }
+                    u += h;
+                    lv = gi;
+                }
+                if lv >= sel_gi {
+                    self.proxy_scroll_offset = off;
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -646,11 +704,11 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
     let content = chunks[1];
     let help_area = chunks[2];
 
-    // Store positions for mouse click handling
     app.proxy_mode_y = chunks[0].y;
     app.proxy_content_y = content.y;
     app.proxy_content_x = content.x;
     app.proxy_content_w = content.width;
+    app.proxy_content_h = content.height;
 
     if app.proxy_groups.is_empty() {
         let msg = Span::styled("  No proxy groups available", CLASH_THEME.muted);
@@ -660,44 +718,7 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 
     let total = app.proxy_groups.len();
-    let sel_gi = app.proxy_group_selected.min(total.saturating_sub(1));
-
-    // Clamp + auto-scroll
     app.proxy_scroll_offset = app.proxy_scroll_offset.min(total.saturating_sub(1));
-
-    // Calculate which groups fit starting from scroll_offset
-    let mut last_visible = app.proxy_scroll_offset;
-    let mut used = 0u16;
-    for gi in app.proxy_scroll_offset..total {
-        let h = 2u16 + app.proxy_groups[gi].proxies.len() as u16;
-        if used + h > content.height {
-            break;
-        }
-        used += h;
-        last_visible = gi;
-    }
-
-    // Ensure selection is visible
-    if sel_gi < app.proxy_scroll_offset {
-        app.proxy_scroll_offset = sel_gi;
-    } else if sel_gi > last_visible {
-        // Advance scroll forward until sel_gi fits
-        let mut off = app.proxy_scroll_offset;
-        while sel_gi > last_visible && off + 1 < total {
-            off += 1;
-            used = 0;
-            last_visible = off;
-            for gi in off..total {
-                let h = 2u16 + app.proxy_groups[gi].proxies.len() as u16;
-                if used + h > content.height {
-                    break;
-                }
-                used += h;
-                last_visible = gi;
-            }
-        }
-        app.proxy_scroll_offset = off;
-    }
 
     render_proxy_groups(frame, content, app, app.proxy_scroll_offset);
     render_proxies_help(frame, help_area);
