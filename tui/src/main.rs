@@ -25,12 +25,12 @@ fn handle_proxy_click(app: &mut App, col: u16, row: u16) {
     // Click on mode bar → switch mode by column
     if row == app.proxy_mode_y {
         let rel = col.saturating_sub(app.proxy_content_x);
-        // " 模式: [规则] 全局 直连  |  p: 切换模式"
+        // " Mode: [Rule] Global Direct  |  p: switch mode"
         if rel >= 7 && rel <= 13 {
             set_proxy_mode(app, "rule");
-        } else if rel >= 17 && rel <= 18 {
+        } else if rel >= 16 && rel <= 21 {
             set_proxy_mode(app, "global");
-        } else if rel >= 21 && rel <= 22 {
+        } else if rel >= 23 && rel <= 28 {
             set_proxy_mode(app, "direct");
         }
         return;

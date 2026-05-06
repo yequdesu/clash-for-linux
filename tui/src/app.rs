@@ -557,22 +557,16 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
     };
 
     // Status row
-    let kernel_mode_label = match app.kernel_mode.as_str() {
-        "rule" => "规则",
-        "global" => "全局",
-        "direct" => "直连",
-        _ => app.kernel_mode.as_str(),
-    };
     let (status_dot, status_color, status_text) = if app.kernel_running {
-        ("●", CLASH_THEME.accent, format!(" 运行中    {}    {} 模式", app.kernel_version, kernel_mode_label))
+        ("●", CLASH_THEME.accent, format!(" Running    {}    {} mode", app.kernel_version, app.kernel_mode))
     } else {
-        ("○", CLASH_THEME.danger, " 已停止    内核未连接".to_string())
+        ("○", CLASH_THEME.danger, " Stopped    Kernel not connected".to_string())
     };
     let status_line = Line::from(vec![
         Span::styled(format!(" {} ", status_dot), Style::default().fg(status_color).bg(CLASH_THEME.surface)),
         Span::styled(status_text, Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.surface)),
     ]);
-    crate::widgets::card::Card::new("状态")
+    crate::widgets::card::Card::new("Status")
         .render(frame, rows[0], vec![status_line]);
 
     // Traffic + Current Proxy row
@@ -607,7 +601,7 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
         );
     }
 
-    crate::widgets::card::Card::new("流量")
+    crate::widgets::card::Card::new("Traffic")
         .render(frame, mid[0], traffic_lines);
 
     // Current Proxy card
@@ -625,13 +619,13 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
         )));
         proxy_lines.push(Line::from(""));
         proxy_lines.push(Line::from(Span::styled(
-            "  p: 切换模式",
+            "  p: cycle mode",
             Style::default().fg(CLASH_THEME.muted),
         )));
     } else {
         proxy_lines.push(Line::from(Span::styled("  No proxies", CLASH_THEME.muted)));
     }
-    crate::widgets::card::Card::new("当前代理")
+    crate::widgets::card::Card::new("Current Proxy")
         .render(frame, mid[1], proxy_lines);
 
     // Proxy Mode card
@@ -655,20 +649,19 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
             };
             vec![
                 Span::styled("  [", Style::default().fg(CLASH_THEME.muted)),
-                Span::styled("规则", rule_style),
-                Span::styled("] ", Style::default().fg(CLASH_THEME.muted)),
-                Span::styled("全局", global_style),
-                Span::styled(" ", Style::default().fg(CLASH_THEME.muted)),
-                Span::styled("直连", direct_style),
-            ]
-        }),
+            Span::styled("Rule", rule_style),
+            Span::styled("] ", Style::default().fg(CLASH_THEME.muted)),
+            Span::styled("Global", global_style),
+            Span::styled(" ", Style::default().fg(CLASH_THEME.muted)),
+            Span::styled("Direct", direct_style),
+        ]}),
         Line::from(""),
         Line::from(Span::styled(
-            "  p: 切换模式",
+            "  p: cycle mode",
             Style::default().fg(CLASH_THEME.muted),
         )),
     ];
-    crate::widgets::card::Card::new("代理模式")
+    crate::widgets::card::Card::new("Proxy Mode")
         .render(frame, mid[2], mode_lines);
 
     // System Info + Memory row
@@ -688,7 +681,7 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
             if app.tun_enabled { Style::default().fg(CLASH_THEME.accent) } else { Style::default().fg(CLASH_THEME.muted) },
         )),
     ];
-    crate::widgets::card::Card::new("系统信息")
+    crate::widgets::card::Card::new("System Info")
         .render(frame, sys[0], sys_lines);
 
     let mem_ratio = if app.memory_limit > 0 {
@@ -712,7 +705,7 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
             CLASH_THEME.primary,
         );
     }
-    crate::widgets::card::Card::new("内存")
+    crate::widgets::card::Card::new("Memory")
         .render(frame, sys[1], mem_lines);
 
     // Subscription card
@@ -728,7 +721,7 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
             CLASH_THEME.muted,
         ))]
     };
-    crate::widgets::card::Card::new("订阅")
+    crate::widgets::card::Card::new("Subscription")
         .render(frame, rows[3], sub_lines);
 }
 
@@ -774,13 +767,13 @@ fn render_proxies_mode_bar(frame: &mut Frame, area: Rect, app: &App) {
     let muted = Style::default().fg(CLASH_THEME.muted);
     let active = Style::default().fg(CLASH_THEME.accent).bold();
     let spans = vec![
-        Span::styled(" 模式: ", muted),
-        Span::styled("[规则]", if app.kernel_mode == "rule" { active } else { muted }),
+        Span::styled(" Mode: ", muted),
+        Span::styled("[Rule]", if app.kernel_mode == "rule" { active } else { muted }),
         Span::styled(" ", muted),
-        Span::styled("全局", if app.kernel_mode == "global" { active } else { muted }),
+        Span::styled("Global", if app.kernel_mode == "global" { active } else { muted }),
         Span::styled(" ", muted),
-        Span::styled("直连", if app.kernel_mode == "direct" { active } else { muted }),
-        Span::styled("  |  p: 切换模式", muted),
+        Span::styled("Direct", if app.kernel_mode == "direct" { active } else { muted }),
+        Span::styled("  |  p: switch mode", muted),
     ];
     frame.render_widget(
         Paragraph::new(Line::from(spans)).style(Style::default().bg(CLASH_THEME.bg)),
@@ -906,7 +899,7 @@ fn render_proxy_groups(frame: &mut Frame, area: Rect, app: &App, scroll_line: us
 
 fn render_proxies_help(frame: &mut Frame, area: Rect) {
     let help = Line::from(Span::styled(
-        " Enter:切换  d:测延迟  D:全部测试  p:切换模式  g/G:顶部/底部  滚轮:滚动  点击:选择",
+        " Enter:switch  d:test  D:test all  p:mode  g/G:top/bottom  wheel:scroll  click:select",
         Style::default().fg(CLASH_THEME.muted),
     ));
     frame.render_widget(
@@ -925,8 +918,8 @@ fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.subscriptions.is_empty() {
         let lines = vec![
             Line::from(""),
-            Line::from(Span::styled("  无订阅配置", CLASH_THEME.muted)),
-            Line::from(Span::styled("  使用 CLI 添加: clashctl sub add <url>", CLASH_THEME.muted)),
+            Line::from(Span::styled("  No subscriptions configured", CLASH_THEME.muted)),
+            Line::from(Span::styled("  Use CLI: clashctl sub add <url>", CLASH_THEME.muted)),
         ];
         frame.render_widget(Paragraph::new(lines).style(Style::default().fg(CLASH_THEME.text)), list);
         render_sub_help(frame, help_area);
@@ -937,8 +930,10 @@ fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let mut y = 0u16;
     for (i, sub) in app.subscriptions.iter().enumerate() {
-        let needed = 4u16;
-        if y + needed > list.height {
+        // card: 1 top border + 1 header + 2 detail + 1 bottom border = 5 lines
+        // plus 1 line gap after each card
+        let card_h = 5u16;
+        if y + card_h > list.height {
             break;
         }
 
@@ -947,40 +942,43 @@ fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
         let marker = if is_active { "●" } else { "○" };
         let bg = if is_sel { CLASH_THEME.primary } else { CLASH_THEME.surface };
 
-        // Card with full borders
-        let card_h = 3u16.min(list.height.saturating_sub(y));
-        if card_h < 2 {
-            break;
-        }
         let card = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(CLASH_THEME.border))
+            .border_style(Style::default().fg(if is_sel { CLASH_THEME.accent } else { CLASH_THEME.border }))
             .style(Style::default().bg(bg));
-        let card_area = Rect::new(list.x, list.y + y, list.width, card_h);
+        let card_area = Rect::new(list.x + 1, list.y + y, list.width.saturating_sub(2), card_h);
         frame.render_widget(card, card_area);
         let inner = card_area.inner(Margin::new(1, 1));
 
-        let header = format!(" {} ID {} │ {}", marker, sub.id, sub.name);
+        // Header: marker + name
+        let hdr = format!(" {} {} (ID: {})", marker, sub.name, sub.id);
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(header, Style::default().fg(if is_active { CLASH_THEME.accent } else { CLASH_THEME.text }).bg(bg)))),
+            Paragraph::new(Line::from(Span::styled(hdr, Style::default().fg(if is_active { CLASH_THEME.accent } else { CLASH_THEME.text })))),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
-        if inner.height > 1 {
-            let url_short = crate::widgets::table::truncate(&sub.url, 35);
-            let detail = format!(" URL: {} │ 状态: {}", url_short, sub.status);
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(detail, Style::default().fg(CLASH_THEME.muted).bg(bg)))),
-                Rect::new(inner.x, inner.y + 1, inner.width, 1),
-            );
-        }
-        y += card_h;
+        // Detail line 1: URL
+        let url_short = crate::widgets::table::truncate(&sub.url, inner.width as usize - 6);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(format!(" URL: {}", url_short), Style::default().fg(CLASH_THEME.muted)))),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        );
+        // Detail line 2: proxies + updated + status
+        let detail = format!(" Proxies: {}  |  Status: {}  |  Updated: {}",
+            sub.proxies_count, sub.status,
+            if sub.updated != "0" && !sub.updated.is_empty() { &sub.updated } else { "—" });
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(detail, Style::default().fg(CLASH_THEME.muted)))),
+            Rect::new(inner.x, inner.y + 2, inner.width, 1),
+        );
+
+        y += card_h + 1; // card height + 1 line gap
     }
     render_sub_help(frame, help_area);
 }
 
 fn render_sub_help(frame: &mut Frame, area: Rect) {
     let help = Line::from(Span::styled(
-        " a:添加  u:更新  U:全部更新  Enter:切换  d:删除  j/k:导航",
+        " a:add  u:update  U:update all  Enter:switch  d:delete  j/k:navigate",
         Style::default().fg(CLASH_THEME.muted),
     ));
     frame.render_widget(Paragraph::new(help).style(Style::default().bg(CLASH_THEME.bg)), area);
@@ -995,7 +993,7 @@ fn render_connections(frame: &mut Frame, area: Rect, app: &mut App) {
     let help_area = Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1);
 
     let header = format!(
-        " 活跃: {}  |  总数: {}  |  ↑ {}/s ↓ {}/s",
+        " Active: {}  |  Total: {}  |  ↑ {}/s ↓ {}/s",
         app.connections_active,
         app.connections_total,
         format_speed(app.traffic.up),
@@ -1007,7 +1005,7 @@ fn render_connections(frame: &mut Frame, area: Rect, app: &mut App) {
     );
 
     if app.connections.is_empty() {
-        let msg = Span::styled("  无活跃连接", CLASH_THEME.muted);
+        let msg = Span::styled("  No active connections", CLASH_THEME.muted);
         frame.render_widget(Paragraph::new(Line::from(msg)), table_area);
         render_conn_help(frame, help_area);
         return;
@@ -1037,7 +1035,7 @@ fn render_connections(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_conn_help(frame: &mut Frame, area: Rect) {
     let help = Line::from(Span::styled(
-        " c:关闭选中  C:关闭全部  j/k:导航  滚轮:导航  点击:关闭",
+        " c:close selected  C:close all  j/k:navigate  wheel:navigate  click:close",
         Style::default().fg(CLASH_THEME.muted),
     ));
     frame.render_widget(Paragraph::new(help).style(Style::default().bg(CLASH_THEME.bg)), area);
@@ -1052,9 +1050,9 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &App) {
     let help_area = Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1);
 
     let level_header = format!(
-        " 级别: [{}] INFO WARN ERROR DEBUG  |  {}  |  {} 行",
+        " Level: [{}] INFO WARN ERROR DEBUG  |  {}  |  {} lines",
         app.log_level_filter,
-        if app.log_paused { "⏸ 已暂停" } else { "▶ 实时" },
+        if app.log_paused { "⏸ Paused" } else { "▶ Live" },
         app.logs.len(),
     );
     frame.render_widget(
@@ -1063,7 +1061,7 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &App) {
     );
 
     if app.logs.is_empty() {
-        let msg = Span::styled("  无日志 (内核可能未运行)", CLASH_THEME.muted);
+        let msg = Span::styled("  No log entries (kernel may not be running)", CLASH_THEME.muted);
         frame.render_widget(Paragraph::new(Line::from(msg)), log_area);
         render_log_help(frame, help_area);
         return;
@@ -1085,11 +1083,11 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &App) {
     let lines: Vec<Line> = shown.iter().map(|(idx, l)| {
         let color = if l.starts_with("[TUI]") {
             CLASH_THEME.warning
-        } else if l.contains("ERROR") || l.contains("error") || l.contains("fail") {
+        } else if l.contains("level=error") || l.contains("ERROR") || l.contains("fail") {
             CLASH_THEME.danger
-        } else if l.contains("WARN") || l.contains("warn") || l.contains("timeout") {
+        } else if l.contains("level=warn") || l.contains("WARN") || l.contains("timeout") {
             CLASH_THEME.warning
-        } else if l.contains("DEBUG") || l.contains("debug") {
+        } else if l.contains("level=debug") || l.contains("DEBUG") {
             CLASH_THEME.muted
         } else {
             CLASH_THEME.text
@@ -1121,7 +1119,7 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_log_help(frame: &mut Frame, area: Rect) {
     let help = Line::from(Span::styled(
-        " f:切换级别  p:暂停/恢复  j/k:滚动  g/G:首/尾  滚轮:滚动",
+        " f:filter level  p:toggle pause  j/k:scroll  g/G:top/bottom  wheel:scroll",
         Style::default().fg(CLASH_THEME.muted),
     ));
     frame.render_widget(Paragraph::new(help).style(Style::default().bg(CLASH_THEME.bg)), area);
@@ -1205,11 +1203,11 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
 
     let status_dot_str = if app.kernel_running { "●" } else { "○" };
     let status_color = if app.kernel_running { CLASH_THEME.accent } else { CLASH_THEME.danger };
-    let status_text = if app.kernel_running { "运行中" } else { "已停止" };
+    let status_text = if app.kernel_running { "Running" } else { "Stopped" };
 
     let line = Line::from(vec![
         Span::styled(format!(" {} {} ", status_dot_str, status_text), Style::default().fg(status_color)),
-        Span::styled(format!("| ↑ {} ↓ {} | [q] 退出  [tab] 切换  [r] 刷新  [?] 帮助",
+        Span::styled(format!("| ↑ {} ↓ {} | [q] Quit  [tab] Switch  [r] Refresh  [?] Help",
             format_speed(app.traffic.up), format_speed(app.traffic.down)),
             Style::default().fg(CLASH_THEME.muted)),
     ]);
