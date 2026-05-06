@@ -383,32 +383,33 @@ impl App {
             return;
         }
         let sel_gi = self.proxy_group_selected.min(total_groups.saturating_sub(1));
-        let sel_pi = self.proxy_selected.min(
-            self.proxy_groups[sel_gi].proxies.len().saturating_sub(1),
-        );
+        let proxy_count = self.proxy_groups[sel_gi].proxies.len();
+        let sel_pi = if proxy_count > 0 {
+            self.proxy_selected.min(proxy_count.saturating_sub(1))
+        } else {
+            0
+        };
 
         // Compute selected proxy's absolute line number
-        // Line 0 = table header, Line 1 = divider, Line 2 = first group header
-        let mut abs_line = 2usize; // skip header + divider
+        let mut abs_line = 2usize;
         for gi in 0..sel_gi {
-            abs_line += 1 + self.proxy_groups[gi].proxies.len() + 1;
+            if gi < self.proxy_groups.len() {
+                abs_line += 1 + self.proxy_groups[gi].proxies.len() + 1;
+            }
         }
-        // Group header
-        abs_line += 1;
-        // Proxy offset
+        abs_line += 1; // group header
         abs_line += sel_pi;
 
-        let view_h = self.proxy_content_h.max(1) as usize;
+        let view_h = (self.proxy_content_h as usize).max(1);
 
-        // Total virtual lines
         let total_lines: usize = 2 + self.proxy_groups.iter()
-            .map(|g| 1 + g.proxies.len() + 1)
+            .map(|g| 1 + g.proxies.len().saturating_add(1))
             .sum::<usize>();
         let max_scroll = total_lines.saturating_sub(view_h);
 
         if abs_line < self.proxy_scroll_offset {
             self.proxy_scroll_offset = abs_line;
-        } else if abs_line >= self.proxy_scroll_offset + view_h {
+        } else if abs_line >= self.proxy_scroll_offset.saturating_add(view_h) {
             self.proxy_scroll_offset = (abs_line + 1).saturating_sub(view_h).min(max_scroll);
         }
         self.proxy_scroll_offset = self.proxy_scroll_offset.min(max_scroll);
@@ -705,7 +706,8 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
         .map(|g| 1 + g.proxies.len() + 1)
         .sum::<usize>();
 
-    let max_scroll = total_lines.saturating_sub(app.proxy_content_h as usize);
+    let view_h = (app.proxy_content_h as usize).max(1);
+    let max_scroll = total_lines.saturating_sub(view_h);
     app.proxy_scroll_offset = app.proxy_scroll_offset.min(max_scroll);
 
     render_proxy_groups(frame, content, app, app.proxy_scroll_offset);
@@ -736,75 +738,72 @@ fn render_proxy_groups(frame: &mut Frame, area: Rect, app: &App, scroll_line: us
     }
     let x = area.x;
     let w = area.width;
+    let scroll = scroll_line as isize;
+    let ay = area.y as isize;
+    let ah = area.height as isize;
 
-    // Table header (always at line 0 of virtual content)
-    let header_y = area.y as i32 - scroll_line as i32 + 0i32;
-    if header_y >= area.y as i32 && header_y < (area.y + area.height) as i32 {
+    // Table header (virtual line 0)
+    let header_sy = ay - scroll; // screen_y = area.y - scroll
+    if header_sy >= ay && header_sy < ay + ah {
         let hdr = Line::from(Span::styled(
             " ♯    Proxy Node                          Type       Delay",
             Style::default().fg(CLASH_THEME.muted),
         ));
-        frame.render_widget(
-            Paragraph::new(hdr).style(Style::default().bg(CLASH_THEME.bg)),
-            Rect::new(x, header_y as u16, w, 1),
-        );
+        frame.render_widget(Paragraph::new(hdr), Rect::new(x, header_sy as u16, w, 1));
     }
-
-    let divider_y = area.y as i32 - scroll_line as i32 + 1i32;
-    if divider_y >= area.y as i32 && divider_y < (area.y + area.height) as i32 {
+    // Divider (virtual line 1)
+    let div_sy = ay - scroll + 1;
+    if div_sy >= ay && div_sy < ay + ah {
         let div = "─".repeat(w.saturating_sub(2) as usize);
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(div, Style::default().fg(CLASH_THEME.border)))),
-            Rect::new(x + 1, divider_y as u16, w.saturating_sub(2), 1),
+            Rect::new(x + 1, div_sy as u16, w.saturating_sub(2), 1),
         );
     }
 
-    // Compute cumulative line positions
-    // Line 0 = header, Line 1 = divider, Line 2 = first group header
-    let mut group_start_lines: Vec<usize> = Vec::new();
-    let mut next_line = 2usize;
+    // Compute group start lines
+    let mut gs_lines: Vec<usize> = Vec::new();
+    let mut nl = 2usize;
     for gi in 0..app.proxy_groups.len() {
-        group_start_lines.push(next_line);
-        // group_header(1) + box(proxies + bottom_border = n + 1)
-        next_line += 1 + (app.proxy_groups[gi].proxies.len() + 1);
+        gs_lines.push(nl);
+        nl += 1 + app.proxy_groups[gi].proxies.len() + 1;
     }
 
-    // Render groups that intersect visible area
+    // Render visible groups
+    let vis_s = scroll_line;
+    let vis_e = scroll_line + area.height as usize;
     for gi in 0..app.proxy_groups.len() {
-        let gs = group_start_lines[gi];
+        let gs = gs_lines[gi];
         let group = &app.proxy_groups[gi];
         let n = group.proxies.len();
-        // Lines: group header(1) + box(proxies + bottom = n + 1) = n + 2
-        let ge = gs + 1 + n + 1; // exclusive end
+        let ge = gs + 1 + n + 1;
 
-        let vis_start = scroll_line;
-        let vis_end = scroll_line + area.height as usize;
-        if ge <= vis_start || gs >= vis_end {
-            continue; // group not visible
+        if ge <= vis_s || gs >= vis_e {
+            continue;
         }
 
-        let screen_y0 = area.y as i32 + gs as i32 - scroll_line as i32;
+        let screen_y0 = ay + gs as isize - scroll;
 
         // Group header
-        let gh_y = screen_y0;
-        if gh_y >= area.y as i32 && gh_y < (area.y + area.height) as i32 {
+        if screen_y0 >= ay && screen_y0 < ay + ah {
             let hdr = format!(" [♯ {}]", group.name);
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(hdr, Style::default().fg(CLASH_THEME.primary).bold()))),
-                Rect::new(x, gh_y as u16, w, 1),
+                Rect::new(x, screen_y0 as u16, w, 1),
             );
         }
 
         // Box
         let box_y0 = screen_y0 + 1;
-        let box_y0_u = (box_y0.max(area.y as i32)) as u16;
-        let box_h = ((n + 1) as i32).min((area.y + area.height) as i32 - box_y0).max(0) as u16;
-        if box_h > 0 {
+        let box_y0_clamped = box_y0.max(ay);
+        let box_max = ay + ah;
+        let box_h = ((n + 1) as isize).min(box_max - box_y0_clamped).max(0) as u16;
+        if box_h > 0 && box_y0_clamped < box_max {
             let box_block = Block::default()
                 .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
                 .border_style(Style::default().fg(CLASH_THEME.border))
                 .style(Style::default().bg(CLASH_THEME.surface));
-            let box_area = Rect::new(x, box_y0_u, w, box_h);
+            let box_area = Rect::new(x, box_y0_clamped as u16, w, box_h);
             frame.render_widget(box_block, box_area);
             let inner = box_area.inner(Margin::new(1, 0));
 
