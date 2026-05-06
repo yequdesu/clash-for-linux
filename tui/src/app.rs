@@ -33,7 +33,6 @@ pub struct App {
     pub proxy_groups: Vec<ProxyGroup>,
     pub proxy_selected: usize,
     pub proxy_group_selected: usize,
-    pub proxy_scroll_offset: usize,
     pub proxy_state: TableState,
 
     pub connections: Vec<Connection>,
@@ -52,9 +51,6 @@ pub struct App {
 
     pub memory_bytes: u64,
     pub memory_limit: u64,
-
-    pub search_active: bool,
-    pub search_query: String,
 
     pub confirm_action: bool,
     pub confirm_timer: u16,
@@ -92,7 +88,6 @@ impl App {
             proxy_groups: Vec::new(),
             proxy_selected: 0,
             proxy_group_selected: 0,
-            proxy_scroll_offset: 0,
             proxy_state: TableState::default(),
 
             connections: Vec::new(),
@@ -111,9 +106,6 @@ impl App {
 
             memory_bytes: 0,
             memory_limit: 0,
-
-            search_active: false,
-            search_query: String::new(),
 
             confirm_action: false,
             confirm_timer: 0,
@@ -651,7 +643,7 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
             Span::styled("Global", if app.kernel_mode == "global" { active } else { muted }),
             Span::styled(" ", muted),
             Span::styled("Direct", if app.kernel_mode == "direct" { active } else { muted }),
-            Span::styled("  |  ● ● ●  |  Search: /", muted),
+            Span::styled("  |  ● anchor  ○ others", muted),
         ]
     };
     frame.render_widget(
@@ -669,68 +661,22 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 
     let selected_gi = app.proxy_group_selected.min(app.proxy_groups.len().saturating_sub(1));
-    let total_groups = app.proxy_groups.len();
 
-    // Clamp scroll offset
-    app.proxy_scroll_offset = app.proxy_scroll_offset.min(total_groups.saturating_sub(1));
-
-    // Calculate which groups are visible
-    let mut visible_groups: Vec<usize> = Vec::new();
+    // Render groups starting from selected_gi, fitting as many as possible below
     let mut offset_y = 0u16;
-    for gi in app.proxy_scroll_offset..total_groups {
-        let proxy_count = app.proxy_groups[gi].proxies.len() as u16;
-        let group_height = 3 + proxy_count;
-        if offset_y + group_height > content.height {
-            break;
-        }
-        visible_groups.push(gi);
-        offset_y += group_height;
-    }
-
-    // Auto-scroll if selected group is not visible
-    if selected_gi < app.proxy_scroll_offset {
-        app.proxy_scroll_offset = selected_gi;
-    } else if !visible_groups.contains(&selected_gi) && selected_gi >= app.proxy_scroll_offset {
-        // Scroll forward until selected group is visible
-        let mut trial_offset = selected_gi;
-        loop {
-            let mut y = 0u16;
-            let mut found = false;
-            for gi in trial_offset..total_groups {
-                let proxy_count = app.proxy_groups[gi].proxies.len() as u16;
-                let group_height = 3 + proxy_count;
-                if y + group_height > content.height {
-                    break;
-                }
-                if gi == selected_gi {
-                    found = true;
-                    break;
-                }
-                y += group_height;
-            }
-            if found || trial_offset == 0 {
-                app.proxy_scroll_offset = trial_offset;
-                break;
-            }
-            trial_offset = trial_offset.saturating_sub(1);
-        }
-    }
-
-    // Re-render with final scroll offset
-    let mut offset_y = 0u16;
-    for gi in app.proxy_scroll_offset..total_groups {
+    for gi in selected_gi..app.proxy_groups.len() {
         let group = &app.proxy_groups[gi];
         let proxy_count = group.proxies.len() as u16;
         let group_height = 3 + proxy_count;
 
-        if offset_y + group_height > content.height {
+        if offset_y + group_height > content.height && gi > selected_gi {
             break;
         }
 
         // Group header
         let group_header_y = content.y + offset_y;
         let header_text = format!(" ♯ {}", group.name);
-        let test_label = if group.group_type == "Selector" { "[测试]" } else { "[auto]" };
+        let test_label = if group.group_type == "Selector" { "[test]" } else { "[auto]" };
         let header_width = content.width.saturating_sub(2) as usize;
         let padded_header = {
             let label_len = test_label.len() + header_text.len();
@@ -777,10 +723,10 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
                 "—".into()
             };
 
-            let name_part = crate::widgets::table::truncate(&proxy.name, 26);
-            let type_part = crate::widgets::table::truncate(&proxy.proxy_type, 7);
+            let name_part = crate::widgets::table::truncate(&proxy.name, 22);
+            let type_part = crate::widgets::table::truncate(&proxy.proxy_type, 6);
             let line = format!(
-                " {} {:28} {:8} {:>6}",
+                " {} {:24} {:8} {:>6}",
                 marker, name_part, type_part, delay_str,
             );
 
@@ -795,9 +741,10 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
                 Rect::new(inner.x, item_y, inner.width, 1),
             );
 
+            // Delay bar starts after text column (marker 2 + name 24 + type 8 + delay 7 ≈ 41)
             if proxy.delay > 0 {
                 let bar_x = inner.x + 44;
-                let bar_w = inner.width.saturating_sub(44);
+                let bar_w = inner.width.saturating_sub(46);
                 if bar_w > 4 {
                     crate::widgets::gauge::render_delay_bar(
                         frame,
@@ -935,9 +882,8 @@ fn render_connections(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_logs(frame: &mut Frame, area: Rect, app: &App) {
     let level_header = format!(
-        " Level: [{}] INFO WARN ERROR  |  Search: /{}  |  {}",
+        " Level: [{}] INFO WARN ERROR  |  {}",
         app.log_level_filter,
-        if app.search_active { &app.search_query } else { "" },
         if app.log_paused { "⏸ Paused" } else { "▶ Live" },
     );
     frame.render_widget(

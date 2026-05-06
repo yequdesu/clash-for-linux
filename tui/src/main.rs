@@ -88,32 +88,6 @@ fn run(
                     continue;
                 }
 
-                // Search mode
-                if app.search_active {
-                    match key.code {
-                        KeyCode::Esc => {
-                            app.search_active = false;
-                            app.search_query.clear();
-                            continue;
-                        }
-                        KeyCode::Backspace => {
-                            app.search_query.pop();
-                            if app.search_query.is_empty() {
-                                app.search_active = false;
-                            }
-                            continue;
-                        }
-                        KeyCode::Char(c) => {
-                            app.search_query.push(c);
-                            continue;
-                        }
-                        _ => {
-                            app.search_active = false;
-                            // fall through to process the key normally
-                        }
-                    }
-                }
-
                 // Confirmation mode
                 if app.confirm_action {
                     match key.code {
@@ -141,7 +115,6 @@ fn run(
                     KeyCode::Char('=') | KeyCode::Char('+') => app.window.zoom_in(),
                     KeyCode::Char('-') => app.window.zoom_out(),
                     KeyCode::Char('0') => app.window.reset(),
-                    KeyCode::Char('/') => app.search_active = !app.search_active,
                     KeyCode::Down | KeyCode::Char('j') => app.select_down(),
                     KeyCode::Up | KeyCode::Char('k') => app.select_up(),
 
