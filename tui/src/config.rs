@@ -27,7 +27,11 @@ impl Config {
                     let val = value.trim();
                     match key.trim() {
                         "CLASH_CONTROLLER" => {
-                            api_url = format!("http://{}", val);
+                            if val.starts_with("http://") || val.starts_with("https://") {
+                                api_url = val.to_string();
+                            } else {
+                                api_url = format!("http://{}", val);
+                            }
                         }
                         "CLASH_MIXED_PORT" => {
                             if let Ok(p) = val.parse() {

@@ -25,6 +25,7 @@ pub struct App {
     pub kernel_version: String,
     pub kernel_mode: String,
     pub kernel_uptime: String,
+    pub tun_enabled: bool,
 
     pub traffic: TrafficInfo,
     pub traffic_history: Vec<u64>,
@@ -82,6 +83,7 @@ impl App {
             kernel_version: String::new(),
             kernel_mode: String::from("rule"),
             kernel_uptime: String::new(),
+            tun_enabled: false,
 
             traffic: TrafficInfo { up: 0, down: 0 },
             traffic_history: Vec::new(),
@@ -206,6 +208,16 @@ impl App {
                 let _ = tx.send(DataEvent::ConfigFetched(result));
             });
         }
+
+        // Fetch logs
+        {
+            let api = api.clone();
+            let tx = tx.clone();
+            self.rt.spawn(async move {
+                let result = api.get_logs().await;
+                let _ = tx.send(DataEvent::LogsFetched(result));
+            });
+        }
     }
 
     pub fn apply_data_event(&mut self, event: DataEvent) {
@@ -213,6 +225,10 @@ impl App {
             DataEvent::VersionFetched(Ok(v)) => {
                 self.kernel_running = true;
                 self.kernel_version = v;
+            }
+            DataEvent::VersionFetched(Err(e)) => {
+                self.kernel_running = false;
+                self.error_msg = Some(format!("API error: {}", e));
             }
             DataEvent::ProxiesFetched(Ok(resp)) => {
                 self.proxy_groups = resp.get_groups();
@@ -230,7 +246,6 @@ impl App {
                 self.connections_total = self.connections.len();
                 self.connections_active = self.connections.iter()
                     .filter(|c| {
-                        // Simple heuristic: connection with traffic is active
                         c.download_speed.unwrap_or(0) > 0 || c.upload_speed.unwrap_or(0) > 0
                     })
                     .count();
@@ -241,6 +256,7 @@ impl App {
             }
             DataEvent::ConfigFetched(Ok(c)) => {
                 self.kernel_mode = c.mode.unwrap_or_else(|| "rule".into());
+                self.tun_enabled = c.tun.as_ref().and_then(|t| t.enable).unwrap_or(false);
             }
             DataEvent::ModeSet(Ok(())) => {
                 self.refresh_data();
@@ -257,7 +273,27 @@ impl App {
             DataEvent::ConnectionClosed(Err(e)) => {
                 self.error_msg = Some(e);
             }
-            DataEvent::DelayTested(_, _) => {}
+            DataEvent::LogsFetched(Ok(lines)) => {
+                if !self.log_paused {
+                    for line in lines {
+                        self.logs.push(line);
+                    }
+                    if self.logs.len() > 1000 {
+                        let excess = self.logs.len() - 1000;
+                        self.logs.drain(0..excess);
+                    }
+                }
+            }
+            DataEvent::DelayTested(name, Ok(delay)) => {
+                for group in &mut self.proxy_groups {
+                    for proxy in &mut group.proxies {
+                        if proxy.name == name {
+                            proxy.delay = delay;
+                        }
+                    }
+                }
+            }
+            DataEvent::DelayTested(_, Err(_)) => {}
             _ => {}
         }
     }
@@ -488,6 +524,10 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
         Line::from(Span::styled(
             "  OS: Linux  |  Arch: x86_64",
             Style::default().fg(CLASH_THEME.text),
+        )),
+        Line::from(Span::styled(
+            format!("  TUN: {}", if app.tun_enabled { "Enabled" } else { "Disabled" }),
+            if app.tun_enabled { Style::default().fg(CLASH_THEME.accent) } else { Style::default().fg(CLASH_THEME.muted) },
         )),
     ];
     crate::widgets::card::Card::new("System Info")

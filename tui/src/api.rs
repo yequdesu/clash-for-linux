@@ -141,10 +141,14 @@ impl ApiClient {
         #[derive(Deserialize)]
         struct VersionResp {
             version: Option<String>,
-            meta: Option<String>,
+            #[serde(default)]
+            meta: Option<serde_json::Value>,
         }
         let resp: VersionResp = self.get("/version").await?;
-        Ok(resp.version.or(resp.meta).unwrap_or_else(|| "unknown".into()))
+        let ver = resp.version.or_else(|| {
+            resp.meta.and_then(|v| v.as_str().map(String::from))
+        }).unwrap_or_else(|| "unknown".into());
+        Ok(ver)
     }
 
     pub async fn get_proxies(&self) -> Result<ProxiesResponse, String> {
@@ -208,6 +212,15 @@ impl ApiClient {
         }
         req.send().await.map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    pub async fn get_logs(&self) -> Result<Vec<String>, String> {
+        #[derive(Deserialize)]
+        struct LogsResponse {
+            logs: Vec<String>,
+        }
+        let resp: LogsResponse = self.get("/logs").await?;
+        Ok(resp.logs)
     }
 }
 
