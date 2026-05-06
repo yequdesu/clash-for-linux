@@ -37,7 +37,9 @@ pub struct ProxyNodeInfo {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TrafficInfo {
+    #[serde(default)]
     pub up: u64,
+    #[serde(default)]
     pub down: u64,
 }
 
@@ -150,7 +152,13 @@ impl ApiClient {
             req = req.header("Authorization", format!("Bearer {}", self.api_key));
         }
         let resp = req.send().await.map_err(|e| e.to_string())?;
-        resp.json::<T>().await.map_err(|e| e.to_string())
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+        if !status.is_success() {
+            return Err(format!("HTTP {}: {}", status.as_u16(), text));
+        }
+        serde_json::from_str::<T>(&text)
+            .map_err(|e| format!("{} — body: {}", e, &text[..text.len().min(200)]))
     }
 
     async fn put<T: for<'de> Deserialize<'de>>(&self, path: &str, body: &str) -> Result<T, String> {
@@ -171,7 +179,12 @@ impl ApiClient {
             req = req.header("Authorization", format!("Bearer {}", self.api_key));
         }
         req = req.header("Content-Type", "application/json");
-        req.send().await.map_err(|e| e.to_string())?;
+        let resp = req.send().await.map_err(|e| e.to_string())?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("HTTP {}: {}", status.as_u16(), text));
+        }
         Ok(())
     }
 
@@ -182,7 +195,12 @@ impl ApiClient {
             req = req.header("Authorization", format!("Bearer {}", self.api_key));
         }
         req = req.header("Content-Type", "application/json");
-        req.send().await.map_err(|e| e.to_string())?;
+        let resp = req.send().await.map_err(|e| e.to_string())?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("HTTP {}: {}", status.as_u16(), text));
+        }
         Ok(())
     }
 
@@ -205,7 +223,11 @@ impl ApiClient {
     }
 
     pub async fn get_traffic(&self) -> Result<TrafficInfo, String> {
-        self.get("/traffic").await
+        let v: serde_json::Value = self.get("/traffic").await?;
+        Ok(TrafficInfo {
+            up: v.get("up").and_then(|v| v.as_u64()).unwrap_or(0),
+            down: v.get("down").and_then(|v| v.as_u64()).unwrap_or(0),
+        })
     }
 
     pub async fn get_connections(&self) -> Result<Vec<Connection>, String> {
@@ -214,7 +236,11 @@ impl ApiClient {
     }
 
     pub async fn get_memory(&self) -> Result<MemoryInfo, String> {
-        self.get("/memory").await
+        let v: serde_json::Value = self.get("/memory").await?;
+        Ok(MemoryInfo {
+            inuse: v.get("inuse").and_then(|v| v.as_u64()),
+            oslimit: v.get("oslimit").and_then(|v| v.as_u64()),
+        })
     }
 
     pub async fn get_config(&self) -> Result<RuntimeConfig, String> {

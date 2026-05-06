@@ -1123,12 +1123,6 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let status_color = if app.kernel_running { CLASH_THEME.accent } else { CLASH_THEME.danger };
     let status_text = if app.kernel_running { "Running" } else { "Stopped" };
 
-    let full = format!(
-        " {} {} | ↑ {} ↓ {} | [q] Quit  [tab] Switch  [r] Refresh  [?] Help",
-        status_dot_str, status_text,
-        format_speed(app.traffic.up),
-        format_speed(app.traffic.down),
-    );
     let line = Line::from(vec![
         Span::styled(format!(" {} {} ", status_dot_str, status_text), Style::default().fg(status_color)),
         Span::styled(format!("| ↑ {} ↓ {} | [q] Quit  [tab] Switch  [r] Refresh  [?] Help",
