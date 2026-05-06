@@ -25,11 +25,12 @@ fn handle_proxy_click(app: &mut App, col: u16, row: u16) {
     // Click on mode bar → switch mode by column
     if row == app.proxy_mode_y {
         let rel = col.saturating_sub(app.proxy_content_x);
+        // " 模式: [规则] 全局 直连  |  p: 切换模式"
         if rel >= 7 && rel <= 13 {
             set_proxy_mode(app, "rule");
-        } else if rel >= 16 && rel <= 21 {
+        } else if rel >= 17 && rel <= 18 {
             set_proxy_mode(app, "global");
-        } else if rel >= 23 && rel <= 28 {
+        } else if rel >= 21 && rel <= 22 {
             set_proxy_mode(app, "direct");
         }
         return;
@@ -184,13 +185,20 @@ fn run(
                         app.ensure_proxy_visible();
                     }
                     KeyCode::Char('g') => {
-                        app.log_scroll = 0;
-                        app.proxy_selected = 0;
-                        app.connection_selected = 0;
-                        app.sub_selected = 0;
+                        match app.tab {
+                            Tab::Logs => app.log_scroll = 0,
+                            Tab::Connections => app.connection_selected = 0,
+                            Tab::Subscriptions => app.sub_selected = 0,
+                            _ => {}
+                        }
                     }
                     KeyCode::Char('G') => {
-                        app.log_scroll = app.logs.len().saturating_sub(1);
+                        match app.tab {
+                            Tab::Logs => app.log_scroll = app.logs.len().saturating_sub(1),
+                            Tab::Connections => app.connection_selected = app.connections.len().saturating_sub(1),
+                            Tab::Subscriptions => app.sub_selected = app.subscriptions.len().saturating_sub(1),
+                            _ => {}
+                        }
                     }
                     KeyCode::Char('1') => app.tab = Tab::Overview,
                     KeyCode::Char('2') => app.tab = Tab::Proxies,
