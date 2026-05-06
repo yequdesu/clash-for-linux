@@ -21,6 +21,58 @@ use app::App;
 use event::{DataEvent, Event, EventHandler};
 use widgets::tab_bar::Tab;
 
+fn handle_proxy_click(app: &mut App, col: u16, row: u16) {
+    // Click on mode bar → switch mode by column
+    if row == app.proxy_mode_y {
+        let rel = col.saturating_sub(app.proxy_content_x);
+        // " Mode: [Rule] Global Direct  |  p: switch mode"
+        //  0123456789...
+        if rel >= 7 && rel <= 13 {
+            set_proxy_mode(app, "rule");
+        } else if rel >= 16 && rel <= 21 {
+            set_proxy_mode(app, "global");
+        } else if rel >= 23 && rel <= 28 {
+            set_proxy_mode(app, "direct");
+        }
+        return;
+    }
+
+    // Click in content area → find proxy at position
+    if row < app.proxy_content_y {
+        return;
+    }
+    let mut rel_y = row.saturating_sub(app.proxy_content_y);
+
+    for gi in app.proxy_scroll_offset..app.proxy_groups.len() {
+        let n = app.proxy_groups[gi].proxies.len() as u16;
+        let gh = 2u16 + n;
+
+        if rel_y < gh {
+            if rel_y >= 1 && rel_y <= n {
+                // Clicked on a proxy line
+                let pi = (rel_y - 1) as usize;
+                if pi < app.proxy_groups[gi].proxies.len() {
+                    app.proxy_group_selected = gi;
+                    app.proxy_selected = pi;
+                }
+            }
+            // Click on header (rel_y == 0) or bottom border → ignore
+            break;
+        }
+        rel_y = rel_y.saturating_sub(gh);
+    }
+}
+
+fn set_proxy_mode(app: &App, mode: &str) {
+    let api = app.api.clone();
+    let tx = app.data_tx.clone();
+    let m = mode.to_string();
+    let _ = app.rt.spawn(async move {
+        let result = api.set_mode(&m).await;
+        let _ = tx.send(DataEvent::ModeSet(result));
+    });
+}
+
 fn main() -> io::Result<()> {
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     let (data_tx, data_rx) = mpsc::channel::<DataEvent>();
@@ -213,13 +265,31 @@ fn run(
             Ok(Event::Mouse(mouse)) => {
                 match mouse.kind {
                     MouseEventKind::ScrollDown => {
-                        if app.tab == Tab::Logs {
-                            app.log_scroll = app.log_scroll.saturating_add(3);
+                        match app.tab {
+                            Tab::Proxies => {
+                                app.proxy_scroll_offset = (app.proxy_scroll_offset + 1)
+                                    .min(app.proxy_groups.len().saturating_sub(1));
+                            }
+                            Tab::Logs => {
+                                app.log_scroll = app.log_scroll.saturating_add(3);
+                            }
+                            _ => {}
                         }
                     }
                     MouseEventKind::ScrollUp => {
-                        if app.tab == Tab::Logs {
-                            app.log_scroll = app.log_scroll.saturating_sub(3);
+                        match app.tab {
+                            Tab::Proxies => {
+                                app.proxy_scroll_offset = app.proxy_scroll_offset.saturating_sub(1);
+                            }
+                            Tab::Logs => {
+                                app.log_scroll = app.log_scroll.saturating_sub(3);
+                            }
+                            _ => {}
+                        }
+                    }
+                    MouseEventKind::Down(crossterm_event::MouseButton::Left) => {
+                        if app.tab == Tab::Proxies {
+                            handle_proxy_click(app, mouse.column, mouse.row);
                         }
                     }
                     _ => {}
