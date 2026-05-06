@@ -161,6 +161,41 @@ impl ApiClient {
             .map_err(|e| format!("{} — body: {}", e, &text[..text.len().min(200)]))
     }
 
+    /// Read first JSON line from a streaming endpoint (NDJSON)
+    async fn get_first_json<T: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<T, String> {
+        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
+        let mut req = self.client.get(&url);
+        if !self.api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", self.api_key));
+        }
+        let mut resp = req.send().await.map_err(|e| e.to_string())?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(format!("HTTP {}", status.as_u16()));
+        }
+        // Read only until first newline (traffic/memory stream NDJSON)
+        let mut line = Vec::new();
+        while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+            for &b in chunk.iter() {
+                if b == b'\n' {
+                    let s = String::from_utf8_lossy(&line).to_string();
+                    return serde_json::from_str::<T>(&s)
+                        .map_err(|e| format!("{} — line: {}", e, &s[..s.len().min(200)]));
+                }
+                line.push(b);
+            }
+            if line.len() > 65536 {
+                break;
+            }
+        }
+        if !line.is_empty() {
+            let s = String::from_utf8_lossy(&line).to_string();
+            return serde_json::from_str::<T>(&s)
+                .map_err(|e| format!("{} — line: {}", e, &s[..s.len().min(200)]));
+        }
+        Err("empty streaming response".into())
+    }
+
     async fn put<T: for<'de> Deserialize<'de>>(&self, path: &str, body: &str) -> Result<T, String> {
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
         let mut req = self.client.put(&url).body(body.to_string());
@@ -223,7 +258,7 @@ impl ApiClient {
     }
 
     pub async fn get_traffic(&self) -> Result<TrafficInfo, String> {
-        let v: serde_json::Value = self.get("/traffic").await?;
+        let v: serde_json::Value = self.get_first_json("/traffic").await?;
         Ok(TrafficInfo {
             up: v.get("up").and_then(|v| v.as_u64()).unwrap_or(0),
             down: v.get("down").and_then(|v| v.as_u64()).unwrap_or(0),
@@ -236,7 +271,7 @@ impl ApiClient {
     }
 
     pub async fn get_memory(&self) -> Result<MemoryInfo, String> {
-        let v: serde_json::Value = self.get("/memory").await?;
+        let v: serde_json::Value = self.get_first_json("/memory").await?;
         Ok(MemoryInfo {
             inuse: v.get("inuse").and_then(|v| v.as_u64()),
             oslimit: v.get("oslimit").and_then(|v| v.as_u64()),
