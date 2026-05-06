@@ -1,0 +1,135 @@
+mixed-port: 7890
+allow-lan: true
+bind-address: '*'
+mode: rule
+log-level: info
+ipv6: false
+profile:
+    store-selected: true
+    tracing: false
+    store-fake-ip: false
+unified-delay: true
+hosts:
+    localhost.localhost: 127.0.0.1
+    
+dns:
+    enable: true
+    ipv6: false
+    listen: '0.0.0.0:1053'
+    enhanced-mode: fake-ip
+    fake-ip-range: 198.18.0.1/16
+    use-hosts: true
+    default-nameserver: [223.5.5.5, 119.29.29.29]
+    proxy-server-nameserver: [223.5.5.5, 119.29.29.29]
+    nameserver: [223.5.5.5, 223.6.6.6]
+    fake-ip-filter: ['*.lan', localhost.ptlogin2.qq.com, dns.msftncsi.com, '*.srv.nintendo.net', '*.stun.playstation.net', 'xbox.*.microsoft.com', '*.xboxlive.com']
+    fallback: [1.1.1.1, 8.8.8.8]
+    fallback-filter: { geoip: true, geoip-code: CN, ipcidr: [240.0.0.0/4] }
+proxies:
+    - { name: '136.57 GB | 300 GB', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '601', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: down-30005.sz.gfp.tencent-cloud.com, skip-cert-verify: true }
+    - { name: 'Traffic Reset: 11 Days Left', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '601', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: down-30005.sz.gfp.tencent-cloud.com, skip-cert-verify: true }
+    - { name: 'Expire Date: 2026-07-14', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '601', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: down-30005.sz.gfp.tencent-cloud.com, skip-cert-verify: true }
+    - { name: '🇭🇰 Hong Kong丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '601', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: down-30005.sz.gfp.tencent-cloud.com, skip-cert-verify: true }
+    - { name: '🇭🇰 Hong Kong丨02', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '602', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: "2e5bb8-2896242028.antpcdn.com\n", skip-cert-verify: true }
+    - { name: '🇭🇰 Hong Kong丨03', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '603', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: access1.tpns.tencent.com, skip-cert-verify: true }
+    - { name: '🇭🇰 Hong Kong丨04', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '604', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: cdn.antpcdn.com, skip-cert-verify: true }
+    - { name: '🇭🇰 Hong Kong丨05', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '605', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: access1.tpns.tencent.com, skip-cert-verify: true }
+    - { name: '🇯🇵 Japan丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '661', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: down-30005.sz.gfp.tencent-cloud.com, skip-cert-verify: true }
+    - { name: '🇯🇵 Japan丨02', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '662', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: "2e5bb8-2896242028.antpcdn.com\n", skip-cert-verify: true }
+    - { name: '🇯🇵 Japan丨03', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '663', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: access1.tpns.tencent.com, skip-cert-verify: true }
+    - { name: '🇯🇵 Japan丨04', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '664', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: cdn.antpcdn.com, skip-cert-verify: true }
+    - { name: '🇯🇵 Japan丨05', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '665', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: down-30005.sz.gfp.tencent-cloud.com, skip-cert-verify: true }
+    - { name: '🇰🇷 South Korea丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '681', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: emUCdFoC4M3oCW.oss-cn-shanghai.aliyuncs.com, skip-cert-verify: true }
+    - { name: '🇸🇬 Singapore丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '641', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: down-30005.sz.gfp.tencent-cloud.com, skip-cert-verify: true }
+    - { name: '🇸🇬 Singapore丨02', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '642', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: "2e5bb8-2896242028.antpcdn.com\n", skip-cert-verify: true }
+    - { name: '🇸🇬 Singapore丨03', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '643', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: access1.tpns.tencent.com, skip-cert-verify: true }
+    - { name: '🇸🇬 Singapore丨04', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '644', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: cdn.antpcdn.com, skip-cert-verify: true }
+    - { name: '🇸🇬 Singapore丨05', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '645', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: down-30005.sz.gfp.tencent-cloud.com, skip-cert-verify: true }
+    - { name: '🇨🇳 Taiwan丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '621', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: down-30005.sz.gfp.tencent-cloud.com, skip-cert-verify: true }
+    - { name: '🇨🇳 Taiwan丨02', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '622', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: "2e5bb8-2896242028.antpcdn.com\n", skip-cert-verify: true }
+    - { name: '🇨🇳 Taiwan丨03', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '623', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: access1.tpns.tencent.com, skip-cert-verify: true }
+    - { name: '🇨🇳 Taiwan丨04', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '624', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: cdn.antpcdn.com, skip-cert-verify: true }
+    - { name: '🇨🇳 Taiwan丨05', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '625', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: access1.tpns.tencent.com, skip-cert-verify: true }
+    - { name: '🇬🇧 Great Britain丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '721', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: emUCdFoC4M3oCW.oss-cn-shanghai.aliyuncs.com, skip-cert-verify: true }
+    - { name: '🇺🇸 United States丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '701', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: down-30005.sz.gfp.tencent-cloud.com, skip-cert-verify: true }
+    - { name: '🇺🇸 United States丨02', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '702', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: "2e5bb8-2896242028.antpcdn.com\n", skip-cert-verify: true }
+    - { name: '🇺🇸 United States丨03', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '703', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: access1.tpns.tencent.com, skip-cert-verify: true }
+    - { name: '🇺🇸 United States丨04', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '704', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: cdn.antpcdn.com, skip-cert-verify: true }
+    - { name: '🇺🇸 United States丨05', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '705', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: access1.tpns.tencent.com, skip-cert-verify: true }
+    - { name: '🇨🇦 Canada丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '741', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: emUCdFoC4M3oCW.oss-cn-shanghai.aliyuncs.com, skip-cert-verify: true }
+    - { name: '🇫🇷 France | 01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '751', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: emUCdFoC4M3oCW.oss-cn-shanghai.aliyuncs.com, skip-cert-verify: true }
+    - { name: '🇩🇪 Germany | 01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '761', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: emUCdFoC4M3oCW.oss-cn-shanghai.aliyuncs.com, skip-cert-verify: true }
+    - { name: '🇵🇭 Philippines丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '771', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: emUCdFoC4M3oCW.oss-cn-shanghai.aliyuncs.com, skip-cert-verify: true }
+    - { name: '🇳🇱 Netherlands丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '781', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: emUCdFoC4M3oCW.oss-cn-shanghai.aliyuncs.com, skip-cert-verify: true }
+    - { name: '🇹🇷 Turkey丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '791', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: emUCdFoC4M3oCW.oss-cn-shanghai.aliyuncs.com, skip-cert-verify: true }
+    - { name: '🇻🇳 Vietnam | 01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '801', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: emUCdFoC4M3oCW.oss-cn-shanghai.aliyuncs.com, skip-cert-verify: true }
+    - { name: '🇲🇾 Malaysia丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '811', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: emUCdFoC4M3oCW.oss-cn-shanghai.aliyuncs.com, skip-cert-verify: true }
+    - { name: '🇹🇭 Thailand丨01', type: anytls, server: asvf5ofzgyic23yn.redug8dqjjktoapmdfmqymrvi0iupi.com, port: '821', password: 2d6fb6d7-d824-4cd1-baf8-a3952c7979a5, udp: true, client-fingerprint: chrome, sni: emUCdFoC4M3oCW.oss-cn-shanghai.aliyuncs.com, skip-cert-verify: true }
+proxy-groups:
+    - { name: SSRDOG, type: select, proxies: [Auto, '136.57 GB | 300 GB', 'Traffic Reset: 11 Days Left', 'Expire Date: 2026-07-14', '🇭🇰 Hong Kong丨01', '🇭🇰 Hong Kong丨02', '🇭🇰 Hong Kong丨03', '🇭🇰 Hong Kong丨04', '🇭🇰 Hong Kong丨05', '🇯🇵 Japan丨01', '🇯🇵 Japan丨02', '🇯🇵 Japan丨03', '🇯🇵 Japan丨04', '🇯🇵 Japan丨05', '🇰🇷 South Korea丨01', '🇸🇬 Singapore丨01', '🇸🇬 Singapore丨02', '🇸🇬 Singapore丨03', '🇸🇬 Singapore丨04', '🇸🇬 Singapore丨05', '🇨🇳 Taiwan丨01', '🇨🇳 Taiwan丨02', '🇨🇳 Taiwan丨03', '🇨🇳 Taiwan丨04', '🇨🇳 Taiwan丨05', '🇬🇧 Great Britain丨01', '🇺🇸 United States丨01', '🇺🇸 United States丨02', '🇺🇸 United States丨03', '🇺🇸 United States丨04', '🇺🇸 United States丨05', '🇨🇦 Canada丨01', '🇫🇷 France | 01', '🇩🇪 Germany | 01', '🇵🇭 Philippines丨01', '🇳🇱 Netherlands丨01', '🇹🇷 Turkey丨01', '🇻🇳 Vietnam | 01', '🇲🇾 Malaysia丨01', '🇹🇭 Thailand丨01'] }
+    - { name: Auto, type: fallback, proxies: ['🇭🇰 Hong Kong', '🇨🇳 Taiwan', '🇯🇵 Japan', '🇰🇷 Korea', '🇸🇬 Singapore', '🇺🇸 United States', '🇨🇦 Canada', '🇬🇧 Great Britain', '🇹🇷 Turkey', '🇳🇱 Netherlands', '🇫🇷 France', '🇩🇪 Germany', '🇻🇳 Vietnam', '🇲🇾 Malaysia', '🇹🇭 Thailand', '🇵🇭 Philippines'], url: 'http://cp.cloudflare.com/generate_204', interval: 300 }
+    - { name: '🇭🇰 Hong Kong', type: select, proxies: ['🇭🇰 Hong Kong丨01', '🇭🇰 Hong Kong丨02', '🇭🇰 Hong Kong丨03', '🇭🇰 Hong Kong丨04', '🇭🇰 Hong Kong丨05'] }
+    - { name: '🇨🇳 Taiwan', type: select, proxies: ['🇨🇳 Taiwan丨01', '🇨🇳 Taiwan丨02', '🇨🇳 Taiwan丨03', '🇨🇳 Taiwan丨04', '🇨🇳 Taiwan丨05'] }
+    - { name: '🇯🇵 Japan', type: select, proxies: ['🇯🇵 Japan丨01', '🇯🇵 Japan丨02', '🇯🇵 Japan丨03', '🇯🇵 Japan丨04', '🇯🇵 Japan丨05'] }
+    - { name: '🇰🇷 Korea', type: select, proxies: ['🇰🇷 South Korea丨01'] }
+    - { name: '🇸🇬 Singapore', type: select, proxies: ['🇸🇬 Singapore丨01', '🇸🇬 Singapore丨02', '🇸🇬 Singapore丨03', '🇸🇬 Singapore丨04', '🇸🇬 Singapore丨05'] }
+    - { name: '🇨🇦 Canada', type: select, proxies: ['🇨🇦 Canada丨01'] }
+    - { name: '🇺🇸 United States', type: select, proxies: ['🇺🇸 United States丨01', '🇺🇸 United States丨02', '🇺🇸 United States丨03', '🇺🇸 United States丨04', '🇺🇸 United States丨05'] }
+    - { name: '🇬🇧 Great Britain', type: select, proxies: ['🇬🇧 Great Britain丨01'] }
+    - { name: '🇹🇷 Turkey', type: select, proxies: ['🇹🇷 Turkey丨01'] }
+    - { name: '🇳🇱 Netherlands', type: select, proxies: ['🇳🇱 Netherlands丨01'] }
+    - { name: '🇫🇷 France', type: select, proxies: ['🇫🇷 France | 01'] }
+    - { name: '🇩🇪 Germany', type: select, proxies: ['🇩🇪 Germany | 01'] }
+    - { name: '🇻🇳 Vietnam', type: select, proxies: ['🇻🇳 Vietnam | 01'] }
+    - { name: '🇲🇾 Malaysia', type: select, proxies: ['🇲🇾 Malaysia丨01'] }
+    - { name: '🇹🇭 Thailand', type: select, proxies: ['🇹🇭 Thailand丨01'] }
+    - { name: '🇵🇭 Philippines', type: select, proxies: ['🇵🇭 Philippines丨01'] }
+rule-providers:
+    YouTube: { type: http, behavior: classical, url: 'https://api-gz.hosbbq.com/nus74f89st1/Y.yml', interval: 86400, path: ./ruleset/YouTube.yml }
+    SteamCN: { type: http, behavior: classical, url: 'https://api-gz.hosbbq.com/nus74f89st1/SC.yml', interval: 86400, path: ./ruleset/SteamCN.yml }
+    Bahamut: { type: http, behavior: classical, url: 'https://api-gz.hosbbq.com/nus74f89st1/Ba.yml', interval: 86400, path: ./ruleset/Bahamut.yml }
+    DMM: { type: http, behavior: classical, url: 'https://api-gz.hosbbq.com/nus74f89st1/DM.yml', interval: 86400, path: ./ruleset/DMM.yml }
+    ChinaMax: { type: http, behavior: classical, url: 'https://api-gz.hosbbq.com/nus74f89st1/C.yml', interval: 86400, path: ./ruleset/ChinaMax.yml }
+rules:
+    - 'DOMAIN,dog.ssrdog.com,SSRDOG'
+    
+    - 'DOMAIN,ic.adobe.io,REJECT'
+    - 'DOMAIN,dyzt55url8.adobe.io,REJECT'
+    - 'DOMAIN,gw8gfjbs05.adobe.io,REJECT'
+    - 'DOMAIN,0mo5a70cqa.adobe.io,REJECT'
+    - 'DOMAIN,ij0gdyrfka.adobe.io,REJECT'
+    - 'DOMAIN,dxyeyf6ecy.adobe.io,REJECT'
+    - 'DOMAIN,1hzopx6nz7.adobe.io,REJECT'
+    - 'DOMAIN,ph0f2h2csf.adobe.io,REJECT'
+    - 'DOMAIN,23ynjitwt5.adobe.io,REJECT'
+    - 'DOMAIN,crs.cr.adobe.com,REJECT'
+    - 'DOMAIN,www.photoshop.com,REJECT'
+    - 'DOMAIN,cc-cdn.adobe.com,REJECT'
+    - 'DOMAIN,photos.adobe.io,REJECT'
+    - 'DOMAIN,cc-api-data.adobe.io,REJECT'
+    - 'DOMAIN,lcs-cops.adobe.io,REJECT'
+    - 'DOMAIN,cai-splunk-proxy.adobe.io,REJECT'
+    - 'DOMAIN-KEYWORD,sjtu.edu.cn,DIRECT'
+    - 'DOMAIN-KEYWORD,linkedin,SSRDOG'
+    - 'DOMAIN-SUFFIX,okex.com,SSRDOG'
+    - 'DOMAIN-SUFFIX,oklink.com,SSRDOG'
+    - 'DOMAIN-SUFFIX,okx.com,SSRDOG'
+    - 'RULE-SET,SteamCN,DIRECT'
+    - 'RULE-SET,Bahamut,🇨🇳 Taiwan'
+    - 'RULE-SET,DMM,🇯🇵 Japan'
+    - 'RULE-SET,ChinaMax,DIRECT'
+    - 'DOMAIN,local.adguard.org,DIRECT'
+    - 'DOMAIN-SUFFIX,local,DIRECT'
+    - 'IP-CIDR,127.0.0.0/8,DIRECT'
+    - 'IP-CIDR,172.16.0.0/12,DIRECT'
+    - 'IP-CIDR,192.168.0.0/16,DIRECT'
+    - 'IP-CIDR,10.0.0.0/8,DIRECT'
+    - 'IP-CIDR,17.0.0.0/8,DIRECT'
+    - 'IP-CIDR,100.64.0.0/10,DIRECT'
+    - 'IP-CIDR,224.0.0.0/4,DIRECT'
+    - 'IP-CIDR,203.0.113.0/24,DIRECT'
+    - 'IP-CIDR,192.0.2.0/24,DIRECT'
+    - 'IP-CIDR6,fe80::/10,DIRECT'
+    - 'GEOIP,CN,DIRECT'
+    - 'GEOIP,LAN,DIRECT'
+    - 'MATCH,SSRDOG'

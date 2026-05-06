@@ -1,0 +1,30 @@
+# Build artifacts
+target/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go
+go.sum
+
+# Rust
+tui/target/
+tui/Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TUI-template (reference only, not part of project)
+TUI-template/
+
+# Environment
+.env.local
