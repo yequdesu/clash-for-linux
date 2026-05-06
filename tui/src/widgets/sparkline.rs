@@ -45,14 +45,14 @@ pub fn render_sparkline(
 
     let spark_str: String = sampled.into_iter().collect();
     let spark_width = spark_str.chars().count() as u16;
-    let line = Line::from(Span::styled(spark_str, Style::default().fg(color).bg(CLASH_THEME.sparkline_bg)));
 
     if spark_width < area.width {
         let pad = " ".repeat((area.width - spark_width) as usize);
-        let padded = format!("{}{}", spark_str, pad);
-        let line = Line::from(Span::styled(padded, Style::default().fg(color).bg(CLASH_THEME.sparkline_bg)));
+        let full_str = format!("{}{}", spark_str, pad);
+        let line = Line::from(Span::styled(full_str, Style::default().fg(color).bg(CLASH_THEME.sparkline_bg)));
         frame.render_widget(Paragraph::new(line).style(Style::default().bg(CLASH_THEME.sparkline_bg)), area);
     } else {
+        let line = Line::from(Span::styled(spark_str, Style::default().fg(color).bg(CLASH_THEME.sparkline_bg)));
         frame.render_widget(Paragraph::new(line).style(Style::default().bg(CLASH_THEME.sparkline_bg)), area);
     }
 }

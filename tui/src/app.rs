@@ -218,8 +218,9 @@ impl App {
                 self.proxy_groups = resp.get_groups();
             }
             DataEvent::TrafficFetched(Ok(t)) => {
+                let down = t.down;
                 self.traffic = t;
-                self.traffic_history.push(t.down);
+                self.traffic_history.push(down);
                 if self.traffic_history.len() > 60 {
                     self.traffic_history.remove(0);
                 }
@@ -555,7 +556,7 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    let group_height = 5u16;
+    let _group_height = 5u16;
     let mut offset_y = 0u16;
     for (gi, group) in app.proxy_groups.iter().enumerate() {
         if offset_y + 2 >= list.height {
@@ -849,7 +850,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     let status_dot_str = if app.kernel_running { "●" } else { "○" };
-    let status_color = if app.kernel_running { CLASH_THEME.accent } else { CLASH_THEME.muted };
+    let _status_color = if app.kernel_running { CLASH_THEME.accent } else { CLASH_THEME.muted }; 
     let status_text = if app.kernel_running { "Running" } else { "Stopped" };
 
     let full = format!(

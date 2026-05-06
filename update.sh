@@ -20,12 +20,34 @@ CLASH_BASE_DIR="${HOME}/.clashctl"
 CLASH_BIN_DIR="${CLASH_BASE_DIR}/bin"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-GH_PROXY="${GH_PROXY:-}"
-if [ -n "$GH_PROXY" ]; then
-    GITHUB_API="${GH_PROXY}/https://api.github.com"
-else
-    GITHUB_API="https://api.github.com"
-fi
+# ========== 网络检测 & 镜像 ==========
+GITHUB_MIRROR=""
+MIRROR_LIST=(
+    "https://gh-proxy.com"
+    "https://ghproxy.net"
+)
+
+detect_network() {
+    if curl -fsSL --connect-timeout 5 --max-time 10 "https://github.com" -o /dev/null 2>/dev/null; then
+        GITHUB_MIRROR=""
+        return
+    fi
+    for mirror in "${MIRROR_LIST[@]}"; do
+        if curl -fsSL --connect-timeout 5 --max-time 10 "${mirror}/https://github.com" -o /dev/null 2>/dev/null; then
+            GITHUB_MIRROR="$mirror"
+            return
+        fi
+    done
+}
+
+github_api_url() {
+    local url="$1"
+    if [ -n "$GITHUB_MIRROR" ]; then
+        echo "${GITHUB_MIRROR}/${url}"
+    else
+        echo "$url"
+    fi
+}
 
 ask_confirm() {
     local prompt="$1"
@@ -61,7 +83,7 @@ update_source() {
     fi
     
     cd "${SCRIPT_DIR}"
-    git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || {
+    git pull origin clash-terminal 2>/dev/null || {
         echo -e "${YELLOW}⚠ Git pull 失败, 继续使用当前代码${NC}"
     }
     echo -e "${GREEN}✓ 源码已更新${NC}"
@@ -84,8 +106,10 @@ rebuild_cli() {
     fi
     
     cd "${SCRIPT_DIR}"
+    echo -e "  ${GRAY}下载依赖...${NC}"
     go mod download 2>/dev/null || true
-    go build -ldflags="-s -w" -o "$go_bin" ./cmd/clashctl/ && {
+    echo -e "  ${GRAY}编译...${NC}"
+    go build -v -ldflags="-s -w" -o "$go_bin" ./cmd/clashctl/ 2>&1 | tail -3 && {
         echo -e "${GREEN}✓ clashctl 编译成功${NC}"
         
         echo -e "${YELLOW}⚠ 更新 /usr/local/bin/clashctl 需要 sudo 权限${NC}"
@@ -115,8 +139,7 @@ rebuild_tui() {
     if ask_confirm "是否重新编译 TUI?" "N"; then
         cd "${SCRIPT_DIR}/tui"
         cargo build --release && {
-            cp target/release/clash-tui "${CLASH_BIN_DIR}/clash-tui" 2>/dev/null || \
-            cp target/release/tui-template "${CLASH_BIN_DIR}/clash-tui" 2>/dev/null || true
+            cp target/release/clash-tui "${CLASH_BIN_DIR}/clash-tui" 2>/dev/null || true
             
             echo -e "${YELLOW}⚠ 更新 /usr/local/bin/clash-tui 需要 sudo 权限${NC}"
             if ask_confirm "是否更新到 /usr/local/bin?"; then
@@ -140,7 +163,9 @@ check_kernel_update() {
         current_version=$(clashctl status 2>/dev/null | grep "Kernel:" | awk '{print $2}' || echo "")
     fi
     
-    local api_url="${GITHUB_API}/repos/MetaCubeX/mihomo/releases/latest"
+    detect_network
+    local api_url
+    api_url=$(github_api_url "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest")
     local latest_version=""
     
     latest_version=$(curl -fsSL --connect-timeout 10 "$api_url" 2>/dev/null | \
@@ -148,7 +173,7 @@ check_kernel_update() {
     
     if [ -z "$latest_version" ]; then
         echo -e "${YELLOW}⚠ 无法获取最新版本信息${NC}"
-        echo -e "${YELLOW}  GitHub API 可能无法访问, 尝试设置 GH_PROXY 环境变量${NC}"
+        echo -e "${YELLOW}  GitHub API 可能无法访问${NC}"
         return
     fi
     
@@ -161,7 +186,6 @@ check_kernel_update() {
     fi
     
     if ask_confirm "是否下载新版内核?"; then
-        echo -e "  ${GRAY}请手动运行: clashctl upgrade-kernel${NC}"
         if command -v clashctl &>/dev/null; then
             clashctl upgrade-kernel
         else
@@ -184,8 +208,6 @@ restart_kernel() {
         echo -e "${GRAY}跳过重启${NC}"
     fi
 }
-
-# ========== 主流程 ==========
 
 main() {
     echo ""

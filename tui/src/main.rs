@@ -246,7 +246,6 @@ fn run(
                 }
             }
             Ok(Event::Tick) => app.on_tick(),
-            Ok(_) => {}
             Err(e) => app.error_msg = Some(e.to_string()),
         }
 

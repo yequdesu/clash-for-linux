@@ -96,8 +96,6 @@ pub struct SubscriptionInfo {
     pub proxies_count: usize,
 }
 
-use std::collections::HashMap;
-
 #[derive(Debug, Clone)]
 pub struct ApiClient {
     pub base_url: String,
