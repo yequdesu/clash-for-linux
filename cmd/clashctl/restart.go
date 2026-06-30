@@ -1,6 +1,8 @@
 package main
 
 import (
+	"time"
+
 	"github.com/spf13/cobra"
 )
 
@@ -17,5 +19,7 @@ func init() {
 
 func runRestart(cmd *cobra.Command, args []string) {
 	runStop(nil, nil)
+	// Wait for port release (TCP TIME_WAIT) before starting
+	time.Sleep(1 * time.Second)
 	runStart(nil, nil)
 }

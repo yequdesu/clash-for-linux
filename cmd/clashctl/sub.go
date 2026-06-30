@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 	"github.com/yequdesu/clashctl/internal/config"
 	"github.com/yequdesu/clashctl/internal/sub"
 )
@@ -57,6 +58,21 @@ var subUpdateCmd = &cobra.Command{
 	Run:   runSubUpdate,
 }
 
+var subImportCmd = &cobra.Command{
+	Use:   "import <file>",
+	Short: "Import a local YAML config file as a subscription",
+	Long: `Import a local YAML configuration file as a subscription.
+
+The file will be copied to the profiles directory, validated, and activated
+as the current subscription.
+
+Examples:
+  clashctl sub import ~/Downloads/my-config.yaml
+  clashctl sub import ./ssrdog.yaml --name "My SSR Config"`,
+	Args: cobra.ExactArgs(1),
+	Run:  runSubImport,
+}
+
 var subLogCmd = &cobra.Command{
 	Use:   "log",
 	Short: "View subscription operation log",
@@ -72,10 +88,12 @@ var (
 
 func init() {
 	subAddCmd.Flags().StringVar(&subName, "name", "", "Subscription name")
+	subImportCmd.Flags().StringVar(&subName, "name", "", "Subscription display name (default: derived from filename)")
 	subUpdateCmd.Flags().BoolVar(&subAuto, "auto", false, "Auto-update mode")
 	subUpdateCmd.Flags().BoolVar(&subCron, "cron", false, "Cron mode (silent)")
 
 	subCmd.AddCommand(subAddCmd)
+	subCmd.AddCommand(subImportCmd)
 	subCmd.AddCommand(subRemoveCmd)
 	subCmd.AddCommand(subListCmd)
 	subCmd.AddCommand(subUseCmd)
@@ -148,7 +166,27 @@ func runSubAdd(cmd *cobra.Command, args []string) {
 	fmt.Printf("  %s\n", cyan(fmt.Sprintf("%d proxies", downloaded.ProxyCount)))
 
 	profilesCfg.Profiles = append(profilesCfg.Profiles, profile)
-	profilesCfg.Use = newID
+
+	// Validate before activating
+	fmt.Print("↓ Validating downloaded config... ")
+	validationErr := validateConfigFile(targetPath)
+	if validationErr != nil {
+		fmt.Printf("\n%s Validation FAILED — subscription added but NOT activated\n", yellow("⚠"))
+		fmt.Printf("  %s\n", red(validationErr.Error()))
+		fmt.Println()
+		fmt.Println(yellow("  The subscription was added (ID:") + fmt.Sprintf(" %d", newID) + yellow(") but is not active."))
+		fmt.Println(yellow("  Fix the config before switching to it."))
+		// Don't activate — keep previous active subscription
+		for _, p := range profilesCfg.Profiles {
+			if p.ID != newID {
+				profilesCfg.Use = p.ID
+				break
+			}
+		}
+	} else {
+		fmt.Println(green("✓ Valid"))
+		profilesCfg.Use = newID
+	}
 
 	if err := config.SaveProfiles(profilesPath, profilesCfg); err != nil {
 		fmt.Printf("%s Failed to save profiles: %v\n", red("✗"), err)
@@ -156,14 +194,135 @@ func runSubAdd(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Printf("  %s Added subscription: %s (ID: %d)\n", green("✓"), bold(name), newID)
-	fmt.Printf("  %s Activated as current subscription\n", green("✓"))
+	if validationErr == nil {
+		fmt.Printf("  %s Activated as current subscription\n", green("✓"))
+		// Copy to config.yaml
+		os.Remove(filepath.Join(clashResourcesDir, "config.yaml"))
+		if data, err := os.ReadFile(targetPath); err == nil {
+			os.WriteFile(filepath.Join(clashResourcesDir, "config.yaml"), data, 0644)
+		}
+	}
 	fmt.Printf("  %s Proxy reloaded\n", green("✓"))
+}
 
-	// Copy to config.yaml
-	os.Remove(filepath.Join(clashResourcesDir, "config.yaml"))
-	if data, err := os.ReadFile(targetPath); err == nil {
+func runSubImport(cmd *cobra.Command, args []string) {
+	sourcePath := args[0]
+
+	// Expand ~ to home directory
+	sourcePath = expandPath(sourcePath)
+
+	// Validate source file exists
+	if !fileExists(sourcePath) {
+		fmt.Printf("%s File not found: %s\n", red("✗"), sourcePath)
+		return
+	}
+
+	// Read and validate YAML
+	fmt.Print("↓ Importing config file... ")
+	data, err := os.ReadFile(sourcePath)
+	if err != nil {
+		fmt.Printf("\n%s Cannot read file: %v\n", red("✗"), err)
+		return
+	}
+
+	if len(data) == 0 {
+		fmt.Printf("\n%s File is empty\n", red("✗"))
+		return
+	}
+
+	// Validate YAML syntax
+	var yamlCheck map[string]interface{}
+	if err := yaml.Unmarshal(data, &yamlCheck); err != nil {
+		fmt.Printf("\n%s Invalid YAML: %v\n", red("✗"), err)
+		return
+	}
+
+	// Determine name
+	name := subName
+	if name == "" {
+		name = extractNameFromFile(sourcePath)
+	}
+
+	// Count proxies
+	proxyCount := strings.Count(string(data), "name:")
+	fmt.Printf("\r↓ Importing config file... %s\n", green("✓ File valid"))
+	fmt.Printf("  %s\n", cyan(fmt.Sprintf("%d proxies detected", proxyCount)))
+
+	// Set up paths
+	profilesPath := filepath.Join(clashResourcesDir, "profiles.yaml")
+	profilesDir := filepath.Join(clashResourcesDir, "profiles")
+	ensureDir(profilesDir)
+
+	profilesCfg, err := config.LoadProfiles(profilesPath)
+	if err != nil {
+		profilesCfg = &config.ProfilesConfig{Use: 0, Profiles: []config.Profile{}}
+	}
+
+	// Determine new ID
+	newID := 1
+	for _, p := range profilesCfg.Profiles {
+		if p.ID >= newID {
+			newID = p.ID + 1
+		}
+	}
+
+	targetPath := filepath.Join(profilesDir, fmt.Sprintf("%d.yaml", newID))
+
+	// Copy file
+	if err := os.WriteFile(targetPath, data, 0644); err != nil {
+		fmt.Printf("%s Failed to copy file: %v\n", red("✗"), err)
+		return
+	}
+
+	// Build profile entry — store absolute source path as url for provenance
+	absSource, _ := filepath.Abs(sourcePath)
+	profile := config.Profile{
+		ID:      newID,
+		Path:    targetPath,
+		URL:     "file://" + absSource,
+		Name:    name,
+		Updated: config.Now(),
+	}
+
+	profilesCfg.Profiles = append(profilesCfg.Profiles, profile)
+
+	// Validate before activating — invalid config should not break the proxy
+	fmt.Print("↓ Validating imported config... ")
+	validationErr := validateConfigFile(targetPath)
+	if validationErr != nil {
+		// Import but DO NOT activate
+		fmt.Printf("\n%s Validation FAILED — subscription imported but NOT activated\n", yellow("⚠"))
+		fmt.Printf("  %s\n", red(validationErr.Error()))
+		fmt.Println()
+		fmt.Println(yellow("  The config was imported (ID:") + fmt.Sprintf(" %d", newID) + yellow(") but is not active."))
+		fmt.Println(yellow("  Fix the config before switching to it:"))
+		fmt.Printf("  %s\n", cyan(fmt.Sprintf("clashctl sub use %d", newID)))
+		profilesCfg.Use = 0 // Explicitly not active
+		// Determine and set use to the first valid subscription, or 0
+		for _, p := range profilesCfg.Profiles {
+			if p.ID != newID {
+				profilesCfg.Use = p.ID
+				break
+			}
+		}
+	} else {
+		fmt.Println(green("✓ Valid"))
+		profilesCfg.Use = newID
+	}
+
+	if err := config.SaveProfiles(profilesPath, profilesCfg); err != nil {
+		fmt.Printf("%s Failed to save profiles: %v\n", red("✗"), err)
+		return
+	}
+
+	fmt.Printf("  %s Added subscription: %s (ID: %d)\n", green("✓"), bold(name), newID)
+	if validationErr == nil {
+		fmt.Printf("  %s Activated as current subscription\n", green("✓"))
+		// Copy to config.yaml for kernel use
+		os.Remove(filepath.Join(clashResourcesDir, "config.yaml"))
 		os.WriteFile(filepath.Join(clashResourcesDir, "config.yaml"), data, 0644)
 	}
+	fmt.Printf("  %s File copied to: %s\n", green("✓"), targetPath)
 }
 
 func runSubRemove(cmd *cobra.Command, args []string) {
@@ -271,18 +430,33 @@ func runSubUse(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	found := false
-	for _, p := range profilesCfg.Profiles {
-		if p.ID == id {
-			found = true
+	// Find the target profile
+	var targetProfile *config.Profile
+	for i := range profilesCfg.Profiles {
+		if profilesCfg.Profiles[i].ID == id {
+			targetProfile = &profilesCfg.Profiles[i]
 			break
 		}
 	}
-	if !found {
+	if targetProfile == nil {
 		fmt.Printf("%s Subscription ID %d not found\n", red("✗"), id)
 		return
 	}
 
+	// Validate config BEFORE switching — prevents broken config from killing network
+	fmt.Print("↓ Validating config before switching... ")
+	if err := validateConfigFile(targetProfile.Path); err != nil {
+		fmt.Printf("\n%s Config validation FAILED — subscription NOT switched\n", red("✗"))
+		fmt.Printf("  %s\n", red(err.Error()))
+		fmt.Println()
+		fmt.Println(yellow("⚠ The current subscription is unchanged. Your proxy is still working."))
+		fmt.Println(yellow("  To fix the broken config, edit the file or remove the subscription:"))
+		fmt.Printf("  %s\n", cyan(fmt.Sprintf("clashctl sub remove %d", id)))
+		return
+	}
+	fmt.Println(green("✓ Valid"))
+
+	// Config is valid — safe to switch
 	profilesCfg.Use = id
 	if err := config.SaveProfiles(profilesPath, profilesCfg); err != nil {
 		fmt.Printf("%s Failed to save profiles: %v\n", red("✗"), err)
@@ -290,18 +464,14 @@ func runSubUse(cmd *cobra.Command, args []string) {
 	}
 
 	// Copy to config.yaml
-	for _, p := range profilesCfg.Profiles {
-		if p.ID == id {
-			data, err := os.ReadFile(p.Path)
-			if err == nil {
-				os.WriteFile(filepath.Join(clashResourcesDir, "config.yaml"), data, 0644)
-			}
-			fmt.Printf("%s Switched to: %s (ID: %d)\n", green("✓"), bold(p.Name), id)
-			if isRunning() {
-				fmt.Println(yellow("⚠ Run 'clashctl restart' to apply changes."))
-			}
-			return
-		}
+	os.Remove(filepath.Join(clashResourcesDir, "config.yaml"))
+	if data, err := os.ReadFile(targetProfile.Path); err == nil {
+		os.WriteFile(filepath.Join(clashResourcesDir, "config.yaml"), data, 0644)
+	}
+
+	fmt.Printf("%s Switched to: %s (ID: %d)\n", green("✓"), bold(targetProfile.Name), id)
+	if isRunning() {
+		fmt.Println(yellow("⚠ Run 'clashctl restart' to apply changes."))
 	}
 }
 
@@ -394,6 +564,22 @@ func extractNameFromURL(url string) string {
 		url = url[:idx]
 	}
 	return url
+}
+
+func extractNameFromFile(path string) string {
+	name := filepath.Base(path)
+	// Strip extension(s): my-config.yaml → my-config, config.yml → config
+	for {
+		ext := filepath.Ext(name)
+		if ext == "" {
+			break
+		}
+		name = strings.TrimSuffix(name, ext)
+	}
+	if name == "" {
+		return "Imported Config"
+	}
+	return name
 }
 
 func truncateStr(s string, max int) string {

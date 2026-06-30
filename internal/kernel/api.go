@@ -44,6 +44,10 @@ func (c *APIClient) GetVersion() (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API returned status code: %d", resp.StatusCode)
+	}
+
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
@@ -147,13 +151,6 @@ func (pr *ProxiesResponse) GetGroups() []ProxyGroup {
 // SwitchProxy switches the selected proxy in a group
 func (c *APIClient) SwitchProxy(group, proxy string) error {
 	body := fmt.Sprintf(`{"name":"%s"}`, proxy)
-	resp, err := c.doRequest("PUT", "/proxies/"+group, nil)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	// Actually send the PUT with body
 	url := strings.TrimRight(c.BaseURL, "/") + "/proxies/" + group
 	req, err := http.NewRequest("PUT", url, strings.NewReader(body))
 	if err != nil {
@@ -163,11 +160,11 @@ func (c *APIClient) SwitchProxy(group, proxy string) error {
 		req.Header.Set("Authorization", "Bearer "+c.Secret)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp2, err := c.client.Do(req)
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return err
 	}
-	defer resp2.Body.Close()
+	defer resp.Body.Close()
 	return nil
 }
 

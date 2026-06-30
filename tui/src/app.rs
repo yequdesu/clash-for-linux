@@ -6,7 +6,7 @@ use ratatui::Frame;
 use std::sync::mpsc;
 
 use crate::api::{ApiClient, Connection, ProxyGroup, TrafficInfo};
-use crate::background::{BackgroundEffect, NoopBackground};
+use crate::background::{BackgroundEffect, ParticleField};
 use crate::config::Config;
 use crate::event::DataEvent;
 use crate::theme::CLASH_THEME;
@@ -125,7 +125,7 @@ impl App {
             confirm_timer: 0,
 
             window: WindowState::load(),
-            background: Box::new(NoopBackground),
+            background: Box::new(ParticleField::new()),
 
             api,
             config,
@@ -482,13 +482,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     frame.render_widget(win_border, win);
 
     let inner = win.inner(Margin::new(1, 0));
-    let title = format!(" Clash-Terminal · {} ", app.tab.label());
-    let title_span = Span::styled(title.clone(), Style::default().fg(CLASH_THEME.primary).bold());
-    let decor = "─".repeat(inner.width.saturating_sub(title.len() as u16) as usize);
-    let title_line = Line::from(vec![
-        title_span,
-        Span::styled(decor, Style::default().fg(CLASH_THEME.muted)),
-    ]);
+    let title = format!("  Clash-Terminal  ·  {}  ", app.tab.label());
+    let pad = if inner.width > title.len() as u16 {
+        (inner.width - title.len() as u16) / 2
+    } else {
+        0
+    };
+    let centered = format!("{}{}", " ".repeat(pad as usize), title);
+    let title_line = Line::from(Span::styled(centered, Style::default().fg(CLASH_THEME.primary).bold()));
     frame.render_widget(
         Paragraph::new(title_line).style(Style::default().bg(CLASH_THEME.bg)),
         Rect::new(win.x + 1, win.y, win.width.saturating_sub(2), 1),
@@ -519,19 +520,31 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if app.show_help {
         render_help(frame, content_area);
     } else {
-        match app.tab {
-            Tab::Overview => render_overview(frame, content_area, app),
-            Tab::Proxies => render_proxies(frame, content_area, app),
-            Tab::Subscriptions => render_subscriptions(frame, content_area, app),
-            Tab::Connections => render_connections(frame, content_area, app),
-            Tab::Logs => render_logs(frame, content_area, app),
-        }
+        // 使用新的 Tab trait 渲染标签页
+        let tab: Box<dyn crate::tabs::Tab> = match app.tab {
+            Tab::Overview => Box::new(crate::tabs::OverviewTab),
+            Tab::Proxies => Box::new(crate::tabs::ProxiesTab),
+            Tab::Subscriptions => Box::new(crate::tabs::SubscriptionsTab),
+            Tab::Connections => Box::new(crate::tabs::ConnectionsTab),
+            Tab::Logs => Box::new(crate::tabs::LogsTab),
+        };
+        tab.render(frame, content_area, app);
     }
 
-    if let Some(ref err) = app.error_msg.clone() {
-        let error_area = Rect::new(content_area.x, content_area.y + content_area.height.saturating_sub(1), content_area.width, 1);
-        let msg = Span::styled(err, Style::default().fg(CLASH_THEME.danger).bg(CLASH_THEME.bg));
-        frame.render_widget(Paragraph::new(Line::from(msg)), error_area);
+    if let Some(ref err) = app.error_msg {
+        let w = (err.len() + 4).min(content_area.width as usize) as u16;
+        let overlay_area = Rect::new(
+            content_area.x + content_area.width.saturating_sub(w + 2),
+            content_area.y,
+            w + 2,
+            1,
+        );
+        fill_area(frame, overlay_area, CLASH_THEME.danger);
+        let msg = Span::styled(
+            format!(" {} ", err),
+            Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.danger),
+        );
+        frame.render_widget(Paragraph::new(Line::from(msg)), overlay_area);
     }
 
     render_status_bar(frame, chunks[2], app);
@@ -571,9 +584,9 @@ fn render_overview(frame: &mut Frame, area: Rect, app: &mut App) {
 
     // Traffic + Current Proxy row
     let mid = Layout::horizontal([
-        Constraint::Ratio(1, 4),
-        Constraint::Ratio(2, 4),
-        Constraint::Ratio(1, 4),
+        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 3),
     ])
     .split(rows[1]);
 
@@ -920,11 +933,9 @@ fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let active_id = app.sub_active_id;
 
+    let card_h = 6u16;
     let mut y = 0u16;
     for (i, sub) in app.subscriptions.iter().enumerate() {
-        // card: 1 top border + 1 header + 2 detail + 1 bottom border = 5 lines
-        // plus 1 line gap after each card
-        let card_h = 5u16;
         if y + card_h > list.height {
             break;
         }
@@ -932,38 +943,72 @@ fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
         let is_active = sub.id == active_id;
         let is_sel = i == app.sub_selected;
         let marker = if is_active { "●" } else { "○" };
-        let bg = if is_sel { CLASH_THEME.primary } else { CLASH_THEME.surface };
+        let status_display = if is_active { "Active" } else { "Ready" };
+        let status_color = if is_active { CLASH_THEME.accent } else { CLASH_THEME.muted };
+        let border_color = if is_sel { CLASH_THEME.border_focused } else { CLASH_THEME.border };
+        let bg = if is_sel { CLASH_THEME.surface_alt } else { CLASH_THEME.surface };
 
-        let card = Block::default()
+        let card_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(if is_sel { CLASH_THEME.accent } else { CLASH_THEME.border }))
+            .border_style(Style::default().fg(border_color))
             .style(Style::default().bg(bg));
-        let card_area = Rect::new(list.x + 1, list.y + y, list.width.saturating_sub(2), card_h);
-        frame.render_widget(card, card_area);
+        let card_area = Rect::new(list.x + 2, list.y + y, list.width.saturating_sub(4), card_h);
+        frame.render_widget(card_block, card_area);
         let inner = card_area.inner(Margin::new(1, 1));
 
-        // Header: marker + name
-        let hdr = format!(" {} {} (ID: {})", marker, sub.name, sub.id);
+        let hdr = format!(" {} ID {} │ {}", marker, sub.id, sub.name);
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(hdr, Style::default().fg(if is_active { CLASH_THEME.accent } else { CLASH_THEME.text })))),
-            Rect::new(inner.x, inner.y, inner.width, 1),
+            Paragraph::new(Line::from(Span::styled(
+                hdr,
+                Style::default().fg(if is_active { CLASH_THEME.accent } else { CLASH_THEME.text }).bold(),
+            ))),
+            Rect::new(inner.x, inner.y, inner.width.saturating_sub(1), 1),
         );
-        // Detail line 1: URL
+
         let url_short = crate::widgets::table::truncate(&sub.url, inner.width as usize - 6);
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(format!(" URL: {}", url_short), Style::default().fg(CLASH_THEME.muted)))),
+            Paragraph::new(Line::from(Span::styled(
+                format!(" URL: {}", url_short),
+                Style::default().fg(CLASH_THEME.muted),
+            ))),
             Rect::new(inner.x, inner.y + 1, inner.width, 1),
         );
-        // Detail line 2: proxies + updated + status
-        let detail = format!(" Proxies: {}  |  Status: {}  |  Updated: {}",
-            sub.proxies_count, sub.status,
-            if sub.updated != "0" && !sub.updated.is_empty() { &sub.updated } else { "—" });
+
+        let line2_spans = vec![
+            Span::styled(format!(" Proxies: {} ", sub.proxies_count), Style::default().fg(CLASH_THEME.text)),
+            Span::styled("│  ", Style::default().fg(CLASH_THEME.border)),
+            Span::styled(format!("Updated: {}  ", sub.updated), Style::default().fg(CLASH_THEME.muted)),
+            Span::styled("│  ", Style::default().fg(CLASH_THEME.border)),
+            Span::styled(format!("Status: {}", status_display), Style::default().fg(status_color)),
+        ];
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(detail, Style::default().fg(CLASH_THEME.muted)))),
+            Paragraph::new(Line::from(line2_spans)),
             Rect::new(inner.x, inner.y + 2, inner.width, 1),
         );
 
-        y += card_h + 1; // card height + 1 line gap
+        let interval_display = if sub.interval > 0 {
+            let hours = sub.interval / 3600;
+            if hours > 0 { format!("{}h", hours) } else { format!("{}m", sub.interval / 60) }
+        } else {
+            "Off".into()
+        };
+        let traffic_display = if sub.total > 0 {
+            format!("{} / {}", format_bytes(sub.download), format_bytes(sub.total))
+        } else if sub.download > 0 {
+            format_bytes(sub.download)
+        } else {
+            "—".into()
+        };
+        let line3 = format!(
+            " Traffic: {}  │  Expire: {}  │  Update: {}",
+            traffic_display, sub.expire, interval_display,
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(line3, Style::default().fg(CLASH_THEME.muted)))),
+            Rect::new(inner.x, inner.y + 3, inner.width, 1),
+        );
+
+        y += card_h + 1;
     }
     render_sub_help(frame, help_area);
 }
@@ -1015,12 +1060,13 @@ fn render_connections(frame: &mut Frame, area: Rect, app: &mut App) {
         })
         .collect();
 
-    crate::widgets::table::render_simple_table(
+    crate::widgets::table::render_weighted_table(
         frame, table_area,
         &headers.iter().map(|s| *s).collect::<Vec<_>>(),
         &rows,
         &mut app.connection_state,
         app.connection_selected,
+        &[40, 15, 30, 15],
     );
     render_conn_help(frame, help_area);
 }
@@ -1041,14 +1087,31 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &App) {
     let log_area = Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(2));
     let help_area = Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1);
 
-    let level_header = format!(
-        " Level: [{}] INFO WARN ERROR DEBUG  |  {}  |  {} lines",
-        app.log_level_filter,
-        if app.log_paused { "⏸ Paused" } else { "▶ Live" },
-        app.logs.len(),
-    );
+    let level_active = Style::default().fg(CLASH_THEME.primary).bold();
+    let level_inactive = Style::default().fg(CLASH_THEME.muted);
+    let all = format_level_span("ALL", &app.log_level_filter, level_active, level_inactive);
+    let info = format_level_span("INFO", &app.log_level_filter, level_active, level_inactive);
+    let warn = format_level_span("WARN", &app.log_level_filter, level_active, level_inactive);
+    let error = format_level_span("ERROR", &app.log_level_filter, level_active, level_inactive);
+    let debug = format_level_span("DEBUG", &app.log_level_filter, level_active, level_inactive);
+
+    let pause_state = if app.log_paused { "⏸ Paused" } else { "▶ Live" };
+    let level_line = Line::from(vec![
+        Span::styled(" Level: ", level_inactive),
+        Span::styled("[", level_inactive),
+        all,
+        Span::styled("] ", level_inactive),
+        info,
+        Span::styled(" ", level_inactive),
+        warn,
+        Span::styled(" ", level_inactive),
+        error,
+        Span::styled(" ", level_inactive),
+        debug,
+        Span::styled(format!("  |  {}  |  {} lines", pause_state, app.logs.len()), level_inactive),
+    ]);
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(level_header, Style::default().fg(CLASH_THEME.muted)))),
+        Paragraph::new(level_line).style(Style::default().bg(CLASH_THEME.bg)),
         level_hdr,
     );
 
@@ -1072,7 +1135,7 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
-    let lines: Vec<Line> = shown.iter().map(|(idx, l)| {
+    let lines: Vec<Line> = shown.iter().map(|(_idx, l)| {
         let color = if l.starts_with("[TUI]") {
             CLASH_THEME.warning
         } else if l.contains("level=error") || l.contains("ERROR") || l.contains("fail") {
@@ -1084,23 +1147,23 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             CLASH_THEME.text
         };
-        Line::from(Span::styled(l.clone(), Style::default().fg(color)))
+        Line::from(Span::styled((*l).clone(), Style::default().fg(color)))
     }).collect();
 
     frame.render_widget(Paragraph::new(lines).style(Style::default().bg(CLASH_THEME.surface)), log_area);
 
     // Scrollbar on the right edge
-    if total > visible_h && visible_h > 0 {
-        let sb_x = log_area.x + log_area.width.saturating_sub(1);
+    if total > visible_h && visible_h > 0 && log_area.width >= 3 {
+        let sb_x = log_area.x + log_area.width.saturating_sub(2);
         let sb_h = log_area.height;
         let thumb_start = (scroll as f64 / total as f64 * sb_h as f64) as u16;
-        let thumb_size = (visible_h as f64 / total as f64 * sb_h as f64).max(1.0) as u16;
+        let thumb_size = ((visible_h as f64 / total as f64 * sb_h as f64) as u16).max(1);
         for sy in 0..sb_h {
-            let ch = if sy >= thumb_start && sy < thumb_start + thumb_size { "█" } else { "│" };
-            let color = if sy >= thumb_start && sy < thumb_start + thumb_size {
-                CLASH_THEME.primary
+            let is_thumb = sy >= thumb_start && sy < thumb_start + thumb_size;
+            let (ch, color) = if is_thumb {
+                ("██", CLASH_THEME.scrollbar_thumb)
             } else {
-                CLASH_THEME.border
+                ("░░", CLASH_THEME.scrollbar_track)
             };
             frame.buffer_mut().set_string(sb_x, log_area.y + sy, ch, Style::default().fg(color));
         }
@@ -1197,17 +1260,39 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let status_color = if app.kernel_running { CLASH_THEME.accent } else { CLASH_THEME.danger };
     let status_text = if app.kernel_running { "Running" } else { "Stopped" };
 
-    let line = Line::from(vec![
-        Span::styled(format!(" {} {} ", status_dot_str, status_text), Style::default().fg(status_color)),
-        Span::styled(format!("| ↑ {} ↓ {} | [q] Quit  [tab] Switch  [r] Refresh  [?] Help",
-            format_speed(app.traffic.up), format_speed(app.traffic.down)),
-            Style::default().fg(CLASH_THEME.muted)),
-    ]);
-    frame.render_widget(Paragraph::new(line).style(Style::default().bg(CLASH_THEME.bg)), area);
+    let left = format!(" {} {} | ↑ {} ↓ {} ",
+        status_dot_str, status_text,
+        format_speed(app.traffic.up), format_speed(app.traffic.down));
+    let right = "[q] Quit  [tab] Switch  [r] Refresh  [?] Help";
 
-    // Status dot
+    let left_w = left.len() as u16;
+    let right_w = right.len() as u16;
+
+    if left_w + right_w <= area.width {
+        let pad = area.width.saturating_sub(left_w + right_w);
+        let spans = vec![
+            Span::styled(left, Style::default().fg(status_color)),
+            Span::styled(format!("{}{}", " ".repeat(pad as usize), right), Style::default().fg(CLASH_THEME.muted)),
+        ];
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)).style(Style::default().bg(CLASH_THEME.bg)),
+            area,
+        );
+    } else if left_w <= area.width {
+        let line = Line::from(Span::styled(left, Style::default().fg(status_color)));
+        frame.render_widget(Paragraph::new(line).style(Style::default().bg(CLASH_THEME.bg)), area);
+    }
+
     let dot_area = Rect::new(area.x + 1, area.y, 1, 1);
     crate::widgets::status_dot::status_dot(frame, dot_area, app.kernel_running, app.tick_count);
+}
+
+fn format_level_span<'a>(level: &'a str, current: &str, active: Style, inactive: Style) -> Span<'a> {
+    if level == current {
+        Span::styled(level, active)
+    } else {
+        Span::styled(level, inactive)
+    }
 }
 
 fn fill_area(frame: &mut Frame, area: Rect, bg: Color) {
@@ -1242,5 +1327,277 @@ fn format_speed(bytes_per_sec: u64) -> String {
         format!("{:.1} KB/s", bytes_per_sec as f64 / 1024.0)
     } else {
         format!("{} B/s", bytes_per_sec)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::{ConnectionMetadata, MemoryInfo, ProxiesResponse};
+    use std::sync::mpsc;
+
+    fn create_test_app() -> App {
+        let (tx, _rx) = mpsc::channel();
+        let config = Config::load();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        App::new(config, rt.handle().clone(), tx)
+    }
+
+    #[test]
+    fn test_app_initialization() {
+        let app = create_test_app();
+
+        assert_eq!(app.tab, Tab::Overview);
+        assert!(!app.should_quit);
+        assert!(!app.show_help);
+        assert!(app.error_msg.is_none());
+        assert_eq!(app.tick_count, 0);
+        assert!(!app.kernel_running);
+        assert_eq!(app.kernel_version, "");
+        assert_eq!(app.kernel_mode, "rule");
+        assert_eq!(app.traffic.up, 0);
+        assert_eq!(app.traffic.down, 0);
+        assert!(app.proxy_groups.is_empty());
+        assert!(app.connections.is_empty());
+        assert!(app.logs.is_empty());
+        assert!(app.subscriptions.is_empty());
+    }
+
+    #[test]
+    fn test_tab_navigation() {
+        let mut app = create_test_app();
+
+        assert_eq!(app.tab, Tab::Overview);
+
+        app.next_tab();
+        assert_eq!(app.tab, Tab::Proxies);
+
+        app.next_tab();
+        assert_eq!(app.tab, Tab::Subscriptions);
+
+        app.next_tab();
+        assert_eq!(app.tab, Tab::Connections);
+
+        app.next_tab();
+        assert_eq!(app.tab, Tab::Logs);
+
+        // 循环回到 Overview
+        app.next_tab();
+        assert_eq!(app.tab, Tab::Overview);
+    }
+
+    #[test]
+    fn test_tab_navigation_reverse() {
+        let mut app = create_test_app();
+
+        app.prev_tab();
+        assert_eq!(app.tab, Tab::Logs);
+
+        app.prev_tab();
+        assert_eq!(app.tab, Tab::Connections);
+
+        app.prev_tab();
+        assert_eq!(app.tab, Tab::Subscriptions);
+
+        app.prev_tab();
+        assert_eq!(app.tab, Tab::Proxies);
+
+        app.prev_tab();
+        assert_eq!(app.tab, Tab::Overview);
+    }
+
+    #[test]
+    fn test_tab_navigation_cycle() {
+        let mut app = create_test_app();
+
+        // 向前导航 5 次应该回到起点
+        for _ in 0..5 {
+            app.next_tab();
+        }
+        assert_eq!(app.tab, Tab::Overview);
+
+        // 向后导航 5 次应该回到起点
+        for _ in 0..5 {
+            app.prev_tab();
+        }
+        assert_eq!(app.tab, Tab::Overview);
+    }
+
+    #[test]
+    fn test_apply_data_event_traffic() {
+        let mut app = create_test_app();
+
+        let traffic = TrafficInfo { up: 1024, down: 2048 };
+        app.apply_data_event(DataEvent::TrafficFetched(Ok(traffic)));
+
+        assert_eq!(app.traffic.up, 1024);
+        assert_eq!(app.traffic.down, 2048);
+        assert_eq!(app.traffic_history.len(), 1);
+        // 流量历史只保存 down 值
+        assert_eq!(app.traffic_history[0], 2048);
+    }
+
+    #[test]
+    fn test_apply_data_event_traffic_history_limit() {
+        let mut app = create_test_app();
+
+        // 添加 61 个流量事件
+        for i in 0..61 {
+            let traffic = TrafficInfo { up: i, down: i };
+            app.apply_data_event(DataEvent::TrafficFetched(Ok(traffic)));
+        }
+
+        // 应该只保留最近 60 个
+        assert_eq!(app.traffic_history.len(), 60);
+    }
+
+    #[test]
+    fn test_apply_data_event_proxies() {
+        let mut app = create_test_app();
+
+        let proxies = ProxiesResponse {
+            proxies: std::collections::HashMap::new(),
+        };
+        app.apply_data_event(DataEvent::ProxiesFetched(Ok(proxies)));
+
+        assert_eq!(app.proxy_groups.len(), 0);
+    }
+
+    #[test]
+    fn test_apply_data_event_connections() {
+        let mut app = create_test_app();
+
+        let connections = vec![
+            Connection {
+                id: "conn1".to_string(),
+                metadata: Some(ConnectionMetadata {
+                    network: Some("tcp".to_string()),
+                    conn_type: Some("HTTP".to_string()),
+                    host: Some("example.com".to_string()),
+                }),
+                upload: 1024,
+                download: 2048,
+                start: Some("2024-01-01T00:00:00Z".to_string()),
+                chains: vec!["Proxy".to_string()],
+                rule: Some("DOMAIN".to_string()),
+                rule_payload: Some("example.com".to_string()),
+                upload_speed: Some(512),
+                download_speed: Some(1024),
+            },
+        ];
+        app.apply_data_event(DataEvent::ConnectionsFetched(Ok(connections)));
+
+        assert_eq!(app.connections.len(), 1);
+        assert_eq!(app.connections[0].id, "conn1");
+    }
+
+    #[test]
+    fn test_apply_data_event_logs() {
+        let mut app = create_test_app();
+
+        let logs = vec!["log1".to_string(), "log2".to_string()];
+        app.apply_data_event(DataEvent::LogsFetched(Ok(logs)));
+
+        assert_eq!(app.logs.len(), 2);
+        assert_eq!(app.logs[0], "log1");
+        assert_eq!(app.logs[1], "log2");
+    }
+
+    #[test]
+    fn test_apply_data_event_logs_limit() {
+        let mut app = create_test_app();
+
+        // 添加 1001 条日志
+        let logs: Vec<String> = (0..1001).map(|i| format!("log{}", i)).collect();
+        app.apply_data_event(DataEvent::LogsFetched(Ok(logs)));
+
+        // 应该只保留最近 1000 条
+        assert_eq!(app.logs.len(), 1000);
+    }
+
+    #[test]
+    fn test_apply_data_event_memory() {
+        let mut app = create_test_app();
+
+        let memory = MemoryInfo {
+            inuse: Some(1048576),
+            oslimit: Some(2097152),
+        };
+        app.apply_data_event(DataEvent::MemoryFetched(Ok(memory)));
+
+        assert_eq!(app.memory_bytes, 1048576);
+        assert_eq!(app.memory_limit, 2097152);
+    }
+
+    #[test]
+    fn test_apply_data_event_version() {
+        let mut app = create_test_app();
+
+        app.apply_data_event(DataEvent::VersionFetched(Ok("v1.19.17".to_string())));
+
+        assert_eq!(app.kernel_version, "v1.19.17");
+        assert!(app.kernel_running);
+    }
+
+    #[test]
+    fn test_apply_data_event_error() {
+        let mut app = create_test_app();
+
+        app.apply_data_event(DataEvent::VersionFetched(Err("test error".to_string())));
+
+        assert!(app.error_msg.is_some());
+    }
+
+    #[test]
+    fn test_tick() {
+        let mut app = create_test_app();
+
+        assert_eq!(app.tick_count, 0);
+
+        app.on_tick();
+        assert_eq!(app.tick_count, 1);
+
+        app.on_tick();
+        assert_eq!(app.tick_count, 2);
+    }
+
+    #[test]
+    fn test_confirm_action_timer() {
+        let mut app = create_test_app();
+
+        app.confirm_action = true;
+        app.confirm_timer = 0;
+
+        // 运行 60 次 tick
+        for _ in 0..60 {
+            app.on_tick();
+        }
+
+        assert!(app.confirm_action);
+        assert_eq!(app.confirm_timer, 60);
+
+        // 运行第 61 次 tick
+        app.on_tick();
+
+        assert!(!app.confirm_action);
+        assert_eq!(app.confirm_timer, 0);
+    }
+
+    #[test]
+    fn test_format_bytes() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(500), "500 B");
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+        assert_eq!(format_bytes(1048576), "1.0 MB");
+        assert_eq!(format_bytes(1073741824), "1.0 GB");
+    }
+
+    #[test]
+    fn test_format_speed() {
+        assert_eq!(format_speed(0), "0 B/s");
+        assert_eq!(format_speed(500), "500 B/s");
+        assert_eq!(format_speed(1024), "1.0 KB/s");
+        assert_eq!(format_speed(1048576), "1.0 MB/s");
     }
 }

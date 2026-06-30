@@ -123,6 +123,12 @@ pub struct SubscriptionInfo {
     pub status: String,
     pub updated: String,
     pub proxies_count: usize,
+    pub upload: u64,
+    pub download: u64,
+    pub total: u64,
+    pub expire: String,
+    pub interval: u64,
+    pub path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -285,10 +291,17 @@ impl ApiClient {
         let mut subs = Vec::new();
         let mut active_id = 0usize;
         let mut in_profile = false;
+        let mut in_extra = false;
         let mut current_id = 0usize;
         let mut current_name = String::new();
         let mut current_url = String::new();
         let mut current_updated = String::new();
+        let mut current_path = String::new();
+        let mut current_interval: u64 = 0;
+        let mut current_upload: u64 = 0;
+        let mut current_download: u64 = 0;
+        let mut current_total: u64 = 0;
+        let mut current_expire: i64 = 0;
 
         for line in content.lines() {
             let raw = line;
@@ -298,44 +311,75 @@ impl ApiClient {
             if indent == 0 && trimmed.starts_with("use:") {
                 active_id = trimmed.strip_prefix("use:").unwrap_or("0").trim().parse().unwrap_or(0);
             } else if indent <= 4 && trimmed.starts_with("- id:") {
-                // Save previous profile
                 if in_profile && current_id > 0 {
-                    subs.push(SubscriptionInfo {
-                        id: current_id,
-                        name: current_name.clone(),
-                        url: current_url.clone(),
-                        status: String::from("ready"),
-                        updated: current_updated.clone(),
-                        proxies_count: 0,
-                    });
+                    subs.push(build_sub_info(
+                        current_id, &current_name, &current_url, &current_path,
+                        &current_updated, current_interval,
+                        current_upload, current_download, current_total,
+                        current_expire, active_id,
+                    ));
                 }
                 in_profile = true;
+                in_extra = false;
                 current_id = trimmed.strip_prefix("- id:").unwrap_or("0").trim().parse().unwrap_or(0);
                 current_name.clear();
                 current_url.clear();
+                current_path.clear();
                 current_updated.clear();
-            } else if in_profile && trimmed.starts_with("name:") {
-                current_name = trimmed.strip_prefix("name:").unwrap_or("").trim().trim_matches('"').to_string();
-            } else if in_profile && trimmed.starts_with("url:") {
-                current_url = trimmed.strip_prefix("url:").unwrap_or("").trim().to_string();
-            } else if in_profile && trimmed.starts_with("updated:") {
-                let ts: i64 = trimmed.strip_prefix("updated:").unwrap_or("0").trim().parse().unwrap_or(0);
-                if ts > 0 {
-                    current_updated = ts.to_string();
+                current_interval = 0;
+                current_upload = 0;
+                current_download = 0;
+                current_total = 0;
+                current_expire = 0;
+            } else if in_profile && trimmed.starts_with("extra:") {
+                in_extra = true;
+            } else if in_extra && indent > 8 {
+            } else if in_extra && trimmed.starts_with("- ") || trimmed.starts_with("path:") || trimmed.starts_with("name:") {
+                in_extra = false;
+            }
+
+            if !in_extra {
+                if in_profile && trimmed.starts_with("name:") {
+                    current_name = trimmed.strip_prefix("name:").unwrap_or("").trim().trim_matches('"').to_string();
+                } else if in_profile && trimmed.starts_with("url:") {
+                    current_url = trimmed.strip_prefix("url:").unwrap_or("").trim().to_string();
+                } else if in_profile && trimmed.starts_with("updated:") {
+                    let ts: i64 = trimmed.strip_prefix("updated:").unwrap_or("0").trim().parse().unwrap_or(0);
+                    if ts > 0 {
+                        current_updated = ts.to_string();
+                    }
+                } else if in_profile && trimmed.starts_with("path:") {
+                    current_path = trimmed.strip_prefix("path:").unwrap_or("").trim().to_string();
+                } else if in_profile && trimmed.starts_with("interval:") {
+                    current_interval = trimmed.strip_prefix("interval:").unwrap_or("0").trim().parse().unwrap_or(0);
+                }
+            } else {
+                let inner = trimmed.trim_start_matches('-').trim();
+                if inner.starts_with("upload:") {
+                    current_upload = inner.strip_prefix("upload:").unwrap_or("0").trim().parse().unwrap_or(0);
+                } else if inner.starts_with("download:") {
+                    current_download = inner.strip_prefix("download:").unwrap_or("0").trim().parse().unwrap_or(0);
+                } else if inner.starts_with("total:") {
+                    current_total = inner.strip_prefix("total:").unwrap_or("0").trim().parse().unwrap_or(0);
+                } else if inner.starts_with("expire:") {
+                    current_expire = inner.strip_prefix("expire:").unwrap_or("0").trim().parse().unwrap_or(0);
                 }
             }
         }
-        // Save last
+
         if in_profile && current_id > 0 {
-            subs.push(SubscriptionInfo {
-                id: current_id,
-                name: current_name,
-                url: current_url,
-                status: String::from("ready"),
-                updated: current_updated,
-                proxies_count: 0,
-            });
+            subs.push(build_sub_info(
+                current_id, &current_name, &current_url, &current_path,
+                &current_updated, current_interval,
+                current_upload, current_download, current_total,
+                current_expire, active_id,
+            ));
         }
+
+        for sub in &mut subs {
+            sub.proxies_count = count_proxies_in_yaml(&sub.path).await;
+        }
+
         Ok((subs, active_id))
     }
 
@@ -454,5 +498,528 @@ impl ProxiesResponse {
         }
         groups.sort_by(|a, b| a.name.cmp(&b.name));
         groups
+    }
+}
+
+fn build_sub_info(
+    id: usize, name: &str, url: &str, path: &str,
+    updated: &str, interval: u64,
+    upload: u64, download: u64, total: u64,
+    expire_ts: i64, active_id: usize,
+) -> SubscriptionInfo {
+    let status = if id == active_id { "active" } else { "ready" };
+    let expire = if expire_ts > 0 {
+        let dt = chrono::DateTime::from_timestamp(expire_ts, 0);
+        dt.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_else(|| "—".into())
+    } else {
+        "—".into()
+    };
+    let updated_display = if !updated.is_empty() && updated != "0" {
+        let ts: i64 = updated.parse().unwrap_or(0);
+        if ts > 0 {
+            chrono::DateTime::from_timestamp(ts, 0)
+                .map(|d| d.format("%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| "—".into())
+        } else {
+            "—".into()
+        }
+    } else {
+        "—".into()
+    };
+    SubscriptionInfo {
+        id, name: name.to_string(), url: url.to_string(),
+        path: path.to_string(), status: status.to_string(),
+        updated: updated_display, proxies_count: 0,
+        upload, download, total, expire,
+        interval,
+    }
+}
+
+async fn count_proxies_in_yaml(path: &str) -> usize {
+    let expanded = if path.starts_with('~') {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        path.replacen('~', &home, 1)
+    } else {
+        path.to_string()
+    };
+    let content = match tokio::fs::read_to_string(&expanded).await {
+        Ok(c) => c,
+        Err(_) => return 0,
+    };
+    let mut count = 0usize;
+    let mut in_proxies = false;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("proxies:") {
+            in_proxies = true;
+            continue;
+        }
+        if in_proxies {
+            if !trimmed.starts_with('-') && !trimmed.is_empty() && !line.starts_with(' ') {
+                in_proxies = false;
+                continue;
+            }
+            if trimmed.starts_with("- ") || trimmed == "-" {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::{MockServer, Mock, ResponseTemplate};
+    use wiremock::matchers::{method, path};
+
+    #[tokio::test]
+    async fn test_get_version() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        // 准备 mock 响应
+        let response_body = serde_json::json!({
+            "version": "v1.19.17"
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/version"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let version = client.get_version().await.unwrap();
+
+        // 验证结果
+        assert_eq!(version, "v1.19.17");
+    }
+
+    #[tokio::test]
+    async fn test_get_version_with_meta() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        // 准备 mock 响应（使用 meta 字段）
+        let response_body = serde_json::json!({
+            "meta": "v1.19.18"
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/version"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let version = client.get_version().await.unwrap();
+
+        // 验证结果
+        assert_eq!(version, "v1.19.18");
+    }
+
+    #[tokio::test]
+    async fn test_get_version_error() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/version"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let result = client.get_version().await;
+
+        // 验证返回错误
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_proxies() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        // 准备 mock 响应
+        let response_body = serde_json::json!({
+            "proxies": {
+                "Proxy": {
+                    "name": "Proxy",
+                    "type": "Selector",
+                    "now": "node1",
+                    "all": ["node1", "node2"]
+                }
+            }
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/proxies"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let proxies = client.get_proxies().await.unwrap();
+
+        // 验证结果
+        let groups = proxies.get_groups();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "Proxy");
+    }
+
+    #[tokio::test]
+    async fn test_get_proxies_error() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/proxies"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let result = client.get_proxies().await;
+
+        // 验证返回错误
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_traffic() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        // 准备 mock 响应
+        let response_body = serde_json::json!({
+            "up": 1024,
+            "down": 2048
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/traffic"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let traffic = client.get_traffic().await.unwrap();
+
+        // 验证结果
+        assert_eq!(traffic.up, 1024);
+        assert_eq!(traffic.down, 2048);
+    }
+
+    #[tokio::test]
+    async fn test_get_connections() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        // 准备 mock 响应
+        let response_body = serde_json::json!({
+            "connections": [
+                {
+                    "id": "conn1",
+                    "metadata": {
+                        "network": "tcp",
+                        "type": "HTTP",
+                        "host": "example.com"
+                    },
+                    "upload": 1024,
+                    "download": 2048,
+                    "start": "2024-01-01T00:00:00Z",
+                    "chains": ["Proxy", "node1"],
+                    "rule": "DOMAIN",
+                    "rulePayload": "example.com"
+                }
+            ]
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/connections"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let connections = client.get_connections().await.unwrap();
+
+        // 验证结果
+        assert_eq!(connections.len(), 1);
+        assert_eq!(connections[0].id, "conn1");
+        assert_eq!(connections[0].host(), "example.com");
+    }
+
+    #[tokio::test]
+    async fn test_get_connections_empty() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        // 准备 mock 响应（空连接）
+        let response_body = serde_json::json!({
+            "connections": []
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/connections"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let connections = client.get_connections().await.unwrap();
+
+        // 验证结果
+        assert_eq!(connections.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_switch_proxy() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("PUT"))
+            .and(path("/proxies/Proxy"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let result = client.switch_proxy("Proxy", "node1").await;
+
+        // 验证结果
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_switch_proxy_error() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("PUT"))
+            .and(path("/proxies/Proxy"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let result = client.switch_proxy("Proxy", "node1").await;
+
+        // 验证返回错误
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_test_delay() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/proxies/node1/delay"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&serde_json::json!({
+                "delay": 100
+            })))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let delay = client.test_delay("node1", "https://www.google.com", 5000).await.unwrap();
+
+        // 验证结果
+        assert_eq!(delay, 100);
+    }
+
+    #[tokio::test]
+    async fn test_close_connection() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("DELETE"))
+            .and(path("/connections/conn1"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let result = client.close_connection("conn1").await;
+
+        // 验证结果
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_close_all_connections() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("DELETE"))
+            .and(path("/connections"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let result = client.close_all_connections().await;
+
+        // 验证结果
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_config() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        // 准备 mock 响应
+        let response_body = serde_json::json!({
+            "mode": "Rule",
+            "mixed-port": 7890,
+            "tun": {
+                "enable": true
+            }
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/configs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let config = client.get_config().await.unwrap();
+
+        // 验证结果
+        assert_eq!(config.mode, Some("Rule".to_string()));
+        assert_eq!(config.mixed_port, Some(7890));
+        assert_eq!(config.tun.as_ref().unwrap().enable, Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_set_mode() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("PATCH"))
+            .and(path("/configs"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let result = client.set_mode("Global").await;
+
+        // 验证结果
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_memory() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        // 准备 mock 响应
+        let response_body = serde_json::json!({
+            "inuse": 1048576,
+            "oslimit": 2097152
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/memory"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端
+        let client = ApiClient::new(mock_server.uri(), String::new());
+
+        // 执行测试
+        let memory = client.get_memory().await.unwrap();
+
+        // 验证结果
+        assert_eq!(memory.inuse, Some(1048576));
+        assert_eq!(memory.oslimit, Some(2097152));
+    }
+
+    #[tokio::test]
+    async fn test_client_with_api_key() {
+        // 启动 mock 服务器
+        let mock_server = MockServer::start().await;
+
+        // 验证 Authorization 头部
+        Mock::given(method("GET"))
+            .and(path("/version"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&serde_json::json!({
+                "version": "v1.19.17"
+            })))
+            .mount(&mock_server)
+            .await;
+
+        // 创建客户端（带 API key）
+        let client = ApiClient::new(mock_server.uri(), "test-secret".to_string());
+
+        // 执行测试
+        let version = client.get_version().await.unwrap();
+
+        // 验证结果
+        assert_eq!(version, "v1.19.17");
+    }
+
+    #[tokio::test]
+    async fn test_client_connection_error() {
+        // 创建客户端（连接到不存在的服务器）
+        let client = ApiClient::new("http://localhost:1".to_string(), String::new());
+
+        // 执行测试
+        let result = client.get_version().await;
+
+        // 验证返回错误
+        assert!(result.is_err());
     }
 }

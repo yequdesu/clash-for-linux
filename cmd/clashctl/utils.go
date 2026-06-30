@@ -5,8 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yequdesu/clashctl/internal/config"
+	"github.com/yequdesu/clashctl/internal/kernel"
 )
 
 var (
@@ -89,7 +93,15 @@ func isRunning() bool {
 	if pid == "" {
 		return false
 	}
-	_, err := os.Stat(fmt.Sprintf("/proc/%s", pid))
+	pidInt, err := strconv.Atoi(pid)
+	if err != nil {
+		return false
+	}
+	return isRunningByPID(pidInt)
+}
+
+func isRunningByPID(pid int) bool {
+	_, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
 	return err == nil
 }
 
@@ -169,3 +181,42 @@ func cyan(s string) string   { return colorCyan + s + colorReset }
 func blue(s string) string   { return colorBlue + s + colorReset }
 func gray(s string) string   { return colorGray + s + colorReset }
 func bold(s string) string   { return "\033[1m" + s + "\033[0m" }
+
+// validateConfigFile validates a subscription config file by merging it with
+// mixin.yaml and running mihomo -t. Returns nil if the config is valid.
+func validateConfigFile(configPath string) error {
+	mixinPath := filepath.Join(clashResourcesDir, "mixin.yaml")
+	if !fileExists(mixinPath) {
+		// No mixin — validate the raw config directly
+		if !fileExists(configPath) {
+			return fmt.Errorf("config file not found: %s", configPath)
+		}
+	}
+
+	// Merge to a temp runtime and validate
+	tmpRuntime := filepath.Join(clashRuntimeDir, ".validate-runtime.yaml")
+	ensureDir(clashRuntimeDir)
+
+	if fileExists(mixinPath) {
+		if err := config.MergeConfig(configPath, mixinPath, tmpRuntime); err != nil {
+			return fmt.Errorf("config merge failed: %v", err)
+		}
+	} else {
+		// Copy config directly
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			return fmt.Errorf("cannot read config: %v", err)
+		}
+		if err := os.WriteFile(tmpRuntime, data, 0644); err != nil {
+			return fmt.Errorf("cannot write runtime: %v", err)
+		}
+	}
+
+	defer os.Remove(tmpRuntime)
+
+	if err := kernel.ValidateConfig(clashResourcesDir, tmpRuntime, clashBinDir); err != nil {
+		return fmt.Errorf("config validation failed: %v", err)
+	}
+
+	return nil
+}

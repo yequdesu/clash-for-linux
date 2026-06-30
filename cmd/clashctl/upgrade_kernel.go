@@ -123,10 +123,26 @@ func runUpgradeKernel(cmd *cobra.Command, args []string) {
 		fmt.Println(green("✓ Done"))
 	}
 
-	// Replace binary
-	os.Remove(mihomoPath)
-	os.Rename(tmpFile, mihomoPath)
+	// Atomic replace: backup old binary, then rename new over old
+	backupPath := mihomoPath + ".bak"
+	os.Remove(backupPath) // clean up any previous backup
+	if err := os.Rename(mihomoPath, backupPath); err != nil {
+		fmt.Printf("%s Cannot backup current binary: %v\n", red("✗"), err)
+		fmt.Printf("%s New binary saved as: %s\n", yellow("⚠"), tmpFile)
+		fmt.Println(yellow("  Manually replace and run: clashctl start"))
+		return
+	}
+
+	if err := os.Rename(tmpFile, mihomoPath); err != nil {
+		// Rename failed — restore from backup
+		fmt.Printf("%s Cannot install new binary: %v\n", red("✗"), err)
+		os.Rename(backupPath, mihomoPath)
+		fmt.Println(yellow("  Original binary restored from backup"))
+		return
+	}
+
 	os.Chmod(mihomoPath, 0755)
+	os.Remove(backupPath) // clean up backup on success
 
 	fmt.Printf("%s Mihomo kernel upgraded to %s\n", green("✓"), cyan(latestVer))
 	fmt.Println(yellow("  Run 'clashctl start' to restart the proxy."))

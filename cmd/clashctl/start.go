@@ -66,8 +66,20 @@ func runStart(cmd *cobra.Command, args []string) {
 	runtimePath := filepath.Join(clashResourcesDir, "runtime.yaml")
 
 	if !fileExists(configPath) {
-		fmt.Printf("%s Config file not found. Using ssrdog.yaml as default.\n", yellow("⚠"))
-		configPath = "ssrdog.yaml"
+		// Try ssrdog.yaml from current directory as a one-time import
+		if fileExists("ssrdog.yaml") {
+			fmt.Printf("%s Config file not found. Importing ssrdog.yaml as default.\n", yellow("⚠"))
+			if data, err := os.ReadFile("ssrdog.yaml"); err == nil {
+				os.WriteFile(configPath, data, 0644)
+				fmt.Printf("%s ssrdog.yaml → %s\n", green("✓"), configPath)
+			}
+		}
+		if !fileExists(configPath) {
+			fmt.Printf("%s No config file found.\n", red("✗"))
+			fmt.Println("  Add a subscription: clashctl sub add <url>")
+			fmt.Println("  Or place a config at:", configPath)
+			return
+		}
 	}
 
 	fmt.Print("↓ Merging configuration... ")

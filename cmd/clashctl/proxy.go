@@ -52,22 +52,30 @@ func runProxyOn(cmd *cobra.Command, args []string) {
 
 	port := envConfig.MixedPort
 
-	fmt.Printf("%s System proxy enabled\n", green("✓"))
-	fmt.Printf("  export http_proxy=%s\n", cyan(fmt.Sprintf("http://127.0.0.1:%d", port)))
-	fmt.Printf("  export https_proxy=%s\n", cyan(fmt.Sprintf("http://127.0.0.1:%d", port)))
-	fmt.Printf("  export all_proxy=%s\n", cyan(fmt.Sprintf("socks5h://127.0.0.1:%d", port)))
-	fmt.Println()
-	fmt.Println(yellow("To make proxy persistent, add to your shell RC file or run:"))
-	fmt.Println("  eval $(clashctl env)")
-
-	// Try to inject into bashrc/zshrc
-	home, _ := os.UserHomeDir()
-	for _, rc := range []string{".bashrc", ".zshrc"} {
-		rcPath := filepath.Join(home, rc)
-		if fileExists(rcPath) {
-			config.InjectShellRC(rcPath, port)
+	// Inject into shell RC files for persistence
+	home, err := os.UserHomeDir()
+	modified := 0
+	if err == nil {
+		for _, rc := range []string{".bashrc", ".zshrc"} {
+			rcPath := filepath.Join(home, rc)
+			if fileExists(rcPath) {
+				if err := config.InjectShellRC(rcPath, port); err == nil {
+					modified++
+				}
+			}
 		}
 	}
+
+	fmt.Printf("%s System proxy enabled\n", green("✓"))
+	fmt.Printf("  http_proxy=%s\n", cyan(fmt.Sprintf("http://127.0.0.1:%d", port)))
+	fmt.Printf("  https_proxy=%s\n", cyan(fmt.Sprintf("http://127.0.0.1:%d", port)))
+	fmt.Printf("  all_proxy=%s\n", cyan(fmt.Sprintf("socks5h://127.0.0.1:%d", port)))
+	fmt.Println()
+	if modified > 0 {
+		fmt.Printf("%s Proxy added to %d shell RC file(s) (persistent across new shells)\n", green("✓"), modified)
+	}
+	fmt.Println("  Current shell only: eval $(clashctl env)")
+	fmt.Println(yellow("  Remember: proxy only works when kernel is running (clashctl start)"))
 }
 
 func runProxyOff(cmd *cobra.Command, args []string) {

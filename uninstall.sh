@@ -46,11 +46,17 @@ stop_kernel() {
         fi
     fi
     
-    # Kill any remaining mihomo processes
-    pkill -9 mihomo 2>/dev/null || true
-    
-    # Clean PID file
-    rm -f "${CLASH_BASE_DIR}/runtime/mihomo.pid"
+    # Kill clashctl-managed mihomo by PID file (not system-wide pkill)
+    local pid_file="${CLASH_BASE_DIR}/runtime/mihomo.pid"
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file" 2>/dev/null)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            sleep 1
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+        rm -f "$pid_file"
+    fi
     
     echo -e "${GREEN}✓ 内核进程已停止${NC}"
 }

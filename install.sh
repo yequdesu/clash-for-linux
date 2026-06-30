@@ -578,32 +578,36 @@ build_tui() {
 setup_shell_integration() {
     echo ""
     echo -e "${BLUE}Shell 集成...${NC}"
-    
-    local port=7897
-    
+
+    # DO NOT auto-inject proxy env vars into shell RC files.
+    # The proxy may not be running when the user opens a new shell,
+    # which would break all network connections.
+    # Instead, users should run 'clashctl proxy on' after starting the kernel.
+
     for rc in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
         if [ -f "$rc" ]; then
             if grep -q "# clashctl START" "$rc" 2>/dev/null; then
-                echo -e "  ${GRAY}○${NC} $(basename "$rc") (already configured)"
-                continue
+                echo -e "  ${GRAY}○${NC} $(basename "$rc") ${GRAY}(proxy already configured)${NC}"
+            else
+                echo -e "  ${GRAY}  $(basename "$rc") found${NC}"
             fi
-            
-            cat >> "$rc" << RC_EOF
-
-# clashctl START
-export http_proxy=http://127.0.0.1:${port}
-export HTTP_PROXY=http://127.0.0.1:${port}
-export https_proxy=http://127.0.0.1:${port}
-export HTTPS_PROXY=http://127.0.0.1:${port}
-export all_proxy=socks5h://127.0.0.1:${port}
-export ALL_PROXY=socks5h://127.0.0.1:${port}
-export no_proxy=localhost,127.0.0.0/8,::1
-export NO_PROXY=localhost,127.0.0.0/8,::1
-# clashctl END
-RC_EOF
-            echo -e "  ${GREEN}✓${NC} $(basename "$rc")"
         fi
     done
+
+    echo ""
+    echo -e "  ${BOLD}Important:${NC}"
+    echo -e "  ${YELLOW}Proxy settings are NOT automatically added to your shell RC files.${NC}"
+    echo -e "  ${YELLOW}To enable system proxy AFTER starting the kernel, run:${NC}"
+    echo ""
+    echo -e "    ${CYAN}clashctl start${NC}                # Start the proxy kernel"
+    echo -e "    ${CYAN}clashctl proxy on${NC}            # Enable system proxy (persistent)"
+    echo -e "    ${CYAN}eval \$(clashctl env)${NC}          # Enable proxy in current shell only"
+    echo ""
+    echo -e "  ${YELLOW}To disable the proxy:${NC}"
+    echo ""
+    echo -e "    ${CYAN}clashctl proxy off${NC}           # Disable system proxy"
+    echo -e "    ${CYAN}unset http_proxy https_proxy all_proxy${NC}  # Current shell only"
+    echo ""
 }
 
 print_success() {

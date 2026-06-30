@@ -1,0 +1,41 @@
+# .github/workflows/test.yml
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  go-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      - name: Run Go tests
+        run: |
+          cd tests/unit/go
+          go test -v -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+
+  rust-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-rust@v1
+        with:
+          rust-version: '1.75'
+      - name: Run Rust tests
+        run: |
+          cd tui
+          cargo test --verbose
+          cargo clippy -- -D warnings
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: [go-tests, rust-tests]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build binaries
+        run: make build build-tui
+      - name: Run integration tests
+        run: bash tests/integration/cli_test.sh

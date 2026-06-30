@@ -98,6 +98,13 @@ func runTUNOn(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Save original TUN state for rollback
+	wasEnabled, _ := config.GetTUNMode(mixinPath)
+	if wasEnabled {
+		fmt.Println(yellow("⚠ TUN mode is already enabled"))
+		return
+	}
+
 	fmt.Println(yellow("⚠ TUN mode requires sudo/root privileges to modify network settings."))
 	fmt.Println(yellow("⚠ This will restart the proxy kernel."))
 	fmt.Print("Continue? [y/N] ")
@@ -118,7 +125,21 @@ func runTUNOn(cmd *cobra.Command, args []string) {
 	fmt.Println(green("✓ Done"))
 
 	if err := applyTUNMode(true); err != nil {
+		// Rollback: restore original TUN state
 		fmt.Printf("\n%s %v\n", red("✗"), err)
+		fmt.Print("↓ Rolling back TUN config... ")
+		if rbErr := config.SetTUNMode(mixinPath, wasEnabled); rbErr != nil {
+			fmt.Printf("\n%s Rollback failed: %v\n", red("✗"), rbErr)
+			fmt.Println(yellow("⚠ mixin.yaml may be in an inconsistent state. Check tun.enable manually."))
+		} else {
+			// Re-merge after rollback
+			configPath := filepath.Join(clashResourcesDir, "config.yaml")
+			if fileExists(configPath) {
+				runtimePath := filepath.Join(clashResourcesDir, "runtime.yaml")
+				config.MergeConfig(configPath, mixinPath, runtimePath)
+			}
+			fmt.Println(green("✓ Rolled back"))
+		}
 		return
 	}
 
@@ -146,6 +167,13 @@ func runTUNOff(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Save original TUN state for rollback
+	wasEnabled, _ := config.GetTUNMode(mixinPath)
+	if !wasEnabled {
+		fmt.Println(yellow("⚠ TUN mode is already disabled"))
+		return
+	}
+
 	fmt.Print("↓ Disabling TUN mode... ")
 	if err := config.SetTUNMode(mixinPath, false); err != nil {
 		fmt.Printf("\n%s Failed to disable TUN: %v\n", red("✗"), err)
@@ -154,7 +182,21 @@ func runTUNOff(cmd *cobra.Command, args []string) {
 	fmt.Println(green("✓ Done"))
 
 	if err := applyTUNMode(false); err != nil {
+		// Rollback: restore original TUN state
 		fmt.Printf("\n%s %v\n", red("✗"), err)
+		fmt.Print("↓ Rolling back TUN config... ")
+		if rbErr := config.SetTUNMode(mixinPath, wasEnabled); rbErr != nil {
+			fmt.Printf("\n%s Rollback failed: %v\n", red("✗"), rbErr)
+			fmt.Println(yellow("⚠ mixin.yaml may be in an inconsistent state. Check tun.enable manually."))
+		} else {
+			// Re-merge after rollback
+			configPath := filepath.Join(clashResourcesDir, "config.yaml")
+			if fileExists(configPath) {
+				runtimePath := filepath.Join(clashResourcesDir, "runtime.yaml")
+				config.MergeConfig(configPath, mixinPath, runtimePath)
+			}
+			fmt.Println(green("✓ Rolled back"))
+		}
 		return
 	}
 
