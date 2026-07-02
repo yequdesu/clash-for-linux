@@ -21,27 +21,34 @@ impl<'a> Card<'a> {
             let empty = " ".repeat(inner.width as usize);
             for y in 0..inner.height {
                 frame.buffer_mut().set_string(
-                    inner.x, inner.y + y, &empty,
+                    inner.x,
+                    inner.y + y,
+                    &empty,
                     Style::default().bg(CLASH_THEME.surface),
                 );
             }
         }
-        let content = Paragraph::new(lines)
-            .style(Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.surface));
+        let content = Paragraph::new(lines).style(
+            Style::default()
+                .fg(CLASH_THEME.text)
+                .bg(CLASH_THEME.surface),
+        );
         frame.render_widget(content, inner);
     }
 
     pub fn render_block(self, frame: &mut Frame, area: Rect) -> Rect {
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(CLASH_THEME.border).bg(CLASH_THEME.surface))
-            .style(Style::default().bg(CLASH_THEME.surface))
-            .title(
-                Span::styled(
-                    format!(" {} ", self.title),
-                    Style::default().fg(CLASH_THEME.primary).bold(),
-                ),
+            .border_style(
+                Style::default()
+                    .fg(CLASH_THEME.border)
+                    .bg(CLASH_THEME.surface),
             )
+            .style(Style::default().bg(CLASH_THEME.surface))
+            .title(Span::styled(
+                format!(" {} ", self.title),
+                Style::default().fg(CLASH_THEME.primary).bold(),
+            ))
             .title_bottom("");
         let inner = block.inner(area);
         frame.render_widget(block, area);

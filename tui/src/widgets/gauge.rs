@@ -13,7 +13,11 @@ pub struct Gauge {
 
 impl Gauge {
     pub fn new(label: &str, ratio: f64, color: Color) -> Self {
-        Self { label: label.to_string(), ratio, color }
+        Self {
+            label: label.to_string(),
+            ratio,
+            color,
+        }
     }
 }
 
@@ -30,10 +34,11 @@ impl Widget for &Gauge {
         let filled = (bar_width as f64 * self.ratio.clamp(0.0, 1.0)) as usize;
         let empty = bar_width.saturating_sub(filled);
 
-        let bar_str = format!(" {}{}{}",
+        let bar_str = format!(
+            " {}{} {:3.0}%",
             "█".repeat(filled),
             "░".repeat(empty),
-            format!(" {:3.0}%", self.ratio * 100.0)
+            self.ratio * 100.0
         );
 
         let line = Span::styled(bar_str, Style::default().fg(self.color));

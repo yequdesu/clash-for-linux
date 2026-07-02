@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -27,35 +28,8 @@ var tunCmd = &cobra.Command{
 			if os.Getuid() != 0 {
 				ilog.Fatal("Tun mode requires root. Run with sudo.")
 			}
-
-			if err := exec.Command(cfg.YQBin(), "-i",
-				".tun.enable = true", cfg.MixinPath(),
-			).Run(); err != nil {
-				ilog.Warn("set tun failed: %v", err)
-				return
-			}
-			if err := config.MergeConfig(cfg, false); err != nil {
-				ilog.Warn("merge: %v", err)
-				return
-			}
-
-			svc := kernel.NewServiceManager(cfg)
-			svc.Stop()
-
-			ensureSetcap(cfg.KernelBin())
-
-			if err := svc.Start(); err != nil {
-				if strings.Contains(err.Error(), "exit status 5") || strings.Contains(err.Error(), "died") {
-					ilog.Warn("Tun start failed — kernel may lack capability or config issue")
-					ilog.Info("try: sudo setcap cap_net_admin,cap_net_raw+ep %s", cfg.KernelBin())
-					ilog.Info("check: clashctl log")
-				} else {
-					ilog.Warn("Tun start failed: %v", err)
-				}
-				exec.Command(cfg.YQBin(), "-i", ".tun.enable = false", cfg.MixinPath()).Run()
-				config.MergeConfig(cfg, false)
-				svc.Start()
-				return
+			if err := changeTunMode(cfg, true); err != nil {
+				ilog.Fatal("Tun mode not enabled: %v", err)
 			}
 			if dev, err := verifyTunDevice(); err != nil {
 				ilog.Warn("TUN device not detected — %v", err)
@@ -69,18 +43,134 @@ var tunCmd = &cobra.Command{
 			if os.Getuid() != 0 {
 				ilog.Fatal("Tun mode requires root. Run with sudo.")
 			}
-			exec.Command(cfg.YQBin(), "-i", ".tun.enable = false", cfg.MixinPath()).Run()
-			config.MergeConfig(cfg, false)
-			svc := kernel.NewServiceManager(cfg)
-			svc.Stop()
-			if err := svc.Start(); err != nil {
-				ilog.Warn("restart after tun off: %v", err)
+			if err := changeTunMode(cfg, false); err != nil {
+				ilog.Fatal("Tun mode not disabled: %v", err)
 			}
 			ilog.Ok("Tun mode disabled")
 		default:
-			ilog.Warn("usage: clashctl tun [on|off]")
+			ilog.Fatal("usage: clashctl tun [on|off]")
 		}
 	},
+}
+
+type tunService interface {
+	IsRunning() bool
+	Stop() error
+	Start() error
+}
+
+var newTunService = func(cfg *config.EnvConfig) tunService {
+	return kernel.NewServiceManager(cfg)
+}
+
+var mergeTunConfig = config.MergeConfig
+
+type fileSnapshot struct {
+	path   string
+	data   []byte
+	exists bool
+}
+
+func changeTunMode(cfg *config.EnvConfig, enable bool) error {
+	if enable {
+		if err := checkTunPrerequisites(); err != nil {
+			return err
+		}
+	}
+
+	snapshots, err := snapshotFiles(cfg.MixinPath(), cfg.RuntimePath())
+	if err != nil {
+		return err
+	}
+
+	svc := newTunService(cfg)
+	wasRunning := svc.IsRunning()
+
+	if err := setTunEnabled(cfg, enable); err != nil {
+		return fmt.Errorf("set tun: %w", err)
+	}
+	if err := mergeTunConfig(cfg, false); err != nil {
+		restoreSnapshots(snapshots)
+		return fmt.Errorf("merge: %w", err)
+	}
+
+	shouldStart := wasRunning || enable
+	if !shouldStart {
+		return nil
+	}
+
+	if err := svc.Stop(); err != nil {
+		restoreSnapshots(snapshots)
+		return fmt.Errorf("stop current kernel: %w", err)
+	}
+	if enable {
+		ensureSetcap(cfg.KernelBin())
+	}
+	if err := svc.Start(); err != nil {
+		restoreSnapshots(snapshots)
+		if wasRunning {
+			_ = svc.Start()
+		}
+		if strings.Contains(err.Error(), "exit status 5") || strings.Contains(err.Error(), "died") {
+			return fmt.Errorf("kernel may lack capability or config is invalid; try: sudo setcap cap_net_admin,cap_net_raw+ep %s", cfg.KernelBin())
+		}
+		return fmt.Errorf("restart: %w", err)
+	}
+
+	if enable {
+		if _, err := verifyTunDevice(); err != nil {
+			restoreSnapshots(snapshots)
+			if wasRunning {
+				_ = svc.Stop()
+				_ = svc.Start()
+			} else {
+				_ = svc.Stop()
+			}
+			return fmt.Errorf("TUN device not detected after start: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func checkTunPrerequisites() error {
+	if _, err := os.Stat("/dev/net/tun"); err != nil {
+		return fmt.Errorf("/dev/net/tun not available: %w", err)
+	}
+	if _, err := exec.LookPath("ip"); err != nil {
+		return fmt.Errorf("'ip' command not found")
+	}
+	return nil
+}
+
+func setTunEnabled(cfg *config.EnvConfig, enable bool) error {
+	return config.UpdateYAML(cfg.MixinPath(), map[string]any{"tun.enable": enable})
+}
+
+func snapshotFiles(paths ...string) ([]fileSnapshot, error) {
+	snapshots := make([]fileSnapshot, 0, len(paths))
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				snapshots = append(snapshots, fileSnapshot{path: path})
+				continue
+			}
+			return nil, err
+		}
+		snapshots = append(snapshots, fileSnapshot{path: path, data: data, exists: true})
+	}
+	return snapshots, nil
+}
+
+func restoreSnapshots(snapshots []fileSnapshot) {
+	for _, s := range snapshots {
+		if s.exists {
+			_ = config.AtomicWriteFile(s.path, s.data, 0644)
+		} else {
+			_ = os.Remove(s.path)
+		}
+	}
 }
 
 func ensureSetcap(bin string) {
@@ -95,12 +185,12 @@ func ensureSetcap(bin string) {
 }
 
 func showTunStatus(cfg *config.EnvConfig) {
-	out, err := runYQOutput(".tun.enable // \"false\"", cfg.RuntimePath())
+	info, err := config.ReadRuntimeInfo(cfg.RuntimePath())
 	if err != nil {
 		ilog.Info("Tun status: unknown")
 		return
 	}
-	if out == "true\n" {
+	if info.TunEnabled {
 		ilog.Ok("Tun status: enabled")
 	} else {
 		ilog.Info("Tun status: disabled")
@@ -108,18 +198,105 @@ func showTunStatus(cfg *config.EnvConfig) {
 }
 
 func verifyTunDevice() (string, error) {
-	out, err := exec.Command("ip", "link", "show").Output()
+	if out, err := runIPCommand("tuntap", "show"); err == nil {
+		if dev := parseIPTunTapDevice(out); dev != "" {
+			return dev, nil
+		}
+	}
+	if out, err := runIPCommand("-d", "-j", "link", "show"); err == nil {
+		if dev := parseIPLinkJSONDevice(out); dev != "" {
+			return dev, nil
+		}
+	}
+	out, err := runIPCommand("link", "show")
 	if err != nil {
 		return "", err
 	}
+	if dev := parseIPLinkTextDevice(out); dev != "" {
+		return dev, nil
+	}
+	return "", fmt.Errorf("no TUN device found")
+}
+
+var runIPCommand = func(args ...string) ([]byte, error) {
+	return exec.Command("ip", args...).Output()
+}
+
+func parseIPTunTapDevice(out []byte) string {
 	for _, line := range strings.Split(string(out), "\n") {
-		if strings.Contains(line, "utun") || strings.Contains(line, "tun") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				name := strings.TrimSuffix(fields[1], ":")
-				return name, nil
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 2 {
+			continue
+		}
+		name := strings.TrimSuffix(fields[0], ":")
+		for _, field := range fields[1:] {
+			if field == "tun" {
+				return name
 			}
 		}
 	}
-	return "", fmt.Errorf("no TUN device found")
+	return ""
+}
+
+type ipLinkJSONEntry struct {
+	IfName   string   `json:"ifname"`
+	Flags    []string `json:"flags"`
+	LinkInfo struct {
+		InfoKind string `json:"info_kind"`
+	} `json:"linkinfo"`
+}
+
+func parseIPLinkJSONDevice(out []byte) string {
+	var links []ipLinkJSONEntry
+	if err := json.Unmarshal(out, &links); err != nil {
+		return ""
+	}
+	for _, link := range links {
+		if link.IfName == "" {
+			continue
+		}
+		if link.LinkInfo.InfoKind == "tun" {
+			return link.IfName
+		}
+		if likelyTunName(link.IfName) && hasAllFlags(link.Flags, "POINTOPOINT", "NOARP") {
+			return link.IfName
+		}
+	}
+	return ""
+}
+
+func parseIPLinkTextDevice(out []byte) string {
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.Contains(line, ":") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		name := strings.TrimSuffix(fields[1], ":")
+		if likelyTunName(name) && strings.Contains(line, "POINTOPOINT") && strings.Contains(line, "NOARP") {
+			return strings.TrimSuffix(strings.SplitN(name, "@", 2)[0], ":")
+		}
+	}
+	return ""
+}
+
+func likelyTunName(name string) bool {
+	name = strings.ToLower(strings.TrimSuffix(strings.SplitN(name, "@", 2)[0], ":"))
+	return strings.Contains(name, "tun")
+}
+
+func hasAllFlags(flags []string, want ...string) bool {
+	have := map[string]bool{}
+	for _, flag := range flags {
+		have[strings.ToUpper(flag)] = true
+	}
+	for _, flag := range want {
+		if !have[strings.ToUpper(flag)] {
+			return false
+		}
+	}
+	return true
 }

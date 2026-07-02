@@ -24,6 +24,8 @@ pub enum DataEvent {
     Version(Result<api::KernelInfo, String>),
     Delay(String, u64),
     SwitchResult(Result<(), String>),
+    ModeResult(Result<String, String>),
+    SubscriptionResult(Result<String, String>),
 }
 
 pub struct EventHandler {

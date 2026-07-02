@@ -15,10 +15,92 @@ _log_info() { printf '\r\033[36m[i]\033[0m %s\r\n' "$*"; }
 _log_warn() { printf '\r\033[33m[!]\033[0m %s\r\n' "$*"; }
 _sudo()     { [ "$(id -u)" -eq 0 ] && "$@" || sudo "$@"; }
 
+_load_install_env() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    while IFS='=' read -r key val; do
+        case "$key" in
+            CLASH_BASE_DIR) CLASH_BASE_DIR="$val" ;;
+            SERVICE_NAME|CLASH_SERVICE_NAME) SERVICE_NAME="$val" ;;
+            KERNEL_NAME) KERNEL_NAME="$val" ;;
+        esac
+    done < "$file"
+}
+
+_remove_systemd_unit() {
+    local service="$1"
+    [ -n "$service" ] || return 0
+    if [ -f "/etc/systemd/system/${service}.service" ]; then
+        _log_info "removing systemd service: ${service}.service"
+        _sudo systemctl stop "$service" 2>/dev/null || true
+        _sudo systemctl disable "$service" 2>/dev/null || true
+        _sudo rm -f "/etc/systemd/system/${service}.service"
+        _sudo systemctl daemon-reload 2>/dev/null || true
+    fi
+}
+
+_pid_matches_kernel() {
+    local pid="$1"
+    local kernel_bin="${CLASH_BASE_DIR}/bin/${KERNEL_NAME}"
+    local expected exe exe_real cmd0 cmd0_real
+    expected="$(readlink -f "$kernel_bin" 2>/dev/null || printf '%s' "$kernel_bin")"
+
+    exe="$(readlink "/proc/${pid}/exe" 2>/dev/null || true)"
+    exe_real="$(readlink -f "/proc/${pid}/exe" 2>/dev/null || true)"
+    case "$exe" in
+        "$expected"|"$expected (deleted)"|"$kernel_bin"|"$kernel_bin (deleted)") return 0 ;;
+    esac
+    [ -n "$exe_real" ] && [ "$exe_real" = "$expected" ] && return 0
+
+    if [ -r "/proc/${pid}/cmdline" ]; then
+        cmd0="$(tr '\0' '\n' < "/proc/${pid}/cmdline" 2>/dev/null | sed -n '1p')"
+        if [ -n "$cmd0" ]; then
+            cmd0_real="$(readlink -f "$cmd0" 2>/dev/null || printf '%s' "$cmd0")"
+            [ "$cmd0_real" = "$expected" ] && return 0
+        fi
+    fi
+    return 1
+}
+
+_stop_pid_file() {
+    local pid_file="$1"
+    [ -f "$pid_file" ] || return 0
+    local pid
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    case "$pid" in
+        ""|*[!0-9]*)
+            _log_warn "invalid pid file, removing: $pid_file"
+            _sudo rm -f "$pid_file" 2>/dev/null || rm -f "$pid_file" 2>/dev/null || true
+            return 0
+            ;;
+    esac
+    if kill -0 "$pid" 2>/dev/null; then
+        if ! _pid_matches_kernel "$pid"; then
+            _log_warn "pid file points to non-managed process $pid; not killing"
+            _sudo rm -f "$pid_file" 2>/dev/null || rm -f "$pid_file" 2>/dev/null || true
+            return 0
+        fi
+        _log_info "stopping managed kernel pid $pid"
+        _sudo kill "$pid" 2>/dev/null || true
+        sleep 1
+        if kill -0 "$pid" 2>/dev/null; then
+            _log_warn "managed kernel pid $pid did not exit after SIGTERM; sending SIGKILL"
+            _sudo kill -9 "$pid" 2>/dev/null || true
+        fi
+    fi
+    _sudo rm -f "$pid_file" 2>/dev/null || rm -f "$pid_file" 2>/dev/null || true
+}
+
 REAL_USER="${SUDO_USER:-$USER}"
 REAL_HOME="$(eval echo ~"$REAL_USER")"
+_load_install_env /etc/clashctl/install.env
+_load_install_env "$REAL_HOME/.config/clashctl/install.env"
 CLASH_BASE_DIR="${CLASH_BASE_DIR:-$REAL_HOME/clashctl}"
-case ":$PATH:" in *:/usr/local/bin:*) export PATH="/usr/local/bin:$PATH" ;; esac
+KERNEL_NAME="${KERNEL_NAME:-mihomo}"
+SERVICE_NAME="${SERVICE_NAME:-clashctl}"
+case "$KERNEL_NAME" in ""|*[!a-zA-Z0-9_.@-]*) KERNEL_NAME="mihomo" ;; esac
+case "$SERVICE_NAME" in ""|*[!a-zA-Z0-9_.@-]*) SERVICE_NAME="clashctl" ;; esac
+case ":$PATH:" in *:/usr/local/bin:*) ;; *) export PATH="/usr/local/bin:$PATH" ;; esac
 
 echo ""
 _log_info "Linux CLI & TUI Clash — Uninstaller"
@@ -36,18 +118,11 @@ _log_info "stopping kernel..."
 if command -v clashctl >/dev/null 2>&1; then
     clashctl stop 2>/dev/null || true
 fi
-for name in mihomo clash; do
-    pgrep -x "$name" >/dev/null 2>&1 && { _sudo pkill -9 -x "$name" 2>/dev/null || true; sleep 0.3; }
-done
+_stop_pid_file "${CLASH_BASE_DIR}/runtime/${KERNEL_NAME}.pid"
 
 # ── Remove systemd service ──
-if [ -f /etc/systemd/system/clashctl.service ]; then
-    _log_info "removing systemd service..."
-    _sudo systemctl stop clashctl 2>/dev/null || true
-    _sudo systemctl disable clashctl 2>/dev/null || true
-    _sudo rm -f /etc/systemd/system/clashctl.service
-    _sudo systemctl daemon-reload 2>/dev/null || true
-fi
+_remove_systemd_unit "$SERVICE_NAME"
+[ "$SERVICE_NAME" = "clashctl" ] || _remove_systemd_unit clashctl
 
 # ── Remove binaries ──
 for bin in clashctl clash-tui; do
@@ -58,7 +133,7 @@ for bin in clashctl clash-tui; do
 done
 
 # ── Prompt to keep kernel/yq binaries ──
-for bin in mihomo yq; do
+for bin in "$KERNEL_NAME" yq; do
     local_path="${CLASH_BASE_DIR}/bin/${bin}"
     system_path="/usr/local/bin/${bin}"
     if [ -f "$local_path" ]; then
@@ -72,6 +147,7 @@ for bin in mihomo yq; do
                 ;;
             *)
                 _log_info "removing $bin binary"
+                _sudo rm -f "$system_path" 2>/dev/null || true
                 ;;
         esac
     fi

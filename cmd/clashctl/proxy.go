@@ -6,8 +6,8 @@ import (
 )
 
 var proxyCmd = &cobra.Command{
-	Use:   "proxy [on|off]",
-	Short: "Manage system proxy environment variables",
+	Use:   "proxy [on|off|desktop]",
+	Short: "Print shell proxy env commands or manage desktop proxy",
 	Run: func(cmd *cobra.Command, args []string) {
 		requireInstall()
 		if len(args) == 0 {
@@ -16,13 +16,13 @@ var proxyCmd = &cobra.Command{
 		}
 		switch args[0] {
 		case "on":
-			setSystemProxy(cfg)
-			ilog.Ok("system proxy enabled")
+			printProxyExports(cfg)
 		case "off":
-			unsetSystemProxy()
-			ilog.Ok("system proxy disabled")
+			printProxyUnsets()
+		case "desktop":
+			handleDesktopProxy(args[1:])
 		default:
-			ilog.Warn("usage: clashctl proxy [on|off]")
+			ilog.Fatal("usage: clashctl proxy [on|off|desktop on|desktop off|desktop status]")
 		}
 	},
 }

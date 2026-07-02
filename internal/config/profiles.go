@@ -25,6 +25,12 @@ type ProfilesMeta struct {
 func LoadProfiles(path string) (*ProfilesMeta, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return &ProfilesMeta{}, nil
+		}
+		return &ProfilesMeta{}, fmt.Errorf("read profiles: %w", err)
+	}
+	if len(data) == 0 {
 		return &ProfilesMeta{}, nil
 	}
 	var m ProfilesMeta
@@ -39,7 +45,7 @@ func SaveProfiles(path string, m *ProfilesMeta) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return AtomicWriteFile(path, data, 0644)
 }
 
 func (m *ProfilesMeta) NextID() int {

@@ -1,0 +1,73 @@
+name: Install Smoke
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  release-artifact:
+    name: Release artifact installer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run release install smoke
+        shell: bash
+        run: bash scripts/smoke/release_install.sh
+
+  systemd-service:
+    name: systemd service lifecycle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run systemd service smoke
+        shell: bash
+        run: bash scripts/smoke/systemd_service.sh
+
+  distro:
+    name: ${{ matrix.distro }}
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: ubuntu-24.04
+            image: ubuntu:24.04
+            deps: apt-get update && apt-get install -y --no-install-recommends bash ca-certificates curl git procps sed coreutils gzip tar
+          - distro: debian-12
+            image: debian:12
+            deps: apt-get update && apt-get install -y --no-install-recommends bash ca-certificates curl git procps sed coreutils gzip tar
+          - distro: fedora-latest
+            image: fedora:latest
+            deps: dnf install -y bash ca-certificates curl git procps-ng sed coreutils gzip tar findutils
+          - distro: archlinux
+            image: archlinux:base-devel
+            deps: pacman -Sy --noconfirm bash ca-certificates curl git procps-ng sed coreutils gzip tar grep
+    steps:
+      - name: Install container dependencies
+        shell: sh
+        run: ${{ matrix.deps }}
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run install smoke
+        shell: bash
+        env:
+          CLASHCTL_SMOKE_DISTRO: ${{ matrix.distro }}
+        run: bash scripts/smoke/distro_install.sh

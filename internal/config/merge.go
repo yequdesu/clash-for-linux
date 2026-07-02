@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	ilog "github.com/yequdesu/linux-cli-tui-clash/internal/log"
+	"gopkg.in/yaml.v3"
 )
 
 var proxyNotFoundRe = regexp.MustCompile(`proxy\s*\[([^\]]+)\]\s*not\s*found`)
@@ -18,10 +20,10 @@ func MergeConfig(cfg *EnvConfig, autoFix bool) error {
 
 	configPath := cfg.ConfigPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		os.WriteFile(configPath, []byte("{}\n"), 0644)
+		if err := AtomicWriteFile(configPath, []byte("{}\n"), 0644); err != nil {
+			return fmt.Errorf("initialize config: %w", err)
+		}
 	}
-
-	backupData, _ := os.ReadFile(cfg.RuntimePath())
 
 	yqExpr := fmt.Sprintf(`
 select(fileIndex==0) as $config |
@@ -84,20 +86,29 @@ $runtime |
 		return fmt.Errorf("yq merge: %s", stderr.String())
 	}
 
-	if err := os.WriteFile(cfg.RuntimePath(), out, 0644); err != nil {
-		return fmt.Errorf("write runtime: %w", err)
+	tmpRuntime, err := writeRuntimeCandidate(cfg, out)
+	if err != nil {
+		return err
 	}
+	defer os.Remove(tmpRuntime)
 
-	if err := validateConfig(cfg, cfg.RuntimePath()); err != nil {
+	if err := validateConfig(cfg, tmpRuntime); err != nil {
 		errMsg := err.Error()
 		missingGroup := extractMissingProxyGroup(errMsg)
 
 		if missingGroup != "" && autoFix {
 			suggestion := findProxyGroupSuggestion(cfg)
 			if suggestion != "" {
-				if fixErr := applyProxyGroupFix(cfg, missingGroup, suggestion); fixErr != nil {
+				if fixErr := applyProxyGroupFix(tmpRuntime, missingGroup, suggestion); fixErr != nil {
 					ilog.Info("auto-fix failed: %v", fixErr)
-				} else if validateConfig(cfg, cfg.RuntimePath()) == nil {
+				} else if validateConfig(cfg, tmpRuntime) == nil {
+					fixedData, readErr := os.ReadFile(tmpRuntime)
+					if readErr != nil {
+						return fmt.Errorf("read fixed runtime: %w", readErr)
+					}
+					if writeErr := AtomicWriteFile(cfg.RuntimePath(), fixedData, 0644); writeErr != nil {
+						return fmt.Errorf("write runtime: %w", writeErr)
+					}
 					ilog.Info("auto-fixed MATCH rule target: %q → %q", missingGroup, suggestion)
 					return nil
 				}
@@ -106,21 +117,50 @@ $runtime |
 
 		if missingGroup != "" {
 			suggestion := findProxyGroupSuggestion(cfg)
-			if backupData != nil {
-				os.WriteFile(cfg.RuntimePath(), backupData, 0644)
-			}
 			if suggestion != "" {
 				return fmt.Errorf("config validation failed: rule references unknown proxy group %q — did you mean %q?\n  use 'clashctl config merge --autofix' to auto-correct", missingGroup, suggestion)
 			}
 			return fmt.Errorf("config validation failed: rule references unknown proxy group %q (no known proxy group found in subscription)", missingGroup)
 		}
 
-		if backupData != nil {
-			os.WriteFile(cfg.RuntimePath(), backupData, 0644)
-		}
 		return fmt.Errorf("config validation failed: %w", err)
 	}
+	if err := AtomicWriteFile(cfg.RuntimePath(), out, 0644); err != nil {
+		return fmt.Errorf("write runtime: %w", err)
+	}
 	return nil
+}
+
+func writeRuntimeCandidate(cfg *EnvConfig, data []byte) (string, error) {
+	dir := filepath.Dir(cfg.RuntimePath())
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("create runtime dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".runtime-*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("create runtime temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("write runtime temp: %w", err)
+	}
+	if err := tmp.Chmod(0644); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("chmod runtime temp: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("sync runtime temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("close runtime temp: %w", err)
+	}
+	return tmpPath, nil
 }
 
 func extractMissingProxyGroup(errMsg string) string {
@@ -153,21 +193,67 @@ func firstYQ(cfg *EnvConfig, expr string) string {
 	return ""
 }
 
-func applyProxyGroupFix(cfg *EnvConfig, missingGroup, replacement string) error {
-	data, err := os.ReadFile(cfg.RuntimePath())
+func applyProxyGroupFix(path, missingGroup, replacement string) error {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
 
-	pattern := "MATCH," + missingGroup
-	replacementStr := "MATCH," + replacement
-
-	if !strings.Contains(string(data), pattern) {
-		return fmt.Errorf("pattern %q not found in runtime config", pattern)
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parse runtime yaml: %w", err)
 	}
 
-	newData := strings.ReplaceAll(string(data), pattern, replacementStr)
-	return os.WriteFile(cfg.RuntimePath(), []byte(newData), 0644)
+	rules := mappingValue(&doc, "rules")
+	if rules == nil || rules.Kind != yaml.SequenceNode {
+		return fmt.Errorf("rules list not found in runtime config")
+	}
+
+	changed := false
+	for _, rule := range rules.Content {
+		if rule.Kind != yaml.ScalarNode {
+			continue
+		}
+		fixed, ok := fixMatchRule(rule.Value, missingGroup, replacement)
+		if ok {
+			rule.Value = fixed
+			changed = true
+		}
+	}
+	if !changed {
+		return fmt.Errorf("MATCH rule target %q not found in runtime config", missingGroup)
+	}
+
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return fmt.Errorf("marshal runtime yaml: %w", err)
+	}
+	return AtomicWriteFile(path, out, 0644)
+}
+
+func mappingValue(doc *yaml.Node, key string) *yaml.Node {
+	root := doc
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
+		root = root.Content[0]
+	}
+	if root.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == key {
+			return root.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func fixMatchRule(rule, missingGroup, replacement string) (string, bool) {
+	parts := strings.Split(rule, ",")
+	if len(parts) < 2 || strings.TrimSpace(parts[0]) != "MATCH" || strings.TrimSpace(parts[1]) != missingGroup {
+		return rule, false
+	}
+	parts[1] = replacement
+	return strings.Join(parts, ","), true
 }
 
 func validateConfig(cfg *EnvConfig, configPath string) error {

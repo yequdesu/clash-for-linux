@@ -8,7 +8,9 @@ mod widgets;
 mod window;
 
 use crossterm::cursor;
-use crossterm::event::{self as crossterm_event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
+use crossterm::event::{
+    self as crossterm_event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind,
+};
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::ExecutableCommand;
 use ratatui::backend::CrosstermBackend;
@@ -47,7 +49,9 @@ fn main() -> io::Result<()> {
 
     app.on_shutdown();
     terminal::disable_raw_mode()?;
-    terminal.backend_mut().execute(crossterm_event::DisableMouseCapture)?;
+    terminal
+        .backend_mut()
+        .execute(crossterm_event::DisableMouseCapture)?;
     terminal.backend_mut().execute(LeaveAlternateScreen)?;
     terminal.backend_mut().execute(cursor::Show)?;
 
@@ -89,9 +93,19 @@ fn run(
 
                 if app.search_active {
                     match key.code {
-                        KeyCode::Esc => { app.search_active = false; app.search_query.clear(); }
-                        KeyCode::Backspace => { app.search_query.pop(); }
-                        KeyCode::Char(c) => { app.search_query.push(c); }
+                        KeyCode::Esc => {
+                            app.search_active = false;
+                            app.search_query.clear();
+                            app.clamp_proxy_selection();
+                        }
+                        KeyCode::Backspace => {
+                            app.search_query.pop();
+                            app.clamp_proxy_selection();
+                        }
+                        KeyCode::Char(c) => {
+                            app.search_query.push(c);
+                            app.clamp_proxy_selection();
+                        }
                         _ => {}
                     }
                     continue;
@@ -99,7 +113,13 @@ fn run(
 
                 match key.code {
                     KeyCode::Char('q') => app.should_quit = true,
-                    KeyCode::Esc => { app.should_quit = true; }
+                    KeyCode::Esc => {
+                        if app.node_picker_open {
+                            app.close_node_picker();
+                        } else {
+                            app.should_quit = true;
+                        }
+                    }
                     KeyCode::Tab | KeyCode::Char('\t') | KeyCode::Right => app.next_tab(),
                     KeyCode::Left => app.prev_tab(),
                     KeyCode::Char('?') | KeyCode::Char('h') => app.show_help = !app.show_help,
@@ -110,32 +130,62 @@ fn run(
                     KeyCode::Char('/') => app.search_active = !app.search_active,
                     KeyCode::Down | KeyCode::Char('j') => app.select_down(),
                     KeyCode::Up | KeyCode::Char('k') => app.select_up(),
-                    KeyCode::Char('g') => { app.selected_proxy_idx = 0; app.connections_selected = 0; },
+                    KeyCode::Char('g') => {
+                        app.selected_proxy_idx = 0;
+                        app.connections_selected = 0;
+                        app.selected_sub_idx = 0;
+                    }
                     KeyCode::Char('G') => {
                         app.selected_proxy_idx = app.proxy_groups.len().saturating_sub(1);
                         app.connections_selected = app.connections.len().saturating_sub(1);
+                        app.selected_sub_idx = app.profiles.len().saturating_sub(1);
+                    }
+                    KeyCode::Char('1') => {
+                        app.tab = Tab::Overview;
+                    }
+                    KeyCode::Char('2') => {
+                        app.tab = Tab::Proxies;
+                    }
+                    KeyCode::Char('3') => {
+                        app.tab = Tab::Subscriptions;
+                        app.refresh_subscriptions();
+                    }
+                    KeyCode::Char('4') => {
+                        app.tab = Tab::Connections;
+                    }
+                    KeyCode::Char('5') => {
+                        app.tab = Tab::Logs;
+                    }
+                    KeyCode::Enter => match app.tab {
+                        Tab::Proxies | Tab::Overview => {
+                            if app.node_picker_open {
+                                app.switch_selected_node();
+                            } else if key.modifiers.contains(KeyModifiers::ALT) {
+                                app.switch_selected();
+                            } else {
+                                app.test_selected_delay();
+                            }
+                        }
+                        Tab::Subscriptions => {
+                            app.use_selected_subscription();
+                        }
+                        _ => {}
                     },
-                    KeyCode::Char('1') => { app.tab = Tab::Overview; }
-                    KeyCode::Char('2') => { app.tab = Tab::Proxies; }
-                    KeyCode::Char('3') => { app.tab = Tab::Subscriptions; app.refresh_subscriptions(); }
-                    KeyCode::Char('4') => { app.tab = Tab::Connections; }
-                    KeyCode::Char('5') => { app.tab = Tab::Logs; }
-                    KeyCode::Enter => {
-                        match app.tab {
-                            Tab::Proxies | Tab::Overview => {
-                                if key.modifiers.contains(KeyModifiers::ALT) {
-                                    app.switch_selected();
-                                } else {
-                                    app.test_selected_delay();
-                                }
-                            }
-                            Tab::Subscriptions => {
-                                app.refresh_subscriptions();
-                            }
-                            _ => {}
+                    KeyCode::Char('u') | KeyCode::Char('U') => {
+                        if app.tab == Tab::Subscriptions {
+                            app.update_selected_subscription();
                         }
                     }
                     KeyCode::Char('s') | KeyCode::Char('S') => app.toggle_sort(),
+                    KeyCode::Char('o') | KeyCode::Char('O') => {
+                        if app.tab == Tab::Proxies || app.tab == Tab::Overview {
+                            if app.node_picker_open {
+                                app.close_node_picker();
+                            } else {
+                                app.open_node_picker();
+                            }
+                        }
+                    }
                     KeyCode::Char('d') => {
                         if app.tab == Tab::Proxies || app.tab == Tab::Overview {
                             app.test_selected_delay();
@@ -150,33 +200,36 @@ fn run(
                         if app.tab != Tab::Logs {
                             app.cycle_proxy_mode();
                         } else {
-                            app.log_paused = !app.log_paused;
+                            app.toggle_log_pause();
+                        }
+                    }
+                    KeyCode::Char('f') | KeyCode::Char('F') => {
+                        if app.tab == Tab::Logs {
+                            app.cycle_log_level();
                         }
                     }
                     KeyCode::Char('c') => {
                         if app.tab == Tab::Connections {
                             app.close_selected_connection();
+                        } else if app.tab == Tab::Logs {
+                            app.clear_logs();
                         }
                     }
-                    KeyCode::Char('C') => {
-                        if app.tab == Tab::Connections {
-                            app.close_all_connections();
-                        }
+                    KeyCode::Char('C') if app.tab == Tab::Connections => {
+                        app.close_all_connections();
                     }
                     _ => {}
                 }
             }
-            Ok(Event::Mouse(mouse)) => {
-                match mouse.kind {
-                    MouseEventKind::ScrollDown => {
-                        app.log_scroll = app.log_scroll.saturating_add(3);
-                    }
-                    MouseEventKind::ScrollUp => {
-                        app.log_scroll = app.log_scroll.saturating_sub(3);
-                    }
-                    _ => {}
+            Ok(Event::Mouse(mouse)) => match mouse.kind {
+                MouseEventKind::ScrollDown if app.tab == Tab::Logs => {
+                    app.scroll_logs_down(3);
                 }
-            }
+                MouseEventKind::ScrollUp if app.tab == Tab::Logs => {
+                    app.scroll_logs_up(3);
+                }
+                _ => {}
+            },
             Ok(Event::Tick) => app.on_tick(),
             Ok(_) => {}
             Err(e) => app.error_msg = Some(e.to_string()),

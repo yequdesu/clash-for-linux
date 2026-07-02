@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# Release artifact install smoke test.
+#
+# Builds a local clashctl artifact, serves it with SHA256SUMS over HTTP, and
+# verifies install.sh installs from the release path instead of source fallback.
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CLASH_BASE_DIR="${CLASH_BASE_DIR:-/tmp/clashctl-release-smoke}"
+export CLASH_BASE_DIR
+export KERNEL_NAME="${KERNEL_NAME:-mihomo}"
+export SERVICE_NAME="${SERVICE_NAME:-clashctl}"
+export INIT_TYPE="${INIT_TYPE:-nohup}"
+export VERSION_GEODATA="${VERSION_GEODATA:-smoke}"
+
+log() { printf '[release-smoke] %s\n' "$*"; }
+fail() { printf '[release-smoke] ERROR: %s\n' "$*" >&2; exit 1; }
+
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"
+}
+
+sudo_cmd() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+release_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64) printf 'amd64' ;;
+        aarch64|arm64) printf 'arm64' ;;
+        *) fail "unsupported architecture: $(uname -m)" ;;
+    esac
+}
+
+free_port() {
+    python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+}
+
+seed_fake_kernel() {
+    install -d "$CLASH_BASE_DIR/bin"
+    cat > "$CLASH_BASE_DIR/bin/${KERNEL_NAME}" <<'KERNEL'
+#!/usr/bin/env bash
+for arg in "$@"; do
+    if [ "$arg" = "-t" ]; then
+        exit 0
+    fi
+done
+trap 'exit 0' TERM INT
+while :; do sleep 60; done
+KERNEL
+    chmod 755 "$CLASH_BASE_DIR/bin/${KERNEL_NAME}"
+}
+
+seed_fake_yq() {
+    install -d "$CLASH_BASE_DIR/bin"
+    cat > "$CLASH_BASE_DIR/bin/yq" <<'YQ'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "-i" ]; then
+    expr="${2:-}"
+    file="${3:-}"
+    if [ -z "$file" ]; then
+        exit 1
+    fi
+    if [[ "$expr" == *".secret"* ]]; then
+        secret="${CLASHCTL_SECRET:-}"
+        if grep -q '^secret:' "$file"; then
+            sed -i "s|^secret:.*|secret: \"${secret}\"|" "$file"
+        else
+            printf '\nsecret: "%s"\n' "$secret" >> "$file"
+        fi
+    fi
+    exit 0
+fi
+if [ "${1:-}" = "eval-all" ]; then
+    mixin="${@: -1}"
+    cat "$mixin"
+    exit 0
+fi
+if [ "${1:-}" = "eval" ]; then
+    exit 0
+fi
+echo "fake yq unsupported args: $*" >&2
+exit 1
+YQ
+    chmod 755 "$CLASH_BASE_DIR/bin/yq"
+}
+
+seed_fake_resources() {
+    install -d "$CLASH_BASE_DIR/resources" "$CLASH_BASE_DIR/bin/subconverter"
+    printf 'smoke\n' > "$CLASH_BASE_DIR/resources/Country.mmdb"
+    printf 'smoke\n' > "$CLASH_BASE_DIR/resources/geosite.dat"
+    printf 'smoke\n' > "$CLASH_BASE_DIR/resources/geoip.dat"
+    cat > "$CLASH_BASE_DIR/bin/subconverter/subconverter" <<'SUB'
+#!/usr/bin/env bash
+trap 'exit 0' TERM INT
+while :; do sleep 60; done
+SUB
+    chmod 755 "$CLASH_BASE_DIR/bin/subconverter/subconverter"
+}
+
+cleanup() {
+    if [ -n "${SERVER_PID:-}" ]; then
+        kill "$SERVER_PID" 2>/dev/null || true
+    fi
+    if [ -n "${WORK_DIR:-}" ]; then
+        rm -rf "$WORK_DIR"
+    fi
+}
+trap cleanup EXIT
+
+require_cmd bash
+require_cmd curl
+require_cmd go
+require_cmd install
+require_cmd python3
+require_cmd sha256sum
+require_cmd tar
+
+ARCH="$(release_arch)"
+WORK_DIR="$(mktemp -d)"
+RELEASE_DIR="$WORK_DIR/release"
+DIST_DIR="$WORK_DIR/dist"
+mkdir -p "$RELEASE_DIR" "$DIST_DIR"
+
+log "building release artifact for ${ARCH}"
+GOOS=linux GOARCH="$ARCH" go build -trimpath -o "$DIST_DIR/clashctl-linux-${ARCH}" ./cmd/clashctl
+cat > "$DIST_DIR/clash-tui-linux-${ARCH}" <<'TUI'
+#!/usr/bin/env bash
+echo "clash-tui smoke artifact"
+TUI
+chmod 755 "$DIST_DIR/clashctl-linux-${ARCH}" "$DIST_DIR/clash-tui-linux-${ARCH}"
+tar -C "$DIST_DIR" -czf "$RELEASE_DIR/clash-for-linux-${ARCH}.tar.gz" \
+    "clashctl-linux-${ARCH}" "clash-tui-linux-${ARCH}"
+( cd "$RELEASE_DIR" && sha256sum "clash-for-linux-${ARCH}.tar.gz" > SHA256SUMS )
+
+PORT="$(free_port)"
+python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$RELEASE_DIR" > "$WORK_DIR/http.log" 2>&1 &
+SERVER_PID=$!
+sleep 1
+curl -fsS "http://127.0.0.1:${PORT}/SHA256SUMS" >/dev/null
+
+log "seeding fake kernel/yq/geodata"
+rm -rf "$CLASH_BASE_DIR"
+sudo_cmd rm -f /usr/local/bin/clashctl /usr/local/bin/clash-tui /usr/local/bin/"$KERNEL_NAME" /usr/local/bin/yq
+seed_fake_kernel
+seed_fake_yq
+seed_fake_resources
+
+export CLASHCTL_RELEASE_BASE_URL="http://127.0.0.1:${PORT}"
+unset CLASHCTL_SKIP_RELEASE
+
+log "running install.sh through release artifact path"
+bash "$ROOT_DIR/install.sh" --force --with-tui
+
+test -x /usr/local/bin/clashctl || fail "clashctl was not installed"
+test -x /usr/local/bin/clash-tui || fail "clash-tui was not installed"
+/usr/local/bin/clashctl version >/tmp/clashctl-release-smoke-version.txt
+/usr/local/bin/clash-tui >/tmp/clashctl-release-smoke-tui.txt
+grep -q 'clash-tui smoke artifact' /tmp/clashctl-release-smoke-tui.txt || fail "clash-tui artifact did not run"
+
+python3 - "$CLASH_BASE_DIR/install-state.json" "$CLASHCTL_RELEASE_BASE_URL/clash-for-linux-${ARCH}.tar.gz" <<'PY'
+import json
+import sys
+
+state_path, expected = sys.argv[1], sys.argv[2]
+with open(state_path, "r", encoding="utf-8") as fh:
+    state = json.load(fh)
+components = state.get("components", {})
+for name in ("clashctl", "clash_tui"):
+    component = components.get(name, {})
+    if component.get("source_url") != expected:
+        raise SystemExit(f"{name} source_url={component.get('source_url')!r}, want {expected!r}")
+    if component.get("installed") is not True:
+        raise SystemExit(f"{name} installed flag not true")
+PY
+
+log "running uninstall cleanup"
+printf 'n\nn\n' | bash "$ROOT_DIR/uninstall.sh"
+test ! -d "$CLASH_BASE_DIR" || fail "base dir was not removed"
+test ! -e /usr/local/bin/clashctl || fail "clashctl binary was not removed"
+test ! -e /usr/local/bin/clash-tui || fail "clash-tui binary was not removed"
+
+log "release install smoke passed"

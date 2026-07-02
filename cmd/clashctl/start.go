@@ -24,7 +24,9 @@ var startCmd = &cobra.Command{
 
 		if svc.IsRunning() {
 			ilog.Info("killing stale kernel process...")
-			svc.Stop()
+			if err := svc.Stop(); err != nil {
+				ilog.Fatal("stop stale kernel failed: %v", err)
+			}
 		}
 
 		ilog.Info("starting kernel...")

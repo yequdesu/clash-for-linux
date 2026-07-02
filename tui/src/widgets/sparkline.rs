@@ -16,7 +16,11 @@ pub struct Sparkline {
 impl Sparkline {
     pub fn new(data: Vec<f64>, color: Color) -> Self {
         let max = data.iter().cloned().fold(0.0f64, f64::max).max(1.0);
-        Self { data, color, max_value: max }
+        Self {
+            data,
+            color,
+            max_value: max,
+        }
     }
 }
 

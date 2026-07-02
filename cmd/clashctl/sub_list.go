@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/yequdesu/linux-cli-tui-clash/internal/config"
 	ilog "github.com/yequdesu/linux-cli-tui-clash/internal/log"
@@ -18,8 +19,7 @@ var subListCmd = &cobra.Command{
 		requireInstall()
 		meta, err := config.LoadProfiles(cfg.ProfilesMeta())
 		if err != nil {
-			ilog.Warn("cannot load profiles")
-			return
+			ilog.Fatal("cannot load profiles: %v", err)
 		}
 		if len(meta.Profiles) == 0 {
 			ilog.Info("no subscriptions")
@@ -91,14 +91,14 @@ func countProxies(path string) string {
 	if err != nil {
 		return "—"
 	}
-	count := 0
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.Contains(line, "name:") && strings.Contains(line, "type:") {
-			count++
-		}
+	var parsed struct {
+		Proxies []yaml.Node `yaml:"proxies"`
 	}
-	if count == 0 {
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		return "unknown"
+	}
+	if len(parsed.Proxies) == 0 {
 		return "—"
 	}
-	return fmt.Sprintf("%d", count)
+	return fmt.Sprintf("%d", len(parsed.Proxies))
 }

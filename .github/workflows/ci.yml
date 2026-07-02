@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Format check
+        run: test -z "$(gofmt -l ./cmd ./internal)"
+      - name: Test
+        run: go test ./...
+      - name: Linux test
+        run: GOOS=linux GOARCH=amd64 go test ./...
+      - name: Linux build
+        run: GOOS=linux GOARCH=amd64 go build ./cmd/clashctl
+      - name: CLI exit-code smoke
+        run: bash scripts/smoke/cli_exit_codes.sh
+      - name: Vet
+        run: go vet ./...
+
+  rust:
+    name: Rust TUI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format check
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+      - name: Test
+        run: cargo test
+
+  shell:
+    name: Shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: bash -n install.sh update.sh uninstall.sh install_tui.sh scripts/preflight.sh scripts/init/nohup.sh scripts/init/systemd.sh scripts/smoke/distro_install.sh scripts/smoke/release_install.sh scripts/smoke/systemd_service.sh scripts/smoke/static_safety.sh scripts/smoke/nohup_pid_safety.sh scripts/smoke/cli_exit_codes.sh
+      - name: Static safety checks
+        run: bash scripts/smoke/static_safety.sh
+      - name: Nohup PID safety smoke
+        run: bash scripts/smoke/nohup_pid_safety.sh

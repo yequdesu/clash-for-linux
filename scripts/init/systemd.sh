@@ -14,8 +14,8 @@ RestartSec=3
 ExecStartPre=/usr/bin/sleep 1s
 ExecStart=__KERNEL_PATH__ -d __RESOURCES_DIR__ -f __RESOURCES_DIR__/runtime.yaml
 ExecStop=/bin/kill -SIGTERM $MAINPID
-StandardOutput=append:__LOG_DIR__/mihomo.log
-StandardError=append:__LOG_DIR__/mihomo.log
+StandardOutput=append:__LOG_FILE__
+StandardError=append:__LOG_FILE__
 
 [Install]
 WantedBy=multi-user.target

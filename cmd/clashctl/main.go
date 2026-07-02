@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	cfg     *config.EnvConfig
-	rootCmd *cobra.Command
+	cfg         *config.EnvConfig
+	rootCmd     *cobra.Command
+	exitProcess = os.Exit
 )
 
 func main() {
@@ -22,7 +23,7 @@ func main() {
 		Short: "Clash proxy manager for Linux",
 		Long:  "clashctl - Manage Clash/Mihomo proxy on Linux. CLI + TUI dashboard.",
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Help()
+			showHelpAndExit(cmd)
 		},
 	}
 	rootCmd.AddCommand(startCmd)
@@ -41,11 +42,18 @@ func main() {
 	rootCmd.AddCommand(envCmd)
 	rootCmd.AddCommand(testCmd)
 	rootCmd.AddCommand(tuiCmd)
+	rootCmd.AddCommand(doctorCmd)
+	rootCmd.AddCommand(geodataCmd)
 	rootCmd.AddCommand(versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		exitProcess(1)
 	}
+}
+
+func showHelpAndExit(cmd *cobra.Command) {
+	_ = cmd.Help()
+	exitProcess(1)
 }
 
 func requireInstall() {

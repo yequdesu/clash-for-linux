@@ -17,7 +17,13 @@ pub enum Tab {
 
 impl Tab {
     pub fn all() -> &'static [Tab] {
-        &[Tab::Overview, Tab::Proxies, Tab::Subscriptions, Tab::Connections, Tab::Logs]
+        &[
+            Tab::Overview,
+            Tab::Proxies,
+            Tab::Subscriptions,
+            Tab::Connections,
+            Tab::Logs,
+        ]
     }
 
     pub fn label(&self) -> &'static str {

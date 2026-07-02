@@ -16,53 +16,137 @@ var subUseCmd = &cobra.Command{
 	Short: "Switch to a subscription",
 	Run: func(cmd *cobra.Command, args []string) {
 		requireInstall()
-		id := parseID(args)
-		if id == 0 {
-			return
+		id, err := parseID(args)
+		if err != nil {
+			ilog.Fatal("%v", err)
 		}
-		switchSubscription(cfg, id)
+		if err := switchSubscription(cfg, id); err != nil {
+			ilog.Fatal("%v", err)
+		}
 	},
 }
 
-func switchSubscription(cfg *config.EnvConfig, id int) {
-	meta, _ := config.LoadProfiles(cfg.ProfilesMeta())
-	if len(meta.Profiles) == 0 {
-		ilog.Warn("no subscriptions available, add one first")
-		return
+func switchSubscription(cfg *config.EnvConfig, id int) error {
+	var profile config.Profile
+	if err := config.WithProfilesLock(cfg, func() error {
+		meta, err := config.LoadProfiles(cfg.ProfilesMeta())
+		if err != nil {
+			return err
+		}
+		if len(meta.Profiles) == 0 {
+			return fmt.Errorf("no subscriptions available, add one first")
+		}
+		p := meta.FindByID(id)
+		if p == nil {
+			return fmt.Errorf("subscription id %d not found", id)
+		}
+		profile = *p
+		return nil
+	}); err != nil {
+		return err
 	}
-	p := meta.FindByID(id)
-	if p == nil {
-		ilog.Warn("subscription id %d not found", id)
-		return
-	}
-	data, err := os.ReadFile(p.Path)
+	snapshots, err := snapshotFiles(cfg.ConfigPath(), cfg.RuntimePath())
 	if err != nil {
-		ilog.Warn("cannot read profile file")
-		return
+		return fmt.Errorf("snapshot current config: %w", err)
 	}
-	if err := os.WriteFile(cfg.ConfigPath(), data, 0644); err != nil {
-		ilog.Warn("write config: %v", err)
-		return
+	data, err := os.ReadFile(profile.Path)
+	if err != nil {
+		return fmt.Errorf("cannot read profile file: %w", err)
 	}
-	if err := config.MergeConfig(cfg, false); err != nil {
-		ilog.Warn("merge failed: %v", err)
-		return
+	if err := config.AtomicWriteFile(cfg.ConfigPath(), data, 0644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	if err := mergeRuntimeConfig(cfg, false); err != nil {
+		restoreSnapshots(snapshots)
+		return fmt.Errorf("merge failed, restored previous config: %w", err)
 	}
 
-	svc := kernel.NewServiceManager(cfg)
-	if svc.IsRunning() {
-		svc.Stop()
+	svc := newSubscriptionService(cfg)
+	wasRunning := svc.IsRunning()
+	if wasRunning {
+		if err := svc.Stop(); err != nil {
+			restoreSnapshots(snapshots)
+			return fmt.Errorf("stop current kernel: %w", err)
+		}
 	}
-	ilog.Info("starting kernel with new config...")
+	subscriptionInfo("starting kernel with new config...")
 	if err := svc.Start(); err != nil {
-		ilog.Warn("start failed: %v (config saved, will retry on next start)", err)
+		restoreSnapshots(snapshots)
+		if wasRunning {
+			_ = svc.Start()
+		} else if svc.IsRunning() {
+			_ = svc.Stop()
+		}
+		return fmt.Errorf("start failed, restored previous config: %w", err)
 	}
-	meta.Use = id
-	config.SaveProfiles(cfg.ProfilesMeta(), meta)
-	logSub(fmt.Sprintf("switched to: [%d] %s", id, p.URL))
+	if err := config.WithProfilesLock(cfg, func() error {
+		meta, err := config.LoadProfiles(cfg.ProfilesMeta())
+		if err != nil {
+			return err
+		}
+		if meta.FindByID(id) == nil {
+			return fmt.Errorf("subscription id %d not found", id)
+		}
+		meta.Use = id
+		return saveProfiles(cfg.ProfilesMeta(), meta)
+	}); err != nil {
+		restoreSnapshots(snapshots)
+		if svc.IsRunning() {
+			_ = svc.Stop()
+		}
+		if wasRunning {
+			_ = svc.Start()
+		}
+		return fmt.Errorf("save active subscription failed, restored previous config: %w", err)
+	}
+	logSub(fmt.Sprintf("switched to: [%d] %s", id, profile.URL))
 	if svc.IsRunning() {
-		ilog.Ok("subscription activated: [%d] on :%s", id, svc.ProxyPort())
+		subscriptionOk("subscription activated: [%d] on :%s", id, svc.ProxyPort())
 	} else {
-		ilog.Ok("subscription set: [%d] — run 'clashctl start' to start kernel", id)
+		subscriptionOk("subscription set: [%d] — run 'clashctl start' to start kernel", id)
 	}
+	return nil
 }
+
+var subscriptionQuiet bool
+
+func withSubscriptionQuiet(quiet bool, fn func() error) error {
+	previous := subscriptionQuiet
+	subscriptionQuiet = quiet
+	defer func() { subscriptionQuiet = previous }()
+	return fn()
+}
+
+func subscriptionInfo(format string, args ...any) {
+	if subscriptionQuiet {
+		return
+	}
+	ilog.Info(format, args...)
+}
+
+func subscriptionOk(format string, args ...any) {
+	if subscriptionQuiet {
+		return
+	}
+	ilog.Ok(format, args...)
+}
+
+func subscriptionWarn(format string, args ...any) {
+	if subscriptionQuiet {
+		return
+	}
+	ilog.Warn(format, args...)
+}
+
+type subscriptionService interface {
+	IsRunning() bool
+	Stop() error
+	Start() error
+	ProxyPort() string
+}
+
+var newSubscriptionService = func(cfg *config.EnvConfig) subscriptionService {
+	return kernel.NewServiceManager(cfg)
+}
+
+var mergeRuntimeConfig = config.MergeConfig

@@ -15,7 +15,7 @@ var restartCmd = &cobra.Command{
 		svc := kernel.NewServiceManager(cfg)
 		if svc.IsRunning() {
 			if err := svc.Stop(); err != nil {
-				ilog.Warn("stop: %v", err)
+				ilog.Fatal("stop failed: %v", err)
 			}
 		}
 		ilog.Info("starting kernel...")
@@ -23,7 +23,6 @@ var restartCmd = &cobra.Command{
 			ilog.Fatal("kernel failed: %v", err)
 		}
 		ilog.Ok("kernel restarted on :%s", svc.ProxyPort())
-		setSystemProxy(cfg)
-		ilog.Ok("proxy environment active")
+		printEnvHint()
 	},
 }

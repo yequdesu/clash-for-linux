@@ -22,7 +22,7 @@ var tuiCmd = &cobra.Command{
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
 		if err := c.Run(); err != nil {
-			ilog.Warn("TUI exited with error: %v", err)
+			ilog.Fatal("TUI exited with error: %v", err)
 		}
 	},
 }

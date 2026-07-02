@@ -15,14 +15,13 @@ var stopCmd = &cobra.Command{
 		svc := kernel.NewServiceManager(cfg)
 		if !svc.IsRunning() {
 			ilog.Info("kernel not running")
-			unsetSystemProxy()
+			ilog.Info("clear proxy env: eval $(clashctl proxy off)")
 			return
 		}
 		if err := svc.Stop(); err != nil {
-			ilog.Warn("stop failed: %v", err)
+			ilog.Fatal("stop failed: %v", err)
 		}
 		ilog.Ok("kernel stopped")
-		unsetSystemProxy()
-		ilog.Ok("proxy environment cleared")
+		ilog.Info("clear proxy env: eval $(clashctl proxy off)")
 	},
 }

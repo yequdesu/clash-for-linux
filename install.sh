@@ -27,13 +27,17 @@ _sudo() { [ "$(id -u)" -eq 0 ] && "$@" || sudo "$@"; }
 # ═══════════════════════════════
 #  Flags
 # ═══════════════════════════════
-FORCE=false; WITH_TUI=false; SKIP_CLI=false; TUI_ONLY=false
+FORCE=false; WITH_TUI=false; SKIP_CLI=false; TUI_ONLY=false; RESET_CONFIG=false
+RELEASE_TOOLS_INSTALLED=false
+CLASHCTL_SOURCE_URL=""
+CLASH_TUI_SOURCE_URL=""
 for arg in "$@"; do
     case "$arg" in
         --force)    FORCE=true ;;
+        --reset-config) RESET_CONFIG=true ;;
         --with-tui|--tui) WITH_TUI=true ;;
         --skip-cli) SKIP_CLI=true ;;
-        --tui-only) TUI_ONLY=true; SKIP_CLI=true ;;
+        --tui-only) TUI_ONLY=true; SKIP_CLI=true; WITH_TUI=true ;;
         --help|-h)
             echo "Usage: bash install.sh [flags]"
             echo ""
@@ -41,6 +45,7 @@ for arg in "$@"; do
             echo "  --with-tui (or --tui)    Also build and install the TUI dashboard"
             echo "  --tui-only               Only install the TUI (skip CLI)"
             echo "  --force                  Force reinstall, overwrite existing"
+            echo "  --reset-config           With --force, reset resources/config/subscriptions"
             echo "  --skip-cli               Skip CLI build (use pre-built or skip)"
             echo ""
             echo "Run as normal user. Password asked once at the beginning."
@@ -48,6 +53,10 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+if $RESET_CONFIG && ! $FORCE; then
+    _log_fatal "--reset-config requires --force"
+fi
 
 # ═══════════════════════════════
 #  Preflight: sudo credential
@@ -71,13 +80,38 @@ fi
 REAL_USER="${SUDO_USER:-$USER}"
 REAL_HOME="$(eval echo ~"$REAL_USER")"
 CLASH_BASE_DIR="${CLASH_BASE_DIR:-$REAL_HOME/clashctl}"
-BIN_KERNEL="${CLASH_BASE_DIR}/bin/mihomo"
-KERNEL_NAME="${KERNEL_NAME:-mihomo}"
 
 # ── .env load ──
 [ -f "$SCRIPT_DIR/.env" ] && . "$SCRIPT_DIR/.env" 2>/dev/null || true
+CLASH_BASE_DIR="${CLASH_BASE_DIR:-$REAL_HOME/clashctl}"
 KERNEL_NAME="${KERNEL_NAME:-mihomo}"
+SERVICE_NAME="${SERVICE_NAME:-${CLASH_SERVICE_NAME:-clashctl}}"
 INIT_TYPE="${INIT_TYPE:-}"
+case "$KERNEL_NAME" in ""|*[!a-zA-Z0-9_.@-]*) _log_fatal "invalid KERNEL_NAME: $KERNEL_NAME" ;; esac
+case "$SERVICE_NAME" in ""|*[!a-zA-Z0-9_.@-]*) _log_fatal "invalid SERVICE_NAME: $SERVICE_NAME" ;; esac
+BIN_KERNEL="${CLASH_BASE_DIR}/bin/${KERNEL_NAME}"
+
+_pid_matches_kernel() {
+    local pid="$1"
+    local expected exe exe_real cmd0 cmd0_real
+    expected="$(readlink -f "$BIN_KERNEL" 2>/dev/null || printf '%s' "$BIN_KERNEL")"
+
+    exe="$(readlink "/proc/${pid}/exe" 2>/dev/null || true)"
+    exe_real="$(readlink -f "/proc/${pid}/exe" 2>/dev/null || true)"
+    case "$exe" in
+        "$expected"|"$expected (deleted)"|"$BIN_KERNEL"|"$BIN_KERNEL (deleted)") return 0 ;;
+    esac
+    [ -n "$exe_real" ] && [ "$exe_real" = "$expected" ] && return 0
+
+    if [ -r "/proc/${pid}/cmdline" ]; then
+        cmd0="$(tr '\0' '\n' < "/proc/${pid}/cmdline" 2>/dev/null | sed -n '1p')"
+        if [ -n "$cmd0" ]; then
+            cmd0_real="$(readlink -f "$cmd0" 2>/dev/null || printf '%s' "$cmd0")"
+            [ "$cmd0_real" = "$expected" ] && return 0
+        fi
+    fi
+    return 1
+}
 
 # ── Detect init system ──
 detect_init() {
@@ -92,14 +126,50 @@ detect_init() {
 }
 detect_init
 
-_log_info "kernel: $KERNEL_NAME  |  init: $INIT_TYPE  |  install: $CLASH_BASE_DIR"
+_log_info "kernel: $KERNEL_NAME  |  service: $SERVICE_NAME  |  init: $INIT_TYPE  |  install: $CLASH_BASE_DIR"
 
 # ═══════════════════════════════
-#  Kill stale processes
+#  Stop this installation's existing kernel only
 # ═══════════════════════════════
-for name in mihomo clash; do
-    pgrep -x "$name" >/dev/null 2>&1 && { _sudo pkill -9 -x "$name" 2>/dev/null || true; sleep 0.5; }
-done
+_stop_pid_file() {
+    local pid_file="$1"
+    [ -f "$pid_file" ] || return 0
+    local pid
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    case "$pid" in
+        ""|*[!0-9]*)
+            _log_warn "invalid pid file, removing: $pid_file"
+            _sudo rm -f "$pid_file" 2>/dev/null || rm -f "$pid_file" 2>/dev/null || true
+            return 0
+            ;;
+    esac
+    if kill -0 "$pid" 2>/dev/null; then
+        if ! _pid_matches_kernel "$pid"; then
+            _log_warn "pid file points to non-managed process $pid; not killing"
+            _sudo rm -f "$pid_file" 2>/dev/null || rm -f "$pid_file" 2>/dev/null || true
+            return 0
+        fi
+        _log_info "stopping existing managed kernel pid $pid"
+        _sudo kill "$pid" 2>/dev/null || true
+        sleep 1
+        if kill -0 "$pid" 2>/dev/null; then
+            _log_warn "managed kernel pid $pid did not exit after SIGTERM; sending SIGKILL"
+            _sudo kill -9 "$pid" 2>/dev/null || true
+        fi
+    fi
+    _sudo rm -f "$pid_file" 2>/dev/null || rm -f "$pid_file" 2>/dev/null || true
+}
+
+_stop_existing_kernel() {
+    if command -v clashctl >/dev/null 2>&1; then
+        clashctl stop 2>/dev/null || true
+    fi
+    if command -v systemctl >/dev/null 2>&1 && [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
+        _sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    fi
+    _stop_pid_file "${CLASH_BASE_DIR}/runtime/${KERNEL_NAME}.pid"
+}
+_stop_existing_kernel
 
 # Clean old RC cruft
 for rc in "$REAL_HOME/.zshrc" "$REAL_HOME/.bashrc"; do
@@ -129,13 +199,33 @@ _gh_download() {
 # ═══════════════════════════════════════════════
 #  Function: download kernel binary
 # ═══════════════════════════════════════════════
-_download_kernel() {
-    local ver="${VERSION_MIHOMO:-v1.19.17}"
+_mihomo_arch() {
     local arch="linux-amd64"
     case "$(uname -m)" in
         aarch64|arm64) arch="linux-arm64" ;;
         armv7l)        arch="linux-armv7" ;;
     esac
+    printf '%s' "$arch"
+}
+
+_yq_arch() {
+    local arch="amd64"
+    case "$(uname -m)" in aarch64|arm64) arch="arm64" ;; esac
+    printf '%s' "$arch"
+}
+
+_release_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64) printf 'amd64' ;;
+        aarch64|arm64) printf 'arm64' ;;
+        *) return 1 ;;
+    esac
+}
+
+_download_kernel() {
+    local ver="${VERSION_MIHOMO:-v1.19.17}"
+    local arch
+    arch="$(_mihomo_arch)"
     local filename="mihomo-${arch}-${ver}.gz"
     local raw_url="https://github.com/MetaCubeX/mihomo/releases/download/${ver}/${filename}"
     if _gh_download "$raw_url" /tmp/mihomo.gz "$KERNEL_NAME ${ver}"; then
@@ -154,8 +244,8 @@ _download_kernel() {
 # ═══════════════════════════════════════════════
 _download_yq() {
     local ver="${VERSION_YQ:-v4.49.2}"
-    local arch="amd64"
-    case "$(uname -m)" in aarch64|arm64) arch="arm64" ;; esac
+    local arch
+    arch="$(_yq_arch)"
     local raw_url="https://github.com/mikefarah/yq/releases/download/${ver}/yq_linux_${arch}"
     if _gh_download "$raw_url" /tmp/yq "yq ${ver}"; then
         _sudo install -D /tmp/yq "${CLASH_BASE_DIR}/bin/yq"
@@ -184,6 +274,147 @@ _download_geodata() {
     done
 }
 
+_json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+_write_install_state() {
+    local state="${CLASH_BASE_DIR}/install-state.json"
+    local tmp
+    tmp="$(mktemp)"
+
+    local installed_at
+    installed_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date)"
+
+    local clashctl_installed=false
+    local clashctl_version=""
+    if [ -x /usr/local/bin/clashctl ]; then
+        clashctl_installed=true
+        clashctl_version="$(/usr/local/bin/clashctl version 2>/dev/null | head -n1 || true)"
+    fi
+
+    local tui_installed=false
+    if [ -x /usr/local/bin/clash-tui ]; then
+        tui_installed=true
+    fi
+
+    local mihomo_ver="${VERSION_MIHOMO:-v1.19.17}"
+    local mihomo_asset="mihomo-$(_mihomo_arch)-${mihomo_ver}.gz"
+    local mihomo_url="https://github.com/MetaCubeX/mihomo/releases/download/${mihomo_ver}/${mihomo_asset}"
+    local yq_ver="${VERSION_YQ:-v4.49.2}"
+    local yq_url="https://github.com/mikefarah/yq/releases/download/${yq_ver}/yq_linux_$(_yq_arch)"
+    local geodata_ver="${VERSION_GEODATA:-20250101}"
+    local geodata_url="https://github.com/MetaCubeX/meta-rules-dat/releases/download/${geodata_ver}"
+
+    cat > "$tmp" << STATE
+{
+  "schema_version": 1,
+  "installed_at": "$(_json_escape "$installed_at")",
+  "source_dir": "$(_json_escape "$SCRIPT_DIR")",
+  "base_dir": "$(_json_escape "$CLASH_BASE_DIR")",
+  "service_name": "$(_json_escape "$SERVICE_NAME")",
+  "kernel_name": "$(_json_escape "$KERNEL_NAME")",
+  "init_type": "$(_json_escape "$INIT_TYPE")",
+  "force": $FORCE,
+  "reset_config": $RESET_CONFIG,
+  "components": {
+    "mihomo": {
+      "version": "$(_json_escape "$mihomo_ver")",
+      "source_url": "$(_json_escape "$mihomo_url")",
+      "path": "$(_json_escape "$BIN_KERNEL")"
+    },
+    "yq": {
+      "version": "$(_json_escape "$yq_ver")",
+      "source_url": "$(_json_escape "$yq_url")",
+      "path": "$(_json_escape "${CLASH_BASE_DIR}/bin/yq")"
+    },
+    "geodata": {
+      "version": "$(_json_escape "$geodata_ver")",
+      "source_url": "$(_json_escape "$geodata_url")",
+      "path": "$(_json_escape "${CLASH_BASE_DIR}/resources")"
+    },
+    "clashctl": {
+      "installed": $clashctl_installed,
+      "version": "$(_json_escape "$clashctl_version")",
+      "source_url": "$(_json_escape "$CLASHCTL_SOURCE_URL")",
+      "path": "/usr/local/bin/clashctl"
+    },
+    "clash_tui": {
+      "installed": $tui_installed,
+      "source_url": "$(_json_escape "$CLASH_TUI_SOURCE_URL")",
+      "path": "/usr/local/bin/clash-tui"
+    }
+  }
+}
+STATE
+
+    _sudo install -D -m 0644 "$tmp" "$state"
+    rm -f "$tmp"
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        _sudo chown "$SUDO_USER:$SUDO_USER" "$state" 2>/dev/null || true
+    fi
+    _log_ok "install state written: $state"
+}
+
+_install_release_artifacts() {
+    local install_cli="${1:-true}"
+    local install_tui="${2:-false}"
+    [ "${CLASHCTL_SKIP_RELEASE:-}" = "true" ] && return 1
+
+    local arch
+    if ! arch="$(_release_arch)"; then
+        _log_info "no release artifact for architecture $(uname -m), using source build"
+        return 1
+    fi
+    if ! command -v sha256sum >/dev/null 2>&1; then
+        _log_info "sha256sum not found, using source build"
+        return 1
+    fi
+
+    local base="${CLASHCTL_RELEASE_BASE_URL:-https://github.com/yequdesu/clash-for-linux/releases/latest/download}"
+    local artifact="clash-for-linux-${arch}.tar.gz"
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+
+    if ! _gh_download "${base}/${artifact}" "${tmpdir}/${artifact}" "clash-for-linux release ${arch}"; then
+        rm -rf "$tmpdir"
+        return 1
+    fi
+    if ! _gh_download "${base}/SHA256SUMS" "${tmpdir}/SHA256SUMS" "release checksums"; then
+        rm -rf "$tmpdir"
+        _log_warn "release checksum unavailable, using source build"
+        return 1
+    fi
+    if ! ( cd "$tmpdir" && awk -v file="$artifact" '$2 == file {print; found=1} END {exit found ? 0 : 1}' SHA256SUMS > SHA256SUMS.one && sha256sum -c SHA256SUMS.one ); then
+        rm -rf "$tmpdir"
+        _log_warn "release checksum verification failed, using source build"
+        return 1
+    fi
+    if ! tar -xzf "${tmpdir}/${artifact}" -C "$tmpdir"; then
+        rm -rf "$tmpdir"
+        _log_warn "release artifact extraction failed, using source build"
+        return 1
+    fi
+
+    if $install_cli && [ -f "${tmpdir}/clashctl-linux-${arch}" ]; then
+        _sudo install -D "${tmpdir}/clashctl-linux-${arch}" /usr/local/bin/clashctl
+        CLASHCTL_SOURCE_URL="${base}/${artifact}"
+        _log_ok "clashctl installed from release artifact"
+    fi
+    if $install_tui && [ -f "${tmpdir}/clash-tui-linux-${arch}" ]; then
+        _sudo install -D "${tmpdir}/clash-tui-linux-${arch}" /usr/local/bin/clash-tui
+        CLASH_TUI_SOURCE_URL="${base}/${artifact}"
+        _log_ok "clash-tui installed from release artifact"
+    fi
+
+    rm -rf "$tmpdir"
+    if { $install_cli && [ -x /usr/local/bin/clashctl ]; } || { $install_tui && [ -x /usr/local/bin/clash-tui ]; }; then
+        RELEASE_TOOLS_INSTALLED=true
+        return 0
+    fi
+    return 1
+}
+
 # ═══════════════════════════════════════════════
 #  Function: install CLI (clashctl)
 # ═══════════════════════════════════════════════
@@ -193,10 +424,15 @@ _install_cli() {
         return 0
     fi
 
+    if _install_release_artifacts true "$WITH_TUI" && [ -x /usr/local/bin/clashctl ]; then
+        return 0
+    fi
+
     if command -v go >/dev/null 2>&1; then
         _log_info "building clashctl..."
         GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" go build -ldflags="-s -w" -o /tmp/clashctl ./cmd/clashctl/ && {
             _sudo install -D /tmp/clashctl /usr/local/bin/clashctl; rm -f /tmp/clashctl
+            CLASHCTL_SOURCE_URL="local-source:${SCRIPT_DIR}"
             _log_ok "clashctl installed"
             return 0
         } || { _log_warn "clashctl build failed"; return 1; }
@@ -211,6 +447,7 @@ _install_cli() {
         _log_ok "Go 1.24.1 installed"
         GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" go build -ldflags="-s -w" -o /tmp/clashctl ./cmd/clashctl/ && {
             _sudo install -D /tmp/clashctl /usr/local/bin/clashctl; rm -f /tmp/clashctl
+            CLASHCTL_SOURCE_URL="local-source:${SCRIPT_DIR}"
             _log_ok "clashctl installed"
             return 0
         }
@@ -228,6 +465,10 @@ _install_tui() {
 
     if [ -x /usr/local/bin/clash-tui ]; then
         _log_info "clash-tui already installed"
+        return 0
+    fi
+
+    if _install_release_artifacts false true && [ -x /usr/local/bin/clash-tui ]; then
         return 0
     fi
 
@@ -251,6 +492,7 @@ _install_tui() {
     ( cd "$SCRIPT_DIR/tui" && cargo build --release 2>&1 | tail -5 )
     if [ -f tui/target/release/clash-tui ]; then
         _sudo install -D tui/target/release/clash-tui /usr/local/bin/clash-tui
+        CLASH_TUI_SOURCE_URL="local-source:${SCRIPT_DIR}/tui"
         _log_ok "clash-tui installed"
         return 0
     fi
@@ -263,12 +505,17 @@ _install_tui() {
 # ═══════════════════════════════════════════════
 if [ -d "$CLASH_BASE_DIR" ] && [ -f "$CLASH_BASE_DIR/bin/yq" ]; then
     if $FORCE; then
-        _log_info "force reinstall — preserving binaries, refreshing config..."
+        _log_info "force reinstall — preserving user config by default"
         _sudo mkdir -p /usr/local/bin 2>/dev/null || true
-        for bin in mihomo yq; do
+        for bin in "$KERNEL_NAME" yq; do
             [ -f "${CLASH_BASE_DIR}/bin/${bin}" ] && _sudo cp "${CLASH_BASE_DIR}/bin/${bin}" "/usr/local/bin/${bin}" 2>/dev/null && _log_info "preserved ${bin}" || true
         done
-        _sudo rm -rf "${CLASH_BASE_DIR}/resources" "${CLASH_BASE_DIR}/logs" "${CLASH_BASE_DIR}/runtime" 2>/dev/null || true
+        if $RESET_CONFIG; then
+            _log_warn "resetting resources, logs, and runtime because --reset-config was provided"
+            _sudo rm -rf "${CLASH_BASE_DIR}/resources" "${CLASH_BASE_DIR}/logs" "${CLASH_BASE_DIR}/runtime" 2>/dev/null || true
+        else
+            _sudo rm -rf "${CLASH_BASE_DIR}/runtime" 2>/dev/null || true
+        fi
     else
         _log_warn "already installed at $CLASH_BASE_DIR"
         if $WITH_TUI; then
@@ -295,6 +542,14 @@ _sync_or_download() {
     "$@"
 }
 
+_copy_resource_if_missing() {
+    local src="$1"
+    local dst="$2"
+    if $RESET_CONFIG || [ ! -e "$dst" ]; then
+        /bin/cp -f "$src" "$dst" 2>/dev/null || true
+    fi
+}
+
 # ═══════════════════════════════════════════════
 #  Main install flow
 # ═══════════════════════════════════════════════
@@ -313,15 +568,26 @@ mkdir -p "${CLASH_BASE_DIR}/logs"
 mkdir -p "${CLASH_BASE_DIR}/runtime"
 
 # ── Copy resources ──
-/bin/cp -rf "$SCRIPT_DIR/resources/." "$CLASH_BASE_DIR/resources/" 2>/dev/null || true
-/bin/cp -f "$SCRIPT_DIR/.env" "$CLASH_BASE_DIR/.env" 2>/dev/null || true
-touch "${CLASH_BASE_DIR}/resources/config.yaml"
+_copy_resource_if_missing "$SCRIPT_DIR/resources/mixin.yaml" "$CLASH_BASE_DIR/resources/mixin.yaml"
+_copy_resource_if_missing "$SCRIPT_DIR/resources/profiles.yaml" "$CLASH_BASE_DIR/resources/profiles.yaml"
+_copy_resource_if_missing "$SCRIPT_DIR/.env" "$CLASH_BASE_DIR/.env"
+if $RESET_CONFIG || [ ! -e "${CLASH_BASE_DIR}/resources/config.yaml" ]; then
+    : > "${CLASH_BASE_DIR}/resources/config.yaml"
+fi
 
 # ── Write install markers ──
 mkdir -p "$REAL_HOME/.config/clashctl"
-echo "CLASH_BASE_DIR=$CLASH_BASE_DIR" > "$REAL_HOME/.config/clashctl/install.env"
+{
+    echo "CLASH_BASE_DIR=$CLASH_BASE_DIR"
+    echo "SERVICE_NAME=$SERVICE_NAME"
+    echo "KERNEL_NAME=$KERNEL_NAME"
+} > "$REAL_HOME/.config/clashctl/install.env"
 _sudo mkdir -p /etc/clashctl 2>/dev/null
-echo "CLASH_BASE_DIR=$CLASH_BASE_DIR" | _sudo tee /etc/clashctl/install.env >/dev/null 2>&1
+{
+    echo "CLASH_BASE_DIR=$CLASH_BASE_DIR"
+    echo "SERVICE_NAME=$SERVICE_NAME"
+    echo "KERNEL_NAME=$KERNEL_NAME"
+} | _sudo tee /etc/clashctl/install.env >/dev/null 2>&1
 
 # ── Download resources ──
 _sync_or_download "$KERNEL_NAME" "$BIN_KERNEL" _download_kernel
@@ -336,7 +602,7 @@ command -v setcap >/dev/null 2>&1 && \
 # ── Install systemd service ──
 if [ "$INIT_TYPE" = "systemd" ]; then
     _log_info "installing systemd service..."
-    cat > /tmp/clashctl.service << SYSTEMD
+    cat > "/tmp/${SERVICE_NAME}.service" << SYSTEMD
 [Unit]
 Description=Clashctl Proxy Service (Mihomo)
 After=network.target
@@ -352,13 +618,13 @@ Restart=always
 RestartSec=3
 ExecStart=$BIN_KERNEL -d ${CLASH_BASE_DIR}/resources -f ${CLASH_BASE_DIR}/resources/runtime.yaml
 ExecStop=/bin/kill -SIGTERM \$MAINPID
-StandardOutput=append:${CLASH_BASE_DIR}/logs/mihomo.log
-StandardError=append:${CLASH_BASE_DIR}/logs/mihomo.log
+StandardOutput=append:${CLASH_BASE_DIR}/logs/${KERNEL_NAME}.log
+StandardError=append:${CLASH_BASE_DIR}/logs/${KERNEL_NAME}.log
 
 [Install]
 WantedBy=multi-user.target
 SYSTEMD
-    _sudo mv /tmp/clashctl.service /etc/systemd/system/clashctl.service 2>/dev/null || true
+    _sudo mv "/tmp/${SERVICE_NAME}.service" "/etc/systemd/system/${SERVICE_NAME}.service" 2>/dev/null || true
     _sudo systemctl daemon-reload 2>/dev/null || true
     _log_ok "systemd service installed"
 fi
@@ -383,7 +649,8 @@ $WITH_TUI && _install_tui
 # ── Post-install config ──
 if [ -x /usr/local/bin/clashctl ]; then
     /usr/local/bin/clashctl config merge 2>/dev/null || true
-    RANDOM_SECRET=$(tr -dc 'a-zA-Z0-9' < /dev/urandom 2>/dev/null | head -c8 || echo "clashctl")
+    RANDOM_SECRET="$(od -An -N32 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
+    [ -n "$RANDOM_SECRET" ] || RANDOM_SECRET="$(tr -dc 'a-zA-Z0-9' < /dev/urandom 2>/dev/null | head -c32 || echo "clashctl")"
     /usr/local/bin/clashctl secret "$RANDOM_SECRET" 2>/dev/null || true
     _log_ok "install complete"
 
@@ -396,6 +663,8 @@ if [ -x /usr/local/bin/clashctl ]; then
         /usr/local/bin/clashctl sub add "file://$f" 2>/dev/null || true
     done
 
+    _write_install_state
+
     echo ''
     _log_info "quick start:"
     echo '  clashctl start             start proxy'
@@ -404,5 +673,6 @@ if [ -x /usr/local/bin/clashctl ]; then
     echo '  clashctl tui               launch TUI dashboard'
     [ -x /usr/local/bin/clash-tui ] && echo '  clash-tui                  launch TUI directly'
 else
+    _write_install_state
     _log_warn "clashctl not installed — build manually with Go: bash install.sh"
 fi

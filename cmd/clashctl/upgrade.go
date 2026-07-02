@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	"github.com/yequdesu/linux-cli-tui-clash/internal/kernel"
@@ -15,13 +13,9 @@ var upgradeCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		requireInstall()
 		info := readRuntimeInfo(cfg)
-		api := kernel.NewClient(
-			fmt.Sprintf("http://127.0.0.1:%s", info.apiPort),
-			info.secret,
-		)
+		api := kernel.NewClient(info.apiBaseURL(), info.secret)
 		if err := api.Upgrade(""); err != nil {
-			ilog.Warn("upgrade failed: %v", err)
-			return
+			ilog.Fatal("upgrade failed: %v", err)
 		}
 	},
 }

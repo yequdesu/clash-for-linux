@@ -15,6 +15,9 @@ var nodeCmd = &cobra.Command{
 	Use:   "node",
 	Short: "Proxy node management",
 	Long:  "List proxy groups/nodes, switch nodes, test delays.",
+	Run: func(cmd *cobra.Command, args []string) {
+		showHelpAndExit(cmd)
+	},
 }
 
 var nodeListCmd = &cobra.Command{
@@ -23,19 +26,14 @@ var nodeListCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		requireInstall()
 		info := readRuntimeInfo(cfg)
-		apiPort := info.apiPort
-		if apiPort == "" {
-			apiPort = "9090"
-		}
-		if !portOpen(apiPort) {
-			ilog.Fatal("kernel API not available on :%s — run 'clashctl start' first", apiPort)
+		if !apiOpen(info) {
+			ilog.Fatal("kernel API not available at %s — run 'clashctl start' first", info.apiAddress())
 		}
 
-		api := kernel.NewClient(fmt.Sprintf("http://127.0.0.1:%s", apiPort), info.secret)
+		api := kernel.NewClient(info.apiBaseURL(), info.secret)
 		proxies, err := api.GetProxies()
 		if err != nil {
-			ilog.Warn("failed to get proxies: %v", err)
-			return
+			ilog.Fatal("failed to get proxies: %v", err)
 		}
 
 		groups := make([]string, 0)
@@ -85,24 +83,18 @@ var nodeSwitchCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		requireInstall()
 		if len(args) < 2 {
-			ilog.Warn("usage: clashctl node switch <group> <node>")
-			return
+			ilog.Fatal("usage: clashctl node switch <group> <node>")
 		}
 		info := readRuntimeInfo(cfg)
-		apiPort := info.apiPort
-		if apiPort == "" {
-			apiPort = "9090"
-		}
-		if !portOpen(apiPort) {
-			ilog.Fatal("kernel API not available on :%s", apiPort)
+		if !apiOpen(info) {
+			ilog.Fatal("kernel API not available at %s", info.apiAddress())
 		}
 
 		group := args[0]
 		node := args[1]
-		api := kernel.NewClient(fmt.Sprintf("http://127.0.0.1:%s", apiPort), info.secret)
+		api := kernel.NewClient(info.apiBaseURL(), info.secret)
 		if err := api.SwitchProxy(group, node); err != nil {
-			ilog.Warn("switch failed: %v", err)
-			return
+			ilog.Fatal("switch failed: %v", err)
 		}
 
 		delayStr := ""
@@ -119,19 +111,14 @@ var nodeDelayCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		requireInstall()
 		info := readRuntimeInfo(cfg)
-		apiPort := info.apiPort
-		if apiPort == "" {
-			apiPort = "9090"
-		}
-		if !portOpen(apiPort) {
-			ilog.Fatal("kernel API not available on :%s", apiPort)
+		if !apiOpen(info) {
+			ilog.Fatal("kernel API not available at %s", info.apiAddress())
 		}
 
-		api := kernel.NewClient(fmt.Sprintf("http://127.0.0.1:%s", apiPort), info.secret)
+		api := kernel.NewClient(info.apiBaseURL(), info.secret)
 		proxies, err := api.GetProxies()
 		if err != nil {
-			ilog.Warn("failed to get proxies: %v", err)
-			return
+			ilog.Fatal("failed to get proxies: %v", err)
 		}
 
 		groups := make([]string, 0)
@@ -147,8 +134,7 @@ var nodeDelayCmd = &cobra.Command{
 		}
 
 		if len(args) > 0 && len(groups) == 0 {
-			ilog.Warn("group '%s' not found", args[0])
-			return
+			ilog.Fatal("group '%s' not found", args[0])
 		}
 
 		for _, groupName := range groups {

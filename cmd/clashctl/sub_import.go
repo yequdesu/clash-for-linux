@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,28 +21,47 @@ var subImportCmd = &cobra.Command{
 			dir = args[0]
 		}
 		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-			ilog.Warn("directory not found: %s", dir)
-			return
+			ilog.Fatal("directory not found: %s", dir)
 		}
-		entries, _ := os.ReadDir(dir)
-		count := 0
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			ilog.Fatal("cannot read directory %s: %v", dir, err)
+		}
+		imported := 0
+		failed := 0
 		for _, e := range entries {
 			if e.IsDir() {
 				continue
 			}
 			name := e.Name()
-			if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
+			lowerName := strings.ToLower(name)
+			if !strings.HasSuffix(lowerName, ".yaml") && !strings.HasSuffix(lowerName, ".yml") {
 				continue
 			}
 			fullPath := filepath.Join(dir, name)
 			ilog.Info("importing: %s", name)
-			subAddCmd.Run(nil, []string{"file://" + fullPath})
-			count++
+			result, err := addSubscription(cfg, "file://"+fullPath)
+			if err != nil {
+				failed++
+				ilog.Warn("import failed for %s: %v", name, err)
+				continue
+			}
+			imported++
+			logSub(fmt.Sprintf("imported: [%d] %s", result.ID, result.Source))
+			ilog.Ok("imported: [%d] %s", result.ID, result.Source)
+			if result.ActivateFirst {
+				ilog.Info("activating first subscription...")
+				if err := switchSubscription(cfg, result.ID); err != nil {
+					ilog.Fatal("%v", err)
+				}
+			}
 		}
-		if count == 0 {
-			ilog.Warn("no .yaml/.yml files found in %s", dir)
+		if imported == 0 && failed == 0 {
+			ilog.Fatal("no .yaml/.yml files found in %s", dir)
+		} else if failed > 0 {
+			ilog.Fatal("imported %d config file(s), failed %d — run 'clashctl sub list' to check", imported, failed)
 		} else {
-			ilog.Ok("processed %d config file(s) — use 'clashctl sub list' to check", count)
+			ilog.Ok("imported %d config file(s) — use 'clashctl sub list' to check", imported)
 		}
 	},
 }

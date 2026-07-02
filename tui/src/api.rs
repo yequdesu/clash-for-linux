@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::env;
 use std::fs;
-use std::path::PathBuf;
+use tokio::process::Command;
+
+use crate::config;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct KernelInfo {
@@ -103,56 +104,83 @@ pub struct ProfileEntry {
     pub interval: String,
 }
 
-pub fn read_profiles() -> ProfilesMeta {
-    let empty = ProfilesMeta { profiles: vec![], active_id: 0 };
-    let path = resolve_profiles_path();
-    match path {
-        Some(p) => {
-            match fs::read_to_string(&p) {
-                Ok(content) => serde_yaml::from_str(&content).unwrap_or(empty),
-                Err(_) => empty,
-            }
-        }
-        None => empty,
-    }
+#[derive(Debug, Default, Deserialize)]
+struct RuntimeTunConfig {
+    #[serde(default)]
+    tun: TunConfig,
 }
 
-fn resolve_profiles_path() -> Option<PathBuf> {
-    if let Ok(home) = env::var("HOME") {
-        for base in &["clashctl", ".clashctl"] {
-            let p = PathBuf::from(&home).join(base).join("resources").join("profiles.yaml");
-            if p.exists() {
-                return Some(p);
-            }
+#[derive(Debug, Default, Deserialize)]
+struct TunConfig {
+    #[serde(default)]
+    enable: bool,
+}
+
+pub fn read_profiles() -> ProfilesMeta {
+    let empty = ProfilesMeta {
+        profiles: vec![],
+        active_id: 0,
+    };
+    for resources in config::resource_paths() {
+        let path = resources.join("profiles.yaml");
+        if let Ok(content) = fs::read_to_string(&path) {
+            return serde_yaml::from_str(&content).unwrap_or(empty);
         }
     }
-    None
+    empty
 }
 
 pub fn read_tun_status() -> bool {
-    if let Ok(home) = env::var("HOME") {
-        for base in &["clashctl", ".clashctl"] {
-            let p = PathBuf::from(&home).join(base).join("resources").join("runtime.yaml");
-            if let Ok(content) = fs::read_to_string(&p) {
-                let mut in_tun = false;
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if trimmed == "tun:" {
-                        in_tun = true;
-                        continue;
-                    }
-                    if in_tun && !trimmed.starts_with(' ') && trimmed.contains(':') {
-                        in_tun = false;
-                        continue;
-                    }
-                    if in_tun && (trimmed == "enable: true" || trimmed.starts_with("enable: true")) {
-                        return true;
-                    }
-                }
-            }
+    for resources in config::resource_paths() {
+        let path = resources.join("runtime.yaml");
+        if let Ok(content) = fs::read_to_string(&path) {
+            return tun_enabled_from_yaml(&content).unwrap_or(false);
         }
     }
     false
+}
+
+fn tun_enabled_from_yaml(content: &str) -> Option<bool> {
+    let runtime: RuntimeTunConfig = serde_yaml::from_str(content).ok()?;
+    Some(runtime.tun.enable)
+}
+
+fn clashctl_bin() -> &'static str {
+    if std::path::Path::new("/usr/local/bin/clashctl").exists() {
+        "/usr/local/bin/clashctl"
+    } else {
+        "clashctl"
+    }
+}
+
+pub async fn run_clashctl_sub(action: &str, id: i32) -> Result<String, String> {
+    let id_arg = id.to_string();
+    let mut command = Command::new(clashctl_bin());
+    command.args(["sub", action, &id_arg]);
+    if let Some(install) = config::active_install_env() {
+        command.env("CLASH_BASE_DIR", &install.base_dir);
+        if let Some(service_name) = install.service_name.as_deref() {
+            command.env("SERVICE_NAME", service_name);
+        }
+        if let Some(kernel_name) = install.kernel_name.as_deref() {
+            command.env("KERNEL_NAME", kernel_name);
+        }
+    }
+    let output = command.output().await.map_err(|e| e.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if output.status.success() {
+        if stdout.is_empty() {
+            Ok(format!("subscription {} [{}] completed", action, id))
+        } else {
+            Ok(stdout.lines().last().unwrap_or("").to_string())
+        }
+    } else if stderr.is_empty() {
+        Err(stdout)
+    } else {
+        Err(stderr)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -166,10 +194,13 @@ impl ApiClient {
     pub fn new(base_url: String, api_key: String) -> Self {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(8))
-            .danger_accept_invalid_certs(true)
             .build()
             .expect("failed to create HTTP client");
-        Self { base_url, api_key, client }
+        Self {
+            base_url,
+            api_key,
+            client,
+        }
     }
 
     fn get(&self, path: &str) -> reqwest::RequestBuilder {
@@ -183,50 +214,145 @@ impl ApiClient {
 
     fn put(&self, path: &str, body: String) -> reqwest::RequestBuilder {
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
-        let mut req = self.client.put(&url).header("Content-Type", "application/json").body(body);
+        let mut req = self
+            .client
+            .put(&url)
+            .header("Content-Type", "application/json")
+            .body(body);
         if !self.api_key.is_empty() {
             req = req.header("Authorization", format!("Bearer {}", self.api_key));
         }
         req
     }
 
+    fn patch(&self, path: &str, body: String) -> reqwest::RequestBuilder {
+        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
+        let mut req = self
+            .client
+            .patch(&url)
+            .header("Content-Type", "application/json")
+            .body(body);
+        if !self.api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", self.api_key));
+        }
+        req
+    }
+
+    fn delete(&self, path: &str) -> reqwest::RequestBuilder {
+        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
+        let mut req = self.client.delete(&url);
+        if !self.api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", self.api_key));
+        }
+        req
+    }
+
+    async fn checked_text(resp: reqwest::Response) -> Result<String, String> {
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+        if status.is_success() {
+            Ok(text)
+        } else {
+            Err(Self::response_error(status, &text))
+        }
+    }
+
+    async fn checked_success(resp: reqwest::Response) -> Result<(), String> {
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+        Err(Self::response_error(status, &text))
+    }
+
+    async fn checked_no_content(resp: reqwest::Response) -> Result<(), String> {
+        let status = resp.status();
+        if status == reqwest::StatusCode::NO_CONTENT {
+            return Ok(());
+        }
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+        Err(Self::response_error(status, &text))
+    }
+
+    fn response_error(status: reqwest::StatusCode, text: &str) -> String {
+        let snippet: String = text.chars().take(4096).collect();
+        let snippet = snippet.trim();
+        if snippet.is_empty() {
+            format!("HTTP {}", status)
+        } else {
+            format!("HTTP {}: {}", status, snippet)
+        }
+    }
+
     pub async fn get_version(&self) -> Result<KernelInfo, String> {
-        let resp = self.get("/").send().await.map_err(|e| e.to_string())?;
-        resp.json::<KernelInfo>().await.map_err(|e| e.to_string())
+        let resp = self
+            .get("/version")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let raw = Self::checked_text(resp).await?;
+        serde_json::from_str::<KernelInfo>(&raw).map_err(|e| e.to_string())
     }
 
     pub async fn get_proxies(&self) -> Result<ProxiesResponse, String> {
-        let resp = self.get("/proxies").send().await.map_err(|e| e.to_string())?;
-        let raw = resp.text().await.map_err(|e| e.to_string())?;
+        let resp = self
+            .get("/proxies")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let raw = Self::checked_text(resp).await?;
         serde_json::from_str(&raw).map_err(|e| format!("{}: {}", e, raw))
     }
 
     pub async fn get_connections(&self) -> Result<ConnectionsResponse, String> {
-        let resp = self.get("/connections").send().await.map_err(|e| e.to_string())?;
-        resp.json::<ConnectionsResponse>().await.map_err(|e| e.to_string())
+        let resp = self
+            .get("/connections")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let raw = Self::checked_text(resp).await?;
+        serde_json::from_str::<ConnectionsResponse>(&raw).map_err(|e| e.to_string())
     }
 
     pub async fn test_delay(&self, name: &str) -> Result<u64, String> {
-        let path = format!("/proxies/{}/delay?url=http://www.gstatic.com/generate_204&timeout=5000", name);
+        let path = format!(
+            "/proxies/{}/delay?url={}&timeout=5000",
+            urlencoding::encode(name),
+            urlencoding::encode("http://www.gstatic.com/generate_204"),
+        );
         let resp = self.get(&path).send().await.map_err(|e| e.to_string())?;
-        let delay: DelayResponse = resp.json().await.map_err(|e| e.to_string())?;
+        let raw = Self::checked_text(resp).await?;
+        let delay: DelayResponse = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
         Ok(delay.delay)
     }
 
     pub async fn switch_proxy(&self, group: &str, target: &str) -> Result<(), String> {
-        let path = format!("/proxies/{}", group);
-        let body = format!(r#"{{"name":"{}"}}"#, target);
-        let resp = self.put(&path, body).send().await.map_err(|e| e.to_string())?;
-        if resp.status() == 204 {
-            Ok(())
-        } else {
-            Err(format!("HTTP {}", resp.status()))
-        }
+        let path = format!("/proxies/{}", urlencoding::encode(group));
+        let body = serde_json::json!({ "name": target }).to_string();
+        let resp = self
+            .put(&path, body)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Self::checked_no_content(resp).await
     }
 
-    pub async fn get_logs(&self) -> Result<Vec<LogEntry>, String> {
-        let resp = self.get("/logs?level=info").send().await.map_err(|e| e.to_string())?;
-        let raw = resp.text().await.map_err(|e| e.to_string())?;
+    pub async fn set_mode(&self, mode: &str) -> Result<(), String> {
+        let body = serde_json::json!({ "mode": mode }).to_string();
+        let resp = self
+            .patch("/configs", body)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Self::checked_success(resp).await
+    }
+
+    pub async fn get_logs(&self, level: &str) -> Result<Vec<LogEntry>, String> {
+        let level = urlencoding::encode(level);
+        let path = format!("/logs?level={}", level);
+        let resp = self.get(&path).send().await.map_err(|e| e.to_string())?;
+        let raw = Self::checked_text(resp).await?;
         let result: serde_json::Value = serde_json::from_str(&raw).map_err(|e| format!("{}", e))?;
         if let Some(logs) = result.get("logs") {
             return serde_json::from_value(logs.clone()).map_err(|e| e.to_string());
@@ -235,32 +361,130 @@ impl ApiClient {
     }
 
     pub async fn close_connection(&self, id: &str) -> Result<(), String> {
-        let path = format!("/connections/{}", id);
-        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
-        let mut req = self.client.delete(&url);
-        if !self.api_key.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", self.api_key));
-        }
-        let resp = req.send().await.map_err(|e| e.to_string())?;
-        if resp.status() == 204 {
-            Ok(())
-        } else {
-            Err(format!("HTTP {}", resp.status()))
-        }
+        let path = format!("/connections/{}", urlencoding::encode(id));
+        let resp = self.delete(&path).send().await.map_err(|e| e.to_string())?;
+        Self::checked_no_content(resp).await
     }
 
     pub async fn close_all_connections(&self) -> Result<(), String> {
-        let path = "/connections";
-        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
-        let mut req = self.client.delete(&url);
-        if !self.api_key.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", self.api_key));
-        }
-        let resp = req.send().await.map_err(|e| e.to_string())?;
-        if resp.status() == 204 {
-            Ok(())
-        } else {
-            Err(format!("HTTP {}", resp.status()))
-        }
+        let resp = self
+            .delete("/connections")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Self::checked_no_content(resp).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clashctl_bin, tun_enabled_from_yaml, ApiClient};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    #[test]
+    fn clashctl_bin_has_fallback() {
+        let bin = clashctl_bin();
+        assert!(bin == "/usr/local/bin/clashctl" || bin == "clashctl");
+    }
+
+    #[test]
+    fn tun_status_is_read_from_structured_yaml() {
+        let enabled = tun_enabled_from_yaml(
+            r#"
+mixed-port: 7890
+tun:
+  enable: true
+  stack: system
+"#,
+        );
+        assert_eq!(enabled, Some(true));
+
+        let disabled = tun_enabled_from_yaml(
+            r#"
+tun:
+  enable: false
+"#,
+        );
+        assert_eq!(disabled, Some(false));
+    }
+
+    #[test]
+    fn tun_status_missing_block_defaults_false() {
+        assert_eq!(tun_enabled_from_yaml("mixed-port: 7890\n"), Some(false));
+    }
+
+    fn serve_once(status: &str, body: &str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let addr = listener.local_addr().expect("listener address");
+        let status = status.to_string();
+        let body = body.to_string();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut buf = [0_u8; 4096];
+            let _ = stream.read(&mut buf);
+            let response = format!(
+                "HTTP/1.1 {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                status,
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        format!("http://{}", addr)
+    }
+
+    #[tokio::test]
+    async fn switch_proxy_error_includes_response_body() {
+        let client = ApiClient::new(
+            serve_once("400 Bad Request", "bad proxy name"),
+            String::new(),
+        );
+        let err = client
+            .switch_proxy("Auto", "missing")
+            .await
+            .expect_err("switch should fail");
+
+        assert!(err.contains("HTTP 400 Bad Request"), "err = {}", err);
+        assert!(err.contains("bad proxy name"), "err = {}", err);
+    }
+
+    #[tokio::test]
+    async fn close_connection_error_includes_response_body() {
+        let client = ApiClient::new(
+            serve_once("404 Not Found", "connection missing"),
+            String::new(),
+        );
+        let err = client
+            .close_connection("conn/1")
+            .await
+            .expect_err("close should fail");
+
+        assert!(err.contains("HTTP 404 Not Found"), "err = {}", err);
+        assert!(err.contains("connection missing"), "err = {}", err);
+    }
+
+    #[tokio::test]
+    async fn set_mode_error_body_is_truncated() {
+        let mut body = "x".repeat(4096);
+        body.push_str("TAIL");
+        let client = ApiClient::new(
+            serve_once("500 Internal Server Error", &body),
+            String::new(),
+        );
+        let err = client
+            .set_mode("global")
+            .await
+            .expect_err("mode switch should fail");
+
+        assert!(
+            err.contains("HTTP 500 Internal Server Error"),
+            "err = {}",
+            err
+        );
+        assert!(!err.contains("TAIL"), "err was not truncated");
     }
 }

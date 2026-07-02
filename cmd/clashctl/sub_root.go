@@ -8,6 +8,9 @@ var subCmd = &cobra.Command{
 	Use:   "sub",
 	Short: "Manage subscriptions",
 	Long:  "Add, list, remove, use, update, import, or view subscription logs.",
+	Run: func(cmd *cobra.Command, args []string) {
+		showHelpAndExit(cmd)
+	},
 }
 
 func init() {

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/yequdesu/linux-cli-tui-clash/internal/config"
 	ilog "github.com/yequdesu/linux-cli-tui-clash/internal/log"
@@ -41,4 +42,31 @@ func showProxyStatus() {
 	} else {
 		ilog.Warn("system proxy: off")
 	}
+}
+
+func proxyAddr(cfg *config.EnvConfig) (httpAddr, socksAddr string) {
+	info := readRuntimeInfo(cfg)
+	port := info.proxyPort
+	if port == "" {
+		port = "7890"
+	}
+	return fmt.Sprintf("http://127.0.0.1:%s", port),
+		fmt.Sprintf("socks5h://127.0.0.1:%s", port)
+}
+
+func printProxyExports(cfg *config.EnvConfig) {
+	httpAddr, socksAddr := proxyAddr(cfg)
+	fmt.Printf("export http_proxy=%s\n", httpAddr)
+	fmt.Printf("export HTTP_PROXY=%s\n", httpAddr)
+	fmt.Printf("export https_proxy=%s\n", httpAddr)
+	fmt.Printf("export HTTPS_PROXY=%s\n", httpAddr)
+	fmt.Printf("export all_proxy=%s\n", socksAddr)
+	fmt.Printf("export ALL_PROXY=%s\n", socksAddr)
+	fmt.Println("export no_proxy=localhost,127.0.0.1,::1")
+	fmt.Println("export NO_PROXY=localhost,127.0.0.1,::1")
+}
+
+func printProxyUnsets() {
+	keys := []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"}
+	fmt.Printf("unset %s\n", strings.Join(keys, " "))
 }

@@ -1,11 +1,10 @@
 package main
 
 import (
-	"os/exec"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
-	"github.com/yequdesu/linux-cli-tui-clash/internal/config"
 	ilog "github.com/yequdesu/linux-cli-tui-clash/internal/log"
 )
 
@@ -17,23 +16,33 @@ var secretCmd = &cobra.Command{
 		if len(args) == 0 {
 			info := readRuntimeInfo(cfg)
 			if info.secret != "" {
-				ilog.Info("current secret: %s", info.secret)
+				ilog.Info("current secret: set (hidden)")
+				ilog.Info("use 'clashctl secret show' to print it")
 			} else {
 				ilog.Warn("no secret set")
 			}
 			return
 		}
-		newSecret := args[0]
-		if err := exec.Command(cfg.YQBin(), "-i",
-			".secret = \""+newSecret+"\"", cfg.MixinPath(),
-		).Run(); err != nil {
-			ilog.Warn("set secret failed: %v", err)
+		if args[0] == "show" {
+			info := readRuntimeInfo(cfg)
+			if info.secret == "" {
+				ilog.Fatal("no secret set")
+			}
+			ilog.Warn("printing API secret to terminal")
+			ilog.Info("current secret: %s", info.secret)
 			return
 		}
-		if err := config.MergeConfig(cfg, false); err != nil {
-			ilog.Warn("merge failed: %v", err)
-			return
+		newSecret := args[0]
+		if err := setAPISecret(newSecret); err != nil {
+			ilog.Fatal("%v", err)
 		}
 		ilog.Ok("secret updated (restart kernel to apply)")
 	},
+}
+
+func setAPISecret(newSecret string) error {
+	if newSecret == "" {
+		return fmt.Errorf("secret cannot be empty")
+	}
+	return applyMixinUpdates(map[string]any{"secret": newSecret})
 }

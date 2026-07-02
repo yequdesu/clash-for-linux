@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -34,10 +33,7 @@ var statusCmd = &cobra.Command{
 		}
 
 		info := readRuntimeInfo(cfg)
-		apiPort := info.apiPort
-		if apiPort == "" {
-			apiPort = "9090"
-		}
+		apiPort := info.apiPortOrDefault()
 		proxyPort := info.proxyPort
 		if proxyPort == "" {
 			proxyPort = "7890"
@@ -56,36 +52,35 @@ var statusCmd = &cobra.Command{
 		}
 
 		if apiPort != "" {
-			if portOpen(apiPort) {
-				ilog.Ok("api port: %s", apiPort)
+			if apiOpen(info) {
+				ilog.Ok("api: %s", info.apiAddress())
 			} else {
 				if running {
-					ilog.Warn("api port: %s  NOT listening", apiPort)
+					ilog.Warn("api: %s  NOT listening", info.apiAddress())
 				} else {
-					ilog.Info("api port: %s", apiPort)
+					ilog.Info("api: %s", info.apiAddress())
 				}
 			}
 		}
 
 		if running {
-			api := kernel.NewClient(fmt.Sprintf("http://127.0.0.1:%s", apiPort), info.secret)
+			api := kernel.NewClient(info.apiBaseURL(), info.secret)
 			if ver, err := api.GetVersion(); err == nil {
 				ilog.Info("version: %s", ver)
 			}
 		}
 
 		if info.secret != "" {
-			ilog.Info("api key: %s", info.secret)
+			ilog.Info("api key: set")
+		} else {
+			ilog.Warn("api key: empty")
 		}
 
-		meta, _ := config.LoadProfiles(cfg.ProfilesMeta())
-		if len(meta.Profiles) > 0 {
-			current := meta.GetCurrent()
-			if current != nil {
-				ilog.Info("subscriptions: %d active ([%d] %s)", len(meta.Profiles), current.ID, shortenURL(current.URL))
-			} else {
-				ilog.Info("subscriptions: %d (none active — run 'clashctl sub use <id>')", len(meta.Profiles))
-			}
+		subscriptions, err := statusSubscriptionSummary(cfg)
+		if err != nil {
+			ilog.Warn("subscriptions: cannot read profiles metadata: %v", err)
+		} else if subscriptions != "" {
+			ilog.Info("%s", subscriptions)
 		}
 
 		hp := os.Getenv("http_proxy")
@@ -97,46 +92,66 @@ var statusCmd = &cobra.Command{
 	},
 }
 
+func statusSubscriptionSummary(cfg *config.EnvConfig) (string, error) {
+	meta, err := config.LoadProfiles(cfg.ProfilesMeta())
+	if err != nil {
+		return "", err
+	}
+	if len(meta.Profiles) == 0 {
+		return "", nil
+	}
+	current := meta.GetCurrent()
+	if current != nil {
+		return fmt.Sprintf("subscriptions: %d active ([%d] %s)", len(meta.Profiles), current.ID, shortenURL(current.URL)), nil
+	}
+	return fmt.Sprintf("subscriptions: %d (none active — run 'clashctl sub use <id>')", len(meta.Profiles)), nil
+}
+
 type runtimeInfo struct {
 	proxyPort string
+	apiHost   string
 	apiPort   string
 	secret    string
+	tun       bool
 }
 
 func readRuntimeInfo(cfg *config.EnvConfig) runtimeInfo {
-	var info runtimeInfo
-	data, err := os.ReadFile(cfg.RuntimePath())
-	if err != nil {
-		return info
+	parsed := config.LoadRuntimeInfo(cfg)
+	return runtimeInfo{
+		proxyPort: parsed.ProxyPort,
+		apiHost:   parsed.APIHost,
+		apiPort:   parsed.APIPort,
+		secret:    parsed.Secret,
+		tun:       parsed.TunEnabled,
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(line, "mixed-port:"):
-			info.proxyPort = strings.TrimSpace(strings.TrimPrefix(line, "mixed-port:"))
-			info.proxyPort = strings.Trim(info.proxyPort, `"'`)
-		case strings.HasPrefix(line, "port:"):
-			if info.proxyPort == "" {
-				info.proxyPort = strings.TrimSpace(strings.TrimPrefix(line, "port:"))
-				info.proxyPort = strings.Trim(info.proxyPort, `"'`)
-			}
-		case strings.HasPrefix(line, "external-controller:"):
-			addr := strings.TrimSpace(strings.TrimPrefix(line, "external-controller:"))
-			addr = strings.Trim(addr, `"'`)
-			if idx := strings.LastIndex(addr, ":"); idx >= 0 {
-				info.apiPort = addr[idx+1:]
-				info.apiPort = strings.Trim(info.apiPort, `"'`)
-			}
-		case strings.HasPrefix(line, "secret:"):
-			info.secret = strings.TrimSpace(strings.TrimPrefix(line, "secret:"))
-			info.secret = strings.Trim(info.secret, `"'`)
-		}
-	}
-	return info
+}
+
+func (r runtimeInfo) configRuntimeInfo() config.RuntimeInfo {
+	return config.RuntimeInfo{APIHost: r.apiHost, APIPort: r.apiPort}
+}
+
+func (r runtimeInfo) apiPortOrDefault() string {
+	return r.configRuntimeInfo().APIPortOrDefault("9090")
+}
+
+func (r runtimeInfo) apiAddress() string {
+	return r.configRuntimeInfo().APIAddress("9090")
+}
+
+func (r runtimeInfo) apiBaseURL() string {
+	return r.configRuntimeInfo().APIBaseURL("9090")
+}
+
+func apiOpen(info runtimeInfo) bool {
+	return tcpOpen(info.apiAddress())
 }
 
 func portOpen(port string) bool {
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 1*time.Second)
+	return tcpOpen(net.JoinHostPort("127.0.0.1", port))
+}
+
+func tcpOpen(address string) bool {
+	conn, err := net.DialTimeout("tcp", address, 1*time.Second)
 	if err != nil {
 		return false
 	}

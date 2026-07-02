@@ -9,6 +9,7 @@ import (
 
 type EnvConfig struct {
 	KernelName          string
+	ServiceName         string
 	ClashBaseDir        string
 	ClashConfigURL      string
 	ClashSubUA          string
@@ -16,22 +17,27 @@ type EnvConfig struct {
 	URLGhProxy          string
 	VersionMihomo       string
 	VersionYQ           string
+	VersionGeodata      string
 	VersionSubConverter string
 }
 
 func LoadEnv() *EnvConfig {
 	cfg := &EnvConfig{
 		KernelName:          "mihomo",
+		ServiceName:         "clashctl",
 		ClashBaseDir:        resolveBaseDir(),
 		ClashSubUA:          "clash-verge/v2.4.0",
 		URLGhProxy:          "https://gh-proxy.org",
 		VersionMihomo:       "v1.19.17",
 		VersionYQ:           "v4.49.2",
+		VersionGeodata:      "latest",
 		VersionSubConverter: "v0.9.0",
 	}
 
-	envFile := filepath.Join(cfg.ClashBaseDir, ".env")
-	parseEnvFile(envFile, cfg)
+	parseEnvFile("/etc/clashctl/install.env", cfg)
+	parseUserInstallMarker(cfg)
+	parseEnvFile(filepath.Join(cfg.ClashBaseDir, ".env"), cfg)
+	applyProcessEnv(cfg)
 	return cfg
 }
 
@@ -119,6 +125,8 @@ func parseEnvFile(path string, cfg *EnvConfig) {
 		switch key {
 		case "KERNEL_NAME":
 			cfg.KernelName = val
+		case "SERVICE_NAME", "CLASH_SERVICE_NAME":
+			cfg.ServiceName = val
 		case "CLASH_BASE_DIR":
 			cfg.ClashBaseDir = expandHome(val)
 		case "CLASH_CONFIG_URL":
@@ -133,9 +141,57 @@ func parseEnvFile(path string, cfg *EnvConfig) {
 			cfg.VersionMihomo = val
 		case "VERSION_YQ":
 			cfg.VersionYQ = val
+		case "VERSION_GEODATA":
+			cfg.VersionGeodata = val
 		case "VERSION_SUBCONVERTER":
 			cfg.VersionSubConverter = val
 		}
+	}
+}
+
+func parseUserInstallMarker(cfg *EnvConfig) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return
+	}
+	parseEnvFile(filepath.Join(home, ".config", "clashctl", "install.env"), cfg)
+}
+
+func applyProcessEnv(cfg *EnvConfig) {
+	if val := os.Getenv("KERNEL_NAME"); val != "" {
+		cfg.KernelName = val
+	}
+	if val := os.Getenv("SERVICE_NAME"); val != "" {
+		cfg.ServiceName = val
+	} else if val := os.Getenv("CLASH_SERVICE_NAME"); val != "" {
+		cfg.ServiceName = val
+	}
+	if val := os.Getenv("CLASH_BASE_DIR"); val != "" {
+		cfg.ClashBaseDir = expandHome(val)
+	}
+	if val := os.Getenv("CLASH_CONFIG_URL"); val != "" {
+		cfg.ClashConfigURL = val
+	}
+	if val := os.Getenv("CLASH_SUB_UA"); val != "" {
+		cfg.ClashSubUA = val
+	}
+	if val := os.Getenv("INIT_TYPE"); val != "" {
+		cfg.InitType = val
+	}
+	if val := os.Getenv("URL_GH_PROXY"); val != "" {
+		cfg.URLGhProxy = val
+	}
+	if val := os.Getenv("VERSION_MIHOMO"); val != "" {
+		cfg.VersionMihomo = val
+	}
+	if val := os.Getenv("VERSION_YQ"); val != "" {
+		cfg.VersionYQ = val
+	}
+	if val := os.Getenv("VERSION_GEODATA"); val != "" {
+		cfg.VersionGeodata = val
+	}
+	if val := os.Getenv("VERSION_SUBCONVERTER"); val != "" {
+		cfg.VersionSubConverter = val
 	}
 }
 
@@ -145,10 +201,13 @@ func (c *EnvConfig) MixinPath() string       { return filepath.Join(c.ResourcesD
 func (c *EnvConfig) RuntimePath() string     { return filepath.Join(c.ResourcesDir(), "runtime.yaml") }
 func (c *EnvConfig) TempPath() string        { return filepath.Join(c.ResourcesDir(), "temp.yaml") }
 func (c *EnvConfig) BinDir() string          { return filepath.Join(c.ClashBaseDir, "bin") }
+func (c *EnvConfig) LogDir() string          { return filepath.Join(c.ClashBaseDir, "logs") }
 func (c *EnvConfig) KernelBin() string       { return filepath.Join(c.BinDir(), c.KernelName) }
 func (c *EnvConfig) YQBin() string           { return filepath.Join(c.BinDir(), "yq") }
 func (c *EnvConfig) SubconverterDir() string { return filepath.Join(c.BinDir(), "subconverter") }
-func (c *EnvConfig) SubconverterBin() string { return filepath.Join(c.SubconverterDir(), "subconverter") }
+func (c *EnvConfig) SubconverterBin() string {
+	return filepath.Join(c.SubconverterDir(), "subconverter")
+}
 func (c *EnvConfig) SubconverterConfig() string {
 	return filepath.Join(c.SubconverterDir(), "pref.yml")
 }
@@ -156,5 +215,8 @@ func (c *EnvConfig) ProfilesMeta() string { return filepath.Join(c.ResourcesDir(
 func (c *EnvConfig) ProfilesDir() string  { return filepath.Join(c.ResourcesDir(), "profiles") }
 func (c *EnvConfig) ProfilesLog() string  { return filepath.Join(c.ResourcesDir(), "profiles.log") }
 func (c *EnvConfig) ConfigsDir() string   { return filepath.Join(c.ResourcesDir(), "configs") }
-func (c *EnvConfig) LogFile() string      { return "/var/log/" + c.KernelName + ".log" }
-func (c *EnvConfig) PidFile() string      { return "/run/" + c.KernelName + ".pid" }
+func (c *EnvConfig) LogFile() string      { return filepath.Join(c.LogDir(), c.KernelName+".log") }
+func (c *EnvConfig) InstallState() string { return filepath.Join(c.ClashBaseDir, "install-state.json") }
+func (c *EnvConfig) PidFile() string {
+	return filepath.Join(c.ClashBaseDir, "runtime", c.KernelName+".pid")
+}
