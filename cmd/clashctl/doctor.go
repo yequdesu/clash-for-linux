@@ -207,6 +207,10 @@ func collectDoctorResults(cfg *config.EnvConfig) []doctorResult {
 		if pid := svc.PID(); pid > 0 && !systemdActive {
 			add(doctorWarn, "service state", fmt.Sprintf("kernel pid %d running outside active systemd unit", pid))
 		}
+		if svc.InitType() != "systemd" {
+			add(doctorWarn, "service manager", fmt.Sprintf("systemd unit exists but manager selected %s", svc.InitType()))
+		}
+		checkSystemdUnitSafety(add, cfg.ServiceName, cfg)
 	}
 	if svc.InitType() == "systemd" {
 		if serviceUnitExists(cfg.ServiceName) {
@@ -215,6 +219,7 @@ func collectDoctorResults(cfg *config.EnvConfig) []doctorResult {
 			add(doctorWarn, "systemd unit", cfg.ServiceName+".service not installed")
 		}
 	}
+	checkSSHTunBypassState(add, cfg)
 
 	for _, name := range []string{"Country.mmdb", "geosite.dat", "geoip.dat"} {
 		path := filepath.Join(cfg.ResourcesDir(), name)
@@ -319,6 +324,65 @@ func checkSSHTunRisk(add func(doctorLevel, string, string), info config.RuntimeI
 	add(doctorWarn, "ssh tun", "SSH session detected from "+client+" while TUN auto-route is enabled; start/tun on will protect this route when possible")
 }
 
+func checkSystemdUnitSafety(add func(doctorLevel, string, string), serviceName string, cfg *config.EnvConfig) {
+	path := systemdUnitPath(serviceName)
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		add(doctorWarn, "systemd unit", "cannot read "+path+": "+err.Error())
+		return
+	}
+	text := string(data)
+	if strings.Contains(text, "LimitNPROC=") {
+		add(doctorWarn, "systemd unit", "contains legacy LimitNPROC; reinstall to avoid fork failures")
+	}
+	if strings.Contains(text, "ExecStartPre=/usr/bin/sleep") {
+		add(doctorWarn, "systemd unit", "contains legacy ExecStartPre sleep; reinstall to avoid fork failures")
+	}
+	if !strings.Contains(text, cfg.KernelBin()) {
+		add(doctorWarn, "systemd unit", "ExecStart may not match current kernel path: "+cfg.KernelBin())
+	}
+}
+
+func checkSSHTunBypassState(add func(doctorLevel, string, string), cfg *config.EnvConfig) {
+	path := sshTunBypassStatePath(cfg)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			add(doctorWarn, "ssh bypass", "cannot read "+path+": "+err.Error())
+		}
+		return
+	}
+	var state sshTunBypassState
+	if err := json.Unmarshal(data, &state); err != nil {
+		add(doctorWarn, "ssh bypass", "invalid state file: "+path)
+		return
+	}
+	if len(state.Entries) == 0 {
+		add(doctorWarn, "ssh bypass", "state file has no entries: "+path)
+		return
+	}
+	if _, err := exec.LookPath("ip"); err != nil {
+		add(doctorWarn, "ssh bypass", "state exists but ip command is unavailable")
+		return
+	}
+	for _, entry := range state.Entries {
+		out, err := exec.Command("ip", append(ipFamilyArgsFor(entry.Family), "rule", "show", "priority", entry.Priority)...).Output()
+		if err != nil {
+			add(doctorWarn, "ssh bypass", "cannot inspect ip rule priority "+entry.Priority)
+			continue
+		}
+		text := string(out)
+		if strings.Contains(text, entry.Prefix) && strings.Contains(text, "lookup "+entry.Table) {
+			add(doctorOK, "ssh bypass", fmt.Sprintf("%s lookup %s priority %s", entry.Prefix, entry.Table, entry.Priority))
+		} else {
+			add(doctorWarn, "ssh bypass", fmt.Sprintf("state exists but rule missing for %s lookup %s priority %s", entry.Prefix, entry.Table, entry.Priority))
+		}
+	}
+}
+
 func validateInstallState(path string, cfg *config.EnvConfig) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -363,12 +427,17 @@ func validateInstallState(path string, cfg *config.EnvConfig) (string, error) {
 }
 
 func serviceUnitExists(serviceName string) bool {
+	return systemdUnitPath(serviceName) != ""
+}
+
+func systemdUnitPath(serviceName string) string {
 	for _, dir := range []string{"/etc/systemd/system", "/lib/systemd/system", "/usr/lib/systemd/system"} {
-		if _, err := os.Stat(filepath.Join(dir, serviceName+".service")); err == nil {
-			return true
+		path := filepath.Join(dir, serviceName+".service")
+		if _, err := os.Stat(path); err == nil {
+			return path
 		}
 	}
-	return false
+	return ""
 }
 
 func isSafeController(controller string) bool {

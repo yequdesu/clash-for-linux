@@ -166,6 +166,48 @@ func TestChangeTunModeRestoresConfigWhenStopFails(t *testing.T) {
 	assertFileContent(t, cfg.RuntimePath(), originalRuntime)
 }
 
+func TestChangeTunModeReportsRollbackRestartFailure(t *testing.T) {
+	base := t.TempDir()
+	cfg := &config.EnvConfig{ClashBaseDir: base}
+	if err := os.MkdirAll(cfg.ResourcesDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	originalMixin := []byte("mixed-port: 7890\ntun:\n  enable: true\n")
+	originalRuntime := []byte("mixed-port: 7890\ntun:\n  enable: true\n")
+	if err := os.WriteFile(cfg.MixinPath(), originalMixin, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg.RuntimePath(), originalRuntime, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	service := &fakeTunService{
+		running:     true,
+		startErrors: []error{errors.New("new config failed"), errors.New("old config failed")},
+	}
+	oldNewTunService := newTunService
+	newTunService = func(*config.EnvConfig) tunService {
+		return service
+	}
+	defer func() { newTunService = oldNewTunService }()
+
+	oldMergeTunConfig := mergeTunConfig
+	mergeTunConfig = func(cfg *config.EnvConfig, _ bool) error {
+		return config.AtomicWriteFile(cfg.RuntimePath(), []byte("mixed-port: 7999\n"), 0o644)
+	}
+	defer func() { mergeTunConfig = oldMergeTunConfig }()
+
+	err := changeTunMode(cfg, false)
+	if err == nil || !strings.Contains(err.Error(), "rollback failed") {
+		t.Fatalf("changeTunMode error = %v, want rollback failure", err)
+	}
+	assertFileContent(t, cfg.MixinPath(), originalMixin)
+	assertFileContent(t, cfg.RuntimePath(), originalRuntime)
+	if service.startCalledCount != 2 {
+		t.Fatalf("startCalledCount = %d, want 2", service.startCalledCount)
+	}
+}
+
 func readTunEnabled(t *testing.T, path string) bool {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -184,10 +226,12 @@ func readTunEnabled(t *testing.T, path string) bool {
 }
 
 type fakeTunService struct {
-	running     bool
-	stopErr     error
-	stopCalled  bool
-	startCalled bool
+	running          bool
+	stopErr          error
+	stopCalled       bool
+	startCalled      bool
+	startCalledCount int
+	startErrors      []error
 }
 
 func (f *fakeTunService) IsRunning() bool {
@@ -196,11 +240,22 @@ func (f *fakeTunService) IsRunning() bool {
 
 func (f *fakeTunService) Stop() error {
 	f.stopCalled = true
-	return f.stopErr
+	if f.stopErr != nil {
+		return f.stopErr
+	}
+	f.running = false
+	return nil
 }
 
 func (f *fakeTunService) Start() error {
 	f.startCalled = true
+	f.startCalledCount++
+	if len(f.startErrors) > 0 {
+		err := f.startErrors[0]
+		f.startErrors = f.startErrors[1:]
+		return err
+	}
+	f.running = true
 	return nil
 }
 

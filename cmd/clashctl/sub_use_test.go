@@ -163,40 +163,44 @@ func TestSwitchSubscriptionRestoresRunningServiceWhenStartFails(t *testing.T) {
 	}
 }
 
-func TestSwitchSubscriptionRestoresConfigWhenStoppedServiceStartFails(t *testing.T) {
+func TestSwitchSubscriptionDoesNotStartStoppedService(t *testing.T) {
 	base := t.TempDir()
-	cfg := &config.EnvConfig{
+	testCfg := &config.EnvConfig{
 		ClashBaseDir: base,
 		KernelName:   "missing-kernel",
 		ClashSubUA:   "test",
 	}
-	if err := os.MkdirAll(cfg.ResourcesDir(), 0o755); err != nil {
+	oldGlobalCfg := cfg
+	cfg = testCfg
+	defer func() { cfg = oldGlobalCfg }()
+
+	if err := os.MkdirAll(testCfg.ResourcesDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(cfg.ProfilesDir(), 0o755); err != nil {
+	if err := os.MkdirAll(testCfg.ProfilesDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	oldConfig := []byte("proxies:\n  - name: old\n")
 	oldRuntime := []byte("mixed-port: 7890\n")
-	if err := os.WriteFile(cfg.ConfigPath(), oldConfig, 0o644); err != nil {
+	if err := os.WriteFile(testCfg.ConfigPath(), oldConfig, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cfg.RuntimePath(), oldRuntime, 0o644); err != nil {
+	if err := os.WriteFile(testCfg.RuntimePath(), oldRuntime, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	nextProfile := filepath.Join(cfg.ProfilesDir(), "2.yaml")
+	nextProfile := filepath.Join(testCfg.ProfilesDir(), "2.yaml")
 	if err := os.WriteFile(nextProfile, []byte("proxies:\n  - name: next\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	meta := &config.ProfilesMeta{
 		Use: 1,
 		Profiles: []config.Profile{
-			{ID: 1, Path: filepath.Join(cfg.ProfilesDir(), "1.yaml"), URL: "file://old.yaml"},
+			{ID: 1, Path: filepath.Join(testCfg.ProfilesDir(), "1.yaml"), URL: "file://old.yaml"},
 			{ID: 2, Path: nextProfile, URL: "file://next.yaml"},
 		},
 	}
-	if err := config.SaveProfiles(cfg.ProfilesMeta(), meta); err != nil {
+	if err := config.SaveProfiles(testCfg.ProfilesMeta(), meta); err != nil {
 		t.Fatal(err)
 	}
 
@@ -213,34 +217,34 @@ func TestSwitchSubscriptionRestoresConfigWhenStoppedServiceStartFails(t *testing
 	}
 	defer func() { newSubscriptionService = originalServiceFactory }()
 
-	err := switchSubscription(cfg, 2)
-	if err == nil || !strings.Contains(err.Error(), "start failed, restored previous config") {
-		t.Fatalf("switchSubscription error = %v, want restored start failure", err)
+	if err := switchSubscription(testCfg, 2); err != nil {
+		t.Fatalf("switchSubscription: %v", err)
 	}
 
-	configData, err := os.ReadFile(cfg.ConfigPath())
+	configData, err := os.ReadFile(testCfg.ConfigPath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(configData) != string(oldConfig) {
-		t.Fatalf("config.yaml = %q, want %q", configData, oldConfig)
+	nextConfig := []byte("proxies:\n  - name: next\n")
+	if string(configData) != string(nextConfig) {
+		t.Fatalf("config.yaml = %q, want %q", configData, nextConfig)
 	}
-	runtimeData, err := os.ReadFile(cfg.RuntimePath())
+	runtimeData, err := os.ReadFile(testCfg.RuntimePath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(runtimeData) != string(oldRuntime) {
-		t.Fatalf("runtime.yaml = %q, want %q", runtimeData, oldRuntime)
+	if string(runtimeData) != "mixed-port: 7999\n" {
+		t.Fatalf("runtime.yaml = %q, want merged runtime", runtimeData)
 	}
-	after, err := config.LoadProfiles(cfg.ProfilesMeta())
+	after, err := config.LoadProfiles(testCfg.ProfilesMeta())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Use != 1 {
-		t.Fatalf("active profile = %d, want 1", after.Use)
+	if after.Use != 2 {
+		t.Fatalf("active profile = %d, want 2", after.Use)
 	}
-	if fakeSvc.startCount != 1 {
-		t.Fatalf("startCount = %d, want 1", fakeSvc.startCount)
+	if fakeSvc.startCount != 0 {
+		t.Fatalf("startCount = %d, want 0", fakeSvc.startCount)
 	}
 }
 

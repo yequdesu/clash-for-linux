@@ -14,6 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"; cd "$SCRIPT_DIR"
 _log_ok()   { printf '\r\033[32m[+]\033[0m %s\r\n' "$*"; }
 _log_info() { printf '\r\033[36m[i]\033[0m %s\r\n' "$*"; }
 _log_warn() { printf '\r\033[33m[!]\033[0m %s\r\n' "$*"; }
+_log_fatal(){ printf '\r\n\033[31m[x]\033[0m %s\r\n\r\n' "$*" >&2; exit 1; }
 _sudo()     { [ "$(id -u)" -eq 0 ] && "$@" || sudo "$@"; }
 
 _gh_download() {
@@ -93,15 +94,39 @@ _install_release_artifacts() {
 
 # ── Pre-flight: cache sudo ──
 if [ "$(id -u)" -ne 0 ]; then
-    sudo -v || _log_warn "sudo auth failed — binary install may be skipped"
+    sudo -v || _log_fatal "sudo authentication failed; cannot update /usr/local/bin binaries"
     ( while true; do sudo -v; sleep 60; done ) &
     SUDO_KEEPER=$!
     trap 'kill $SUDO_KEEPER 2>/dev/null' EXIT
 fi
 
-_log_info "stopping kernel..."
+CLASHCTL_LIFECYCLE_INIT_TYPE="${INIT_TYPE:-}"
+if [ -z "$CLASHCTL_LIFECYCLE_INIT_TYPE" ] && [ -r /etc/clashctl/install.env ]; then
+    CLASHCTL_LIFECYCLE_INIT_TYPE="$(grep -E '^INIT_TYPE=' /etc/clashctl/install.env 2>/dev/null | tail -n1 | cut -d= -f2-)"
+fi
+
+_clashctl_lifecycle() {
+    local clashctl_bin
+    clashctl_bin="$(command -v clashctl 2>/dev/null || true)"
+    [ -n "$clashctl_bin" ] || _log_fatal "clashctl not found"
+    if [ "$CLASHCTL_LIFECYCLE_INIT_TYPE" = "systemd" ]; then
+        _sudo "$clashctl_bin" "$@"
+    else
+        "$clashctl_bin" "$@"
+    fi
+}
+
+WAS_RUNNING=false
 if command -v clashctl >/dev/null 2>&1; then
-    clashctl stop 2>/dev/null || true
+    if _clashctl_lifecycle status 2>/dev/null | grep -q 'kernel: running'; then
+        WAS_RUNNING=true
+    fi
+    if $WAS_RUNNING; then
+        _log_info "stopping kernel..."
+        _clashctl_lifecycle stop || _log_fatal "failed to stop running kernel before update"
+    else
+        _log_info "kernel is not running; update will not auto-start it"
+    fi
 fi
 
 # ── Git pull ──
@@ -119,12 +144,12 @@ if ! _install_release_artifacts "$WANT_TUI"; then
     # ── Always rebuild CLI ──
     if command -v go >/dev/null 2>&1; then
         _log_info "rebuilding clashctl..."
-        GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" go build -ldflags="-s -w" -o /tmp/clashctl ./cmd/clashctl/ && {
-            _sudo install -D /tmp/clashctl /usr/local/bin/clashctl; rm -f /tmp/clashctl
-            _log_ok "clashctl updated"
-        } || _log_warn "clashctl build failed — re-run after fixing Go"
+        GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" go build -ldflags="-s -w" -o /tmp/clashctl ./cmd/clashctl/ || _log_fatal "clashctl build failed"
+        _sudo install -D /tmp/clashctl /usr/local/bin/clashctl || _log_fatal "failed to install clashctl to /usr/local/bin"
+        rm -f /tmp/clashctl
+        _log_ok "clashctl updated"
     else
-        _log_warn "Go not found — skipping CLI rebuild"
+        _log_fatal "Go not found and no valid release artifact was installed"
     fi
 
     # ── Rebuild TUI only when it is installed ──
@@ -135,7 +160,7 @@ if ! _install_release_artifacts "$WANT_TUI"; then
                 _log_info "rebuilding clash-tui..."
                 ( cd tui && cargo build --release 2>&1 | tail -3 )
                 if [ -f tui/target/release/clash-tui ]; then
-                    _sudo install -D tui/target/release/clash-tui /usr/local/bin/clash-tui
+                    _sudo install -D tui/target/release/clash-tui /usr/local/bin/clash-tui || _log_fatal "failed to install clash-tui to /usr/local/bin"
                     _log_ok "clash-tui updated"
                 else
                     _log_warn "clash-tui build failed"
@@ -149,11 +174,17 @@ fi
 
 # ── Restart with updated binary ──
 if command -v clashctl >/dev/null 2>&1; then
-    clashctl start 2>/dev/null || true
-    _log_info "checking kernel update..."
-    clashctl upgrade-kernel 2>/dev/null || _log_info "kernel is up to date"
+    if $WAS_RUNNING; then
+        _clashctl_lifecycle start || _log_fatal "updated clashctl installed, but kernel restart failed"
+    fi
+    if [ "${CLASHCTL_AUTO_UPGRADE_KERNEL:-false}" = "true" ]; then
+        _log_info "checking kernel update..."
+        _clashctl_lifecycle upgrade-kernel || _log_fatal "kernel upgrade failed"
+    else
+        _log_info "kernel binary upgrade skipped; run 'clashctl upgrade-kernel' explicitly if needed"
+    fi
 else
-    _log_warn "clashctl not found — start kernel manually"
+    _log_fatal "clashctl not found after update"
 fi
 
 _log_ok "update complete"

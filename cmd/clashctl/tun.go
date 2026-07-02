@@ -120,30 +120,50 @@ func changeTunMode(cfg *config.EnvConfig, enable bool) error {
 		ensureSetcap(cfg.KernelBin())
 	}
 	if err := svc.Start(); err != nil {
-		restoreSnapshots(snapshots)
-		if wasRunning {
-			_ = svc.Start()
-		}
+		rollbackErr := rollbackTunChange(svc, snapshots, wasRunning)
+		startErr := fmt.Errorf("restart: %w", err)
 		if strings.Contains(err.Error(), "exit status 5") || strings.Contains(err.Error(), "died") {
-			return fmt.Errorf("kernel may lack capability or config is invalid; try: sudo setcap cap_net_admin,cap_net_raw+ep %s", cfg.KernelBin())
+			startErr = fmt.Errorf("restart: kernel may lack capability or config is invalid; try: sudo setcap cap_net_admin,cap_net_raw+ep %s", cfg.KernelBin())
 		}
-		return fmt.Errorf("restart: %w", err)
+		return combineRollbackError(startErr, rollbackErr)
 	}
 
 	if enable {
 		if _, err := verifyTunDevice(); err != nil {
-			restoreSnapshots(snapshots)
-			if wasRunning {
-				_ = svc.Stop()
-				_ = svc.Start()
-			} else {
-				_ = svc.Stop()
-			}
-			return fmt.Errorf("TUN device not detected after start: %w", err)
+			rollbackErr := rollbackTunChange(svc, snapshots, wasRunning)
+			return combineRollbackError(fmt.Errorf("TUN device not detected after start: %w", err), rollbackErr)
 		}
 	}
 
 	return nil
+}
+
+func rollbackTunChange(svc tunService, snapshots []fileSnapshot, wasRunning bool) error {
+	restoreSnapshots(snapshots)
+	if wasRunning {
+		if svc.IsRunning() {
+			if err := svc.Stop(); err != nil {
+				return fmt.Errorf("stop failed kernel after restoring config: %w", err)
+			}
+		}
+		if err := svc.Start(); err != nil {
+			return fmt.Errorf("restart previous kernel after restoring config: %w", err)
+		}
+		return nil
+	}
+	if svc.IsRunning() {
+		if err := svc.Stop(); err != nil {
+			return fmt.Errorf("stop failed kernel after restoring config: %w", err)
+		}
+	}
+	return nil
+}
+
+func combineRollbackError(primary, rollback error) error {
+	if rollback == nil {
+		return primary
+	}
+	return fmt.Errorf("%w; rollback failed: %v", primary, rollback)
 }
 
 func checkTunPrerequisites() error {

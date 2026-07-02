@@ -22,29 +22,51 @@ type ServiceManager struct {
 func NewServiceManager(cfg *config.EnvConfig) *ServiceManager {
 	return &ServiceManager{
 		cfg:      cfg,
-		initType: detectInit(),
+		initType: detectInit(cfg),
 	}
 }
 
-func detectInit() string {
-	if initType := os.Getenv("CLASH_INIT_TYPE"); initType != "" {
+func detectInit(cfg *config.EnvConfig) string {
+	if initType := configuredInitType(cfg); initType != "" {
 		return initType
 	}
-	if !hasSystemd() {
+	if cfg != nil && cfg.ServiceName != "" && unitExists(cfg.ServiceName+".service") {
+		if hasSystemdRuntime() {
+			return "systemd"
+		}
 		return "nohup"
 	}
-	if isContainer() {
-		return "nohup"
+	if hasSystemdRuntime() {
+		return "systemd"
 	}
-	return "systemd"
+	return "nohup"
 }
 
-func hasSystemd() bool {
-	exe, err := os.Readlink("/proc/1/exe")
-	if err != nil {
-		return false
+func configuredInitType(cfg *config.EnvConfig) string {
+	for _, value := range []string{
+		os.Getenv("CLASH_INIT_TYPE"),
+		os.Getenv("INIT_TYPE"),
+		func() string {
+			if cfg == nil {
+				return ""
+			}
+			return cfg.InitType
+		}(),
+	} {
+		initType := strings.ToLower(strings.TrimSpace(value))
+		if initType != "" {
+			return initType
+		}
 	}
-	return strings.Contains(filepath.Base(exe), "systemd")
+	return ""
+}
+
+func hasSystemdRuntime() bool {
+	if fi, err := os.Stat("/run/systemd/system"); err == nil && fi.IsDir() {
+		return true
+	}
+	exe, err := os.Readlink("/proc/1/exe")
+	return err == nil && strings.Contains(filepath.Base(exe), "systemd")
 }
 
 func isContainer() bool {
@@ -97,12 +119,12 @@ func (s *ServiceManager) IsRunning() bool {
 }
 
 func unitExists(name string) bool {
-	_, err := os.Stat("/etc/systemd/system/" + name)
-	if err == nil {
-		return true
+	for _, dir := range []string{"/etc/systemd/system", "/lib/systemd/system", "/usr/lib/systemd/system"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
 	}
-	_, err = os.Stat("/lib/systemd/system/" + name)
-	return err == nil
+	return false
 }
 
 func (s *ServiceManager) DetectAndEnable() error {
@@ -196,6 +218,9 @@ func (s *ServiceManager) waitReady(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	apiReady := false
 	for time.Now().Before(deadline) {
+		if !s.isRunningForWait() {
+			return fmt.Errorf("kernel process died, check 'clashctl log'")
+		}
 		if !apiReady {
 			if conn, err := net.DialTimeout("tcp", apiAddress, 500*time.Millisecond); err == nil {
 				conn.Close()
@@ -205,9 +230,6 @@ func (s *ServiceManager) waitReady(timeout time.Duration) error {
 		if conn, err := net.DialTimeout("tcp", proxyAddress, 500*time.Millisecond); err == nil {
 			conn.Close()
 			return nil
-		}
-		if !s.isRunningForWait() {
-			return fmt.Errorf("kernel process died, check 'clashctl log'")
 		}
 		time.Sleep(500 * time.Millisecond)
 	}

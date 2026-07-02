@@ -50,9 +50,10 @@ var (
 	runSSHGuardIPCommand = func(args ...string) ([]byte, error) {
 		return exec.Command("ip", args...).CombinedOutput()
 	}
-	sshGuardGetuid   = os.Getuid
-	sshGuardGetppid  = os.Getppid
-	sshGuardReadFile = os.ReadFile
+	sshGuardGetuid             = os.Getuid
+	sshGuardGetppid            = os.Getppid
+	sshGuardReadFile           = os.ReadFile
+	writeSSHTunBypassStateFile = config.AtomicWriteFile
 )
 
 func allowSSHTunRisk(flag bool) bool {
@@ -351,15 +352,21 @@ func installSSHTunBypass(cfg *config.EnvConfig, entry sshTunBypassEntry) error {
 
 	ruleArgs := append(ipFamilyArgsFor(entry.Family), "rule", "add", "priority", entry.Priority, "to", entry.Prefix, "lookup", entry.Table)
 	if out, err := runSSHGuardIPCommand(ruleArgs...); err != nil {
+		_ = deleteSSHTunBypassEntry(entry)
 		return fmt.Errorf("install SSH bypass rule failed: ip %s: %s", strings.Join(ruleArgs, " "), strings.TrimSpace(string(out)))
 	}
 
 	state := sshTunBypassState{Entries: []sshTunBypassEntry{entry}}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
+		_ = deleteSSHTunBypassEntry(entry)
 		return err
 	}
-	return config.AtomicWriteFile(sshTunBypassStatePath(cfg), append(data, '\n'), 0644)
+	if err := writeSSHTunBypassStateFile(sshTunBypassStatePath(cfg), append(data, '\n'), 0644); err != nil {
+		_ = deleteSSHTunBypassEntry(entry)
+		return fmt.Errorf("write SSH bypass state: %w", err)
+	}
+	return nil
 }
 
 func cleanupSSHTunBypass(cfg *config.EnvConfig) error {

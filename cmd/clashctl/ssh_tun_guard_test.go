@@ -114,6 +114,54 @@ tun:
 	}
 }
 
+func TestInstallSSHTunBypassCleansRouteWhenStateWriteFails(t *testing.T) {
+	cfg := testSSHTunGuardConfig(t, "mixed-port: 7897\n")
+	entry := sshTunBypassEntry{
+		Family:   "ipv4",
+		Prefix:   "203.0.113.7/32",
+		Table:    sshTunBypassTable,
+		Priority: sshTunBypassPriority,
+		Route: routeInfo{
+			Raw: "203.0.113.7 via 192.168.1.1 dev wlp5s0 src 192.168.1.23",
+			Via: "192.168.1.1",
+			Dev: "wlp5s0",
+			Src: "192.168.1.23",
+		},
+	}
+
+	var commands []string
+	restore := stubSSHGuard(t, 0, func(args ...string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		commands = append(commands, joined)
+		switch joined {
+		case "-4 rule del priority 8000 to 203.0.113.7/32 lookup 2021":
+			return nil, nil
+		case "-4 route del 203.0.113.7/32 table 2021":
+			return nil, nil
+		case "-4 route replace 203.0.113.7/32 table 2021 via 192.168.1.1 dev wlp5s0 src 192.168.1.23":
+			return nil, nil
+		case "-4 rule add priority 8000 to 203.0.113.7/32 lookup 2021":
+			return nil, nil
+		default:
+			t.Fatalf("unexpected ip command: %s", joined)
+			return nil, nil
+		}
+	})
+	defer restore()
+	writeSSHTunBypassStateFile = func(string, []byte, os.FileMode) error {
+		return errors.New("forced state write failure")
+	}
+
+	err := installSSHTunBypass(cfg, entry)
+	if err == nil || !strings.Contains(err.Error(), "write SSH bypass state") {
+		t.Fatalf("installSSHTunBypass error = %v, want state write failure", err)
+	}
+	wantCleanupRule := "-4 rule del priority 8000 to 203.0.113.7/32 lookup 2021"
+	if countString(commands, wantCleanupRule) != 2 {
+		t.Fatalf("cleanup rule command count = %d, want 2; commands=%#v", countString(commands, wantCleanupRule), commands)
+	}
+}
+
 func TestBuildSSHTunBypassEntryFallsBackToMainTableWhenPolicyRouteUsesTunnel(t *testing.T) {
 	restore := stubSSHGuard(t, 0, func(args ...string) ([]byte, error) {
 		switch strings.Join(args, " ") {
@@ -205,6 +253,7 @@ func stubSSHGuard(t *testing.T, uid int, run func(args ...string) ([]byte, error
 	oldUID := sshGuardGetuid
 	oldPPID := sshGuardGetppid
 	oldReadFile := sshGuardReadFile
+	oldWriteState := writeSSHTunBypassStateFile
 	runSSHGuardIPCommand = run
 	sshGuardGetuid = func() int { return uid }
 	return func() {
@@ -212,6 +261,7 @@ func stubSSHGuard(t *testing.T, uid int, run func(args ...string) ([]byte, error
 		sshGuardGetuid = oldUID
 		sshGuardGetppid = oldPPID
 		sshGuardReadFile = oldReadFile
+		writeSSHTunBypassStateFile = oldWriteState
 	}
 }
 
@@ -222,4 +272,14 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func countString(values []string, want string) int {
+	count := 0
+	for _, value := range values {
+		if value == want {
+			count++
+		}
+	}
+	return count
 }

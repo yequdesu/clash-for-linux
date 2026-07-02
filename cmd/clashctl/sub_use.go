@@ -66,28 +66,31 @@ func switchSubscription(cfg *config.EnvConfig, id int) error {
 		restoreSnapshots(snapshots)
 		return fmt.Errorf("merge failed, restored previous config: %w", err)
 	}
-	if err := ensureSafeKernelStartFromSSH(cfg, subUseAllowSSHTunRisk, false); err != nil {
-		restoreSnapshots(snapshots)
-		return err
-	}
 
 	svc := newSubscriptionService(cfg)
 	wasRunning := svc.IsRunning()
 	if wasRunning {
+		if err := ensureSafeKernelStartFromSSH(cfg, subUseAllowSSHTunRisk, false); err != nil {
+			restoreSnapshots(snapshots)
+			return err
+		}
 		if err := svc.Stop(); err != nil {
 			restoreSnapshots(snapshots)
 			return fmt.Errorf("stop current kernel: %w", err)
 		}
-	}
-	subscriptionInfo("starting kernel with new config...")
-	if err := svc.Start(); err != nil {
-		restoreSnapshots(snapshots)
-		if wasRunning {
-			_ = svc.Start()
-		} else if svc.IsRunning() {
-			_ = svc.Stop()
+		subscriptionInfo("starting kernel with new config...")
+		if err := svc.Start(); err != nil {
+			restoreSnapshots(snapshots)
+			if svc.IsRunning() {
+				if stopErr := svc.Stop(); stopErr != nil {
+					return fmt.Errorf("start failed, restored previous config but could not stop failed kernel: %w; rollback failed: %v", err, stopErr)
+				}
+			}
+			if restoreErr := svc.Start(); restoreErr != nil {
+				return fmt.Errorf("start failed, restored previous config but could not restart previous kernel: %w; rollback failed: %v", err, restoreErr)
+			}
+			return fmt.Errorf("start failed, restored previous config: %w", err)
 		}
-		return fmt.Errorf("start failed, restored previous config: %w", err)
 	}
 	if err := config.WithProfilesLock(cfg, func() error {
 		meta, err := config.LoadProfiles(cfg.ProfilesMeta())
@@ -101,11 +104,15 @@ func switchSubscription(cfg *config.EnvConfig, id int) error {
 		return saveProfiles(cfg.ProfilesMeta(), meta)
 	}); err != nil {
 		restoreSnapshots(snapshots)
-		if svc.IsRunning() {
-			_ = svc.Stop()
-		}
 		if wasRunning {
-			_ = svc.Start()
+			if svc.IsRunning() {
+				if stopErr := svc.Stop(); stopErr != nil {
+					return fmt.Errorf("save active subscription failed, restored previous config but could not stop new kernel: %w; rollback failed: %v", err, stopErr)
+				}
+			}
+			if startErr := svc.Start(); startErr != nil {
+				return fmt.Errorf("save active subscription failed, restored previous config but could not restart previous kernel: %w; rollback failed: %v", err, startErr)
+			}
 		}
 		return fmt.Errorf("save active subscription failed, restored previous config: %w", err)
 	}

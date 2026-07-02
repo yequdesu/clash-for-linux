@@ -123,6 +123,26 @@ func TestProcessAliveCurrentProcess(t *testing.T) {
 	}
 }
 
+func TestDetectInitUsesExplicitConfig(t *testing.T) {
+	t.Setenv("CLASH_INIT_TYPE", "")
+	t.Setenv("INIT_TYPE", "")
+
+	cfg := &config.EnvConfig{InitType: "systemd", ServiceName: "clashctl"}
+	if got := detectInit(cfg); got != "systemd" {
+		t.Fatalf("detectInit = %q, want systemd", got)
+	}
+}
+
+func TestDetectInitEnvOverridesConfig(t *testing.T) {
+	t.Setenv("CLASH_INIT_TYPE", "nohup")
+	t.Setenv("INIT_TYPE", "")
+
+	cfg := &config.EnvConfig{InitType: "systemd", ServiceName: "clashctl"}
+	if got := detectInit(cfg); got != "nohup" {
+		t.Fatalf("detectInit = %q, want nohup", got)
+	}
+}
+
 func TestProcessAliveTreatsZombieAsExited(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("requires /proc")

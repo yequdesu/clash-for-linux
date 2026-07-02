@@ -116,12 +116,12 @@ _pid_matches_kernel() {
 # ── Detect init system ──
 detect_init() {
     [ -n "$INIT_TYPE" ] && return
-    if [ -f /run/systemd/system ] || grep -q systemd /proc/1/exe 2>/dev/null; then
+    if [ -d /run/systemd/system ] || grep -q systemd /proc/1/exe 2>/dev/null; then
         INIT_TYPE="systemd"
     elif grep -q 'docker\|kubepods\|containerd' /proc/1/cgroup 2>/dev/null; then
         INIT_TYPE="nohup"
     else
-        INIT_TYPE="systemd"
+        INIT_TYPE="nohup"
     fi
 }
 detect_init
@@ -162,10 +162,11 @@ _stop_pid_file() {
 
 _stop_existing_kernel() {
     if command -v clashctl >/dev/null 2>&1; then
-        clashctl stop 2>/dev/null || true
+        CLASH_BASE_DIR="$CLASH_BASE_DIR" SERVICE_NAME="$SERVICE_NAME" KERNEL_NAME="$KERNEL_NAME" INIT_TYPE="$INIT_TYPE" clashctl stop || \
+            _log_warn "clashctl stop failed, falling back to direct service/pid cleanup"
     fi
     if command -v systemctl >/dev/null 2>&1 && [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
-        _sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+        _sudo systemctl stop "$SERVICE_NAME" || _log_warn "systemctl stop ${SERVICE_NAME} failed, falling back to pid cleanup"
     fi
     _stop_pid_file "${CLASH_BASE_DIR}/runtime/${KERNEL_NAME}.pid"
 }
@@ -534,10 +535,11 @@ _sync_or_download() {
         return 0
     fi
     if [ -f "/usr/local/bin/${name}" ] && [ -x "/usr/local/bin/${name}" ]; then
-        _sudo cp "/usr/local/bin/${name}" "$dst" 2>/dev/null || true
-        _sudo chmod 755 "$dst" 2>/dev/null || true
-        _log_ok "${name} copied from /usr/local/bin/"
-        return 0
+        if _sudo install -D -m 0755 "/usr/local/bin/${name}" "$dst"; then
+            _log_ok "${name} copied from /usr/local/bin/"
+            return 0
+        fi
+        _log_warn "${name} copy from /usr/local/bin failed, downloading fresh"
     fi
     "$@"
 }
@@ -546,7 +548,7 @@ _copy_resource_if_missing() {
     local src="$1"
     local dst="$2"
     if $RESET_CONFIG || [ ! -e "$dst" ]; then
-        /bin/cp -f "$src" "$dst" 2>/dev/null || true
+        /bin/cp -f "$src" "$dst" || _log_fatal "copy resource failed: $src -> $dst"
     fi
 }
 
@@ -581,17 +583,21 @@ mkdir -p "$REAL_HOME/.config/clashctl"
     echo "CLASH_BASE_DIR=$CLASH_BASE_DIR"
     echo "SERVICE_NAME=$SERVICE_NAME"
     echo "KERNEL_NAME=$KERNEL_NAME"
+    echo "INIT_TYPE=$INIT_TYPE"
 } > "$REAL_HOME/.config/clashctl/install.env"
-_sudo mkdir -p /etc/clashctl 2>/dev/null
+_sudo mkdir -p /etc/clashctl
 {
     echo "CLASH_BASE_DIR=$CLASH_BASE_DIR"
     echo "SERVICE_NAME=$SERVICE_NAME"
     echo "KERNEL_NAME=$KERNEL_NAME"
-} | _sudo tee /etc/clashctl/install.env >/dev/null 2>&1
+    echo "INIT_TYPE=$INIT_TYPE"
+} | _sudo tee /etc/clashctl/install.env >/dev/null
 
 # ── Download resources ──
 _sync_or_download "$KERNEL_NAME" "$BIN_KERNEL" _download_kernel
 _sync_or_download yq "${CLASH_BASE_DIR}/bin/yq" _download_yq
+test -x "$BIN_KERNEL" || _log_fatal "kernel binary missing after install: $BIN_KERNEL"
+test -x "${CLASH_BASE_DIR}/bin/yq" || _log_fatal "yq binary missing after install: ${CLASH_BASE_DIR}/bin/yq"
 _download_geodata
 
 # ── Set kernel capabilities (for TUN mode) ──
@@ -625,8 +631,9 @@ StandardError=append:${CLASH_BASE_DIR}/logs/${KERNEL_NAME}.log
 [Install]
 WantedBy=multi-user.target
 SYSTEMD
-    _sudo mv "/tmp/${SERVICE_NAME}.service" "/etc/systemd/system/${SERVICE_NAME}.service" 2>/dev/null || true
-    _sudo systemctl daemon-reload 2>/dev/null || true
+    _sudo install -D -m 0644 "/tmp/${SERVICE_NAME}.service" "/etc/systemd/system/${SERVICE_NAME}.service"
+    rm -f "/tmp/${SERVICE_NAME}.service"
+    _sudo systemctl daemon-reload
     _log_ok "systemd service installed"
 fi
 
@@ -649,19 +656,19 @@ $WITH_TUI && _install_tui
 
 # ── Post-install config ──
 if [ -x /usr/local/bin/clashctl ]; then
-    /usr/local/bin/clashctl config merge 2>/dev/null || true
+    CLASH_BASE_DIR="$CLASH_BASE_DIR" SERVICE_NAME="$SERVICE_NAME" KERNEL_NAME="$KERNEL_NAME" INIT_TYPE="$INIT_TYPE" /usr/local/bin/clashctl config merge || _log_fatal "initial config merge failed"
     RANDOM_SECRET="$(od -An -N32 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
     [ -n "$RANDOM_SECRET" ] || RANDOM_SECRET="$(tr -dc 'a-zA-Z0-9' < /dev/urandom 2>/dev/null | head -c32 || echo "clashctl")"
-    /usr/local/bin/clashctl secret "$RANDOM_SECRET" 2>/dev/null || true
+    CLASH_BASE_DIR="$CLASH_BASE_DIR" SERVICE_NAME="$SERVICE_NAME" KERNEL_NAME="$KERNEL_NAME" INIT_TYPE="$INIT_TYPE" /usr/local/bin/clashctl secret "$RANDOM_SECRET" || _log_fatal "initial API secret write failed"
     _log_ok "install complete"
 
     [ -n "${CLASH_CONFIG_URL:-}" ] && {
         _log_info "downloading subscription..."
-        /usr/local/bin/clashctl sub add "$CLASH_CONFIG_URL" 2>/dev/null || true
+        CLASH_BASE_DIR="$CLASH_BASE_DIR" SERVICE_NAME="$SERVICE_NAME" KERNEL_NAME="$KERNEL_NAME" INIT_TYPE="$INIT_TYPE" /usr/local/bin/clashctl sub add "$CLASH_CONFIG_URL" || _log_warn "initial subscription download failed"
     }
     for f in "${CLASH_BASE_DIR}/resources/configs"/*.yaml "${CLASH_BASE_DIR}/resources/configs"/*.yml; do
         [ -f "$f" ] || continue
-        /usr/local/bin/clashctl sub add "file://$f" 2>/dev/null || true
+        CLASH_BASE_DIR="$CLASH_BASE_DIR" SERVICE_NAME="$SERVICE_NAME" KERNEL_NAME="$KERNEL_NAME" INIT_TYPE="$INIT_TYPE" /usr/local/bin/clashctl sub add "file://$f" || _log_warn "initial local subscription import failed: $f"
     done
 
     _write_install_state

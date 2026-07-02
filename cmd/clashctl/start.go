@@ -18,21 +18,22 @@ var startCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		requireInstall()
 		svc := kernel.NewServiceManager(cfg)
-		if portOpen(svc.ProxyPort()) {
-			ilog.Info("kernel already running on :%s", svc.ProxyPort())
-			printEnvHint()
-			return
+		if svc.IsRunning() {
+			if portOpen(svc.ProxyPort()) {
+				ilog.Info("kernel already running on :%s", svc.ProxyPort())
+				printEnvHint()
+				return
+			}
+			ilog.Info("kernel process exists but proxy port is not ready; stopping stale process...")
+			if err := svc.Stop(); err != nil {
+				ilog.Fatal("stop stale kernel failed: %v", err)
+			}
+		} else if portOpen(svc.ProxyPort()) {
+			ilog.Fatal("proxy port :%s is already in use by a non-managed process; run 'clashctl doctor' or free the port before starting", svc.ProxyPort())
 		}
 
 		if err := ensureSafeKernelStartFromSSH(cfg, startAllowSSHTunRisk, false); err != nil {
 			ilog.Fatal("%v", err)
-		}
-
-		if svc.IsRunning() {
-			ilog.Info("killing stale kernel process...")
-			if err := svc.Stop(); err != nil {
-				ilog.Fatal("stop stale kernel failed: %v", err)
-			}
 		}
 
 		ilog.Info("starting kernel...")
