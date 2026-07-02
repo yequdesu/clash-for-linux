@@ -606,11 +606,12 @@ if [ "$INIT_TYPE" = "systemd" ]; then
 [Unit]
 Description=Clashctl Proxy Service (Mihomo)
 After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
 User=$REAL_USER
-LimitNPROC=500
 LimitNOFILE=1000000
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE

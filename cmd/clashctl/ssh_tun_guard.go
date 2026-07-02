@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/yequdesu/linux-cli-tui-clash/internal/config"
@@ -49,7 +50,9 @@ var (
 	runSSHGuardIPCommand = func(args ...string) ([]byte, error) {
 		return exec.Command("ip", args...).CombinedOutput()
 	}
-	sshGuardGetuid = os.Getuid
+	sshGuardGetuid   = os.Getuid
+	sshGuardGetppid  = os.Getppid
+	sshGuardReadFile = os.ReadFile
 )
 
 func allowSSHTunRisk(flag bool) bool {
@@ -108,7 +111,17 @@ func ensureSafeKernelStartFromSSH(cfg *config.EnvConfig, allowFlag bool, forceTu
 }
 
 func currentSSHSession() sshSessionInfo {
-	fields := strings.Fields(os.Getenv("SSH_CONNECTION"))
+	if session := sshSessionFromEnv(os.Getenv("SSH_CONNECTION"), os.Getenv("SSH_TTY")); session.Active {
+		return session
+	}
+	if session := sshSessionFromProcessTree(); session.Active {
+		return session
+	}
+	return sshSessionInfo{}
+}
+
+func sshSessionFromEnv(sshConnection, sshTTY string) sshSessionInfo {
+	fields := strings.Fields(sshConnection)
 	if len(fields) >= 4 {
 		return sshSessionInfo{
 			Client:     fields[0],
@@ -121,10 +134,62 @@ func currentSSHSession() sshSessionInfo {
 	if len(fields) > 0 {
 		return sshSessionInfo{Client: fields[0], Active: true}
 	}
-	if os.Getenv("SSH_TTY") != "" {
+	if strings.TrimSpace(sshTTY) != "" {
 		return sshSessionInfo{Active: true}
 	}
 	return sshSessionInfo{}
+}
+
+func sshSessionFromProcessTree() sshSessionInfo {
+	pid := sshGuardGetppid()
+	seen := map[int]bool{}
+	for depth := 0; pid > 1 && depth < 32 && !seen[pid]; depth++ {
+		seen[pid] = true
+		if env, err := readProcessEnv(pid); err == nil {
+			if session := sshSessionFromEnv(env["SSH_CONNECTION"], env["SSH_TTY"]); session.Active {
+				return session
+			}
+		}
+		parent, err := readParentPID(pid)
+		if err != nil || parent <= 0 || parent == pid {
+			break
+		}
+		pid = parent
+	}
+	return sshSessionInfo{}
+}
+
+func readProcessEnv(pid int) (map[string]string, error) {
+	data, err := sshGuardReadFile(fmt.Sprintf("/proc/%d/environ", pid))
+	if err != nil {
+		return nil, err
+	}
+	env := map[string]string{}
+	for _, entry := range strings.Split(string(data), "\x00") {
+		if entry == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			env[key] = value
+		}
+	}
+	return env, nil
+}
+
+func readParentPID(pid int) (int, error) {
+	data, err := sshGuardReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return 0, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "PPid:") {
+			continue
+		}
+		return strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "PPid:")))
+	}
+	return 0, fmt.Errorf("PPid not found for pid %d", pid)
 }
 
 func sshSessionClient() (string, bool) {

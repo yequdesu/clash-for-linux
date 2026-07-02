@@ -145,9 +145,15 @@ func (s *ServiceManager) Disable() error {
 
 func runCmd(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run()
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(out))
+	if detail == "" {
+		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, detail)
 }
 
 func (s *ServiceManager) startRaw() error {

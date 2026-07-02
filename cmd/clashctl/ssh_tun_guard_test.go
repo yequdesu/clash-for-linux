@@ -137,6 +137,37 @@ func TestBuildSSHTunBypassEntryFallsBackToMainTableWhenPolicyRouteUsesTunnel(t *
 	}
 }
 
+func TestCurrentSSHSessionFallsBackToProcessTree(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_TTY", "")
+
+	files := map[string][]byte{
+		"/proc/10/environ": []byte("SUDO_USER=yequdesu\x00"),
+		"/proc/10/status":  []byte("Name:\tsudo\nPPid:\t20\n"),
+		"/proc/20/environ": []byte("SSH_CONNECTION=192.168.1.20 50000 192.168.1.23 22\x00SSH_TTY=/dev/pts/3\x00"),
+		"/proc/20/status":  []byte("Name:\tzsh\nPPid:\t1\n"),
+	}
+
+	restore := stubSSHGuard(t, 0, func(args ...string) ([]byte, error) {
+		t.Fatalf("route lookup should not run in this test: %v", args)
+		return nil, nil
+	})
+	defer restore()
+	sshGuardGetppid = func() int { return 10 }
+	sshGuardReadFile = func(path string) ([]byte, error) {
+		data, ok := files[path]
+		if !ok {
+			return nil, os.ErrNotExist
+		}
+		return data, nil
+	}
+
+	session := currentSSHSession()
+	if !session.Active || session.Client != "192.168.1.20" || session.Server != "192.168.1.23" {
+		t.Fatalf("session = %#v", session)
+	}
+}
+
 func TestEnsureSafeKernelStartFromSSHAllowsExplicitOverride(t *testing.T) {
 	cfg := testSSHTunGuardConfig(t, `
 tun:
@@ -172,11 +203,15 @@ func stubSSHGuard(t *testing.T, uid int, run func(args ...string) ([]byte, error
 	t.Helper()
 	oldRun := runSSHGuardIPCommand
 	oldUID := sshGuardGetuid
+	oldPPID := sshGuardGetppid
+	oldReadFile := sshGuardReadFile
 	runSSHGuardIPCommand = run
 	sshGuardGetuid = func() int { return uid }
 	return func() {
 		runSSHGuardIPCommand = oldRun
 		sshGuardGetuid = oldUID
+		sshGuardGetppid = oldPPID
+		sshGuardReadFile = oldReadFile
 	}
 }
 

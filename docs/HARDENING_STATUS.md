@@ -108,8 +108,11 @@ clashctl start
 
 - `internal/config/env.go`：sudo/root 场景下优先解析 `SUDO_USER` 的真实安装目录；没有 marker 时回退到该用户已有的 `~/clashctl` 或 `~/.clashctl`，避免误判 `/root/clashctl`。
 - `internal/kernel/service.go`：systemd unit 存在但 inactive 时，如果发现 raw/nohup 受管进程，`IsRunning` 和 `Stop` 不再误判。
+- `internal/kernel/service.go`：`systemctl` 调用失败时会带出 stdout/stderr，不再只显示 `exit status 1`。
 - `cmd/clashctl/ssh_tun_guard.go`：`start`、`restart`、`tun on`、`sub use`、`upgrade-kernel` 在 SSH 会话中遇到 TUN 自动路由时优先保护当前 SSH 客户端路由；同网段直连路由放行，root/sudo 场景下自动写入 priority 8000、table 2021 的 bypass 规则，无法保护时才失败；`--allow-ssh-tun-risk` 或 `CLASH_ALLOW_SSH_TUN_RISK=1` 作为显式风险覆盖。
+- `cmd/clashctl/ssh_tun_guard.go`：sudo 清理 `SSH_CONNECTION` 时，会沿 `/proc/$PPID` 父进程链读取祖先进程环境，识别 SSH 客户端。
 - `clashctl doctor` 新增 SSH+TUN 风险提示和 systemd inactive/raw running 状态提示。
+- `install.sh`、`scripts/init/systemd.sh`：移除 `LimitNPROC=500` 和 `ExecStartPre=/usr/bin/sleep 1s`，避免桌面/SSH 用户进程较多时 systemd 无法 fork `sleep` 而失败；新增 `StartLimitIntervalSec=60`、`StartLimitBurst=3` 限制失败重启风暴。
 
 已用临时新二进制验证：
 
@@ -117,11 +120,13 @@ clashctl start
 - 普通用户 `/tmp/clashctl-codex status` 可识别当前 raw/nohup 内核 pid `2965170` 和 `Tun status: disabled`。
 - `sudo /tmp/clashctl-codex status` 不再报 `clashctl not installed`，同样识别 `/home/yequdesu/.clashctl` 下的运行状态。
 - `sudo /tmp/clashctl-codex doctor` 显示 base dir 为 `/home/yequdesu/.clashctl`，并提示 `service state: kernel pid 2965170 running outside active systemd unit`。
+- 修正远端 `/etc/systemd/system/clashctl.service` 后，用临时新版执行 `sudo /tmp/clashctl-codex tun on` 成功；输出 `protected SSH client route before TUN: 192.168.1.20/32 via table 2021 priority 8000`。
+- 验证后 `clashctl status` 显示 `Tun status: enabled`，`systemctl is-active clashctl` 为 active，`ip rule` 含 `8000: from all to 192.168.1.20 lookup 2021`，`ip route get 192.168.1.20` 使用 `table 2021 dev wlp5s0`，公网地址使用 `SakuraiTunnel table 2022`。
 
 仍需真机复测：
 
 - 安装新构建后的 `sudo clashctl tun off` 是否能直接命中 `/home/yequdesu/.clashctl`。
-- SSH 环境下 `clashctl start` 遇到 `tun.auto-route=true` 是否在 stop/start 前保护当前 SSH 客户端路由，并保留当前连接。
+- SSH 环境下正式安装后的 `sudo clashctl tun on/start` 遇到 `tun.auto-route=true` 是否在 stop/start 前保护当前 SSH 客户端路由，并保留当前连接。
 - `--allow-ssh-tun-risk` 显式覆盖路径是否可用。
 - root/systemd 与普通用户 raw 模式混用时，`stop/restart/tun off` 是否一致收敛到单一受管进程。
 
