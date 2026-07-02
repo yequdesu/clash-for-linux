@@ -75,6 +75,22 @@ func TestSetTunEnabledCreatesNestedYAML(t *testing.T) {
 	}
 }
 
+func TestHasRequiredTunCapabilitiesRequiresDNSBindCapability(t *testing.T) {
+	complete := "/home/user/.clashctl/bin/mihomo cap_net_admin,cap_net_bind_service,cap_net_raw=ep"
+	if !hasRequiredTunCapabilities(complete) {
+		t.Fatal("complete TUN capabilities should be accepted")
+	}
+
+	missingBindService := "/home/user/.clashctl/bin/mihomo cap_net_admin,cap_net_raw=ep"
+	if hasRequiredTunCapabilities(missingBindService) {
+		t.Fatal("cap_net_bind_service is required for DNS :53 listener")
+	}
+	missing := strings.Join(missingTunCapabilities(missingBindService), ",")
+	if missing != "cap_net_bind_service" {
+		t.Fatalf("missing capabilities = %q, want cap_net_bind_service", missing)
+	}
+}
+
 func TestParseIPTunTapDevice(t *testing.T) {
 	out := []byte("tun0: tun one_queue pi off vnet_hdr off persist off\n")
 

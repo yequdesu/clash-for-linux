@@ -197,7 +197,7 @@ func collectDoctorResults(cfg *config.EnvConfig) []doctorResult {
 		}
 
 		checkRuntimeDNS(add, runtimeInfo)
-		checkRuntimeTun(add, runtimeInfo)
+		checkRuntimeTun(add, cfg, runtimeInfo)
 		checkTunRouteRisk(add, runtimeInfo)
 	}
 
@@ -297,7 +297,7 @@ func checkRuntimeDNS(add func(doctorLevel, string, string), info config.RuntimeI
 	}
 }
 
-func checkRuntimeTun(add func(doctorLevel, string, string), info config.RuntimeInfo) {
+func checkRuntimeTun(add func(doctorLevel, string, string), cfg *config.EnvConfig, info config.RuntimeInfo) {
 	if !info.TunEnabled {
 		add(doctorOK, "tun", "disabled")
 		return
@@ -311,6 +311,24 @@ func checkRuntimeTun(add func(doctorLevel, string, string), info config.RuntimeI
 		return
 	}
 	add(doctorOK, "tun", "enabled")
+	checkKernelTunCapabilities(add, cfg)
+}
+
+func checkKernelTunCapabilities(add func(doctorLevel, string, string), cfg *config.EnvConfig) {
+	if _, err := exec.LookPath("getcap"); err != nil {
+		add(doctorWarn, "tun capability", "getcap not found; cannot verify kernel capabilities")
+		return
+	}
+	out, err := exec.Command("getcap", cfg.KernelBin()).Output()
+	if err != nil {
+		add(doctorWarn, "tun capability", "cannot inspect "+cfg.KernelBin())
+		return
+	}
+	if missing := missingTunCapabilities(string(out)); len(missing) > 0 {
+		add(doctorWarn, "tun capability", fmt.Sprintf("missing %s; run: sudo setcap %s %s", strings.Join(missing, ","), requiredTunSetcapSpec, cfg.KernelBin()))
+		return
+	}
+	add(doctorOK, "tun capability", "kernel has TUN/DNS capabilities")
 }
 
 func checkTunRouteRisk(add func(doctorLevel, string, string), info config.RuntimeInfo) {

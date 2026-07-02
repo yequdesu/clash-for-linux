@@ -39,7 +39,7 @@ var tunCmd = &cobra.Command{
 			}
 			if dev, err := verifyTunDevice(); err != nil {
 				ilog.Warn("TUN device not detected — %v", err)
-				ilog.Info("check: sudo setcap cap_net_admin,cap_net_raw+ep %s", cfg.KernelBin())
+				ilog.Info("check: sudo setcap %s %s", requiredTunSetcapSpec, cfg.KernelBin())
 				ilog.Info("check: kernel log via 'clashctl log'")
 			} else {
 				ilog.Ok("TUN device: %s", dev)
@@ -78,6 +78,10 @@ var newTunService = func(cfg *config.EnvConfig) tunService {
 }
 
 var mergeTunConfig = config.MergeConfig
+
+const requiredTunSetcapSpec = "cap_net_admin,cap_net_raw,cap_net_bind_service+ep"
+
+var requiredTunCapabilities = []string{"cap_net_admin", "cap_net_raw", "cap_net_bind_service"}
 
 type fileSnapshot struct {
 	path   string
@@ -124,7 +128,7 @@ func changeTunMode(cfg *config.EnvConfig, enable bool) error {
 		rollbackErr := rollbackTunChange(svc, snapshots, wasRunning)
 		startErr := fmt.Errorf("restart: %w", err)
 		if strings.Contains(err.Error(), "exit status 5") || strings.Contains(err.Error(), "died") {
-			startErr = fmt.Errorf("restart: kernel may lack capability or config is invalid; try: sudo setcap cap_net_admin,cap_net_raw+ep %s", cfg.KernelBin())
+			startErr = fmt.Errorf("restart: kernel may lack capability or config is invalid; try: sudo setcap %s %s", requiredTunSetcapSpec, cfg.KernelBin())
 		}
 		return combineRollbackError(startErr, rollbackErr)
 	}
@@ -212,10 +216,24 @@ func ensureSetcap(bin string) {
 		return
 	}
 	out, err := exec.Command("getcap", bin).Output()
-	if err == nil && strings.Contains(string(out), "cap_net_admin") {
+	if err == nil && hasRequiredTunCapabilities(string(out)) {
 		return
 	}
-	exec.Command("setcap", "cap_net_admin,cap_net_raw+ep", bin).Run()
+	exec.Command("setcap", requiredTunSetcapSpec, bin).Run()
+}
+
+func hasRequiredTunCapabilities(getcapOutput string) bool {
+	return len(missingTunCapabilities(getcapOutput)) == 0
+}
+
+func missingTunCapabilities(getcapOutput string) []string {
+	var missing []string
+	for _, capability := range requiredTunCapabilities {
+		if !strings.Contains(getcapOutput, capability) {
+			missing = append(missing, capability)
+		}
+	}
+	return missing
 }
 
 func showTunStatus(cfg *config.EnvConfig) {

@@ -602,7 +602,7 @@ _download_geodata
 
 # ── Set kernel capabilities (for TUN mode) ──
 command -v setcap >/dev/null 2>&1 && \
-    _sudo setcap cap_net_admin,cap_net_raw+ep "$BIN_KERNEL" 2>/dev/null && \
+    _sudo setcap cap_net_admin,cap_net_raw,cap_net_bind_service+ep "$BIN_KERNEL" 2>/dev/null && \
     _log_info "TUN capability granted" || true
 
 # ── Install systemd service ──
