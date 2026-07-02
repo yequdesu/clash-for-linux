@@ -45,6 +45,7 @@ func main() {
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(geodataCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(trafficCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		exitProcess(1)

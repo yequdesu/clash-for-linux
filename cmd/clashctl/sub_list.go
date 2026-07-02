@@ -27,13 +27,16 @@ var subListCmd = &cobra.Command{
 		}
 
 		fmt.Println()
-		printTableHeader([]string{"", "ID", "Name", "Status", "Updated", "Proxies", "URL"})
+		printTableHeader([]string{"", "ID", "Name", "Status", "Updated", "Interval", "Next", "Proxies", "URL"})
 		for _, p := range meta.Profiles {
 			marker := " "
 			status := "ready"
 			if p.ID == meta.Use {
 				marker = "*"
 				status = "active"
+			}
+			if p.LastError != "" {
+				status = "error"
 			}
 			name := p.Name
 			if name == "" {
@@ -43,9 +46,17 @@ var subListCmd = &cobra.Command{
 			if updated == "" {
 				updated = "—"
 			}
+			interval := profileIntervalLabel(p)
+			next := p.NextUpdate
+			if next == "" {
+				next = nextProfileUpdateString(p, timeNow())
+			}
+			if next == "" {
+				next = "—"
+			}
 			proxies := countProxies(p.Path)
-			fmt.Printf(" %s  %-3d %-20s %-8s %-14s %-7s %s\n",
-				marker, p.ID, truncStr(name, 20), status, truncStr(updated, 14), proxies, shortenURL(p.URL))
+			fmt.Printf(" %s  %-3d %-20s %-8s %-14s %-9s %-14s %-7s %s\n",
+				marker, p.ID, truncStr(name, 20), status, truncStr(updated, 14), interval, truncStr(next, 14), proxies, shortenURL(p.URL))
 		}
 		fmt.Println()
 		fmt.Println(" * = currently active")

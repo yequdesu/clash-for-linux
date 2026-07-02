@@ -9,12 +9,21 @@ import (
 )
 
 type Profile struct {
-	ID       int    `yaml:"id"`
-	Path     string `yaml:"path"`
-	URL      string `yaml:"url"`
-	Name     string `yaml:"name,omitempty"`
-	Updated  string `yaml:"updated,omitempty"`
-	Interval string `yaml:"interval,omitempty"`
+	ID             int      `yaml:"id"`
+	Path           string   `yaml:"path"`
+	URL            string   `yaml:"url"`
+	Name           string   `yaml:"name,omitempty"`
+	Updated        string   `yaml:"updated,omitempty"`
+	Interval       string   `yaml:"interval,omitempty"`
+	UpdateEnabled  *bool    `yaml:"update_enabled,omitempty"`
+	UpdateInterval string   `yaml:"update_interval,omitempty"`
+	UpdateProxy    string   `yaml:"update_proxy,omitempty"`
+	UserAgent      string   `yaml:"user_agent,omitempty"`
+	ConvertMode    string   `yaml:"convert_mode,omitempty"`
+	Tags           []string `yaml:"tags,omitempty"`
+	LastError      string   `yaml:"last_error,omitempty"`
+	LastUpdated    string   `yaml:"last_updated,omitempty"`
+	NextUpdate     string   `yaml:"next_update,omitempty"`
 }
 
 type ProfilesMeta struct {

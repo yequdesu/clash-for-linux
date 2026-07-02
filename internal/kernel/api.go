@@ -19,6 +19,38 @@ type Client struct {
 	client  *http.Client
 }
 
+type TrafficResponse struct {
+	Up   uint64 `json:"up"`
+	Down uint64 `json:"down"`
+}
+
+type ConnectionsResponse struct {
+	DownloadTotal uint64       `json:"downloadTotal"`
+	UploadTotal   uint64       `json:"uploadTotal"`
+	Connections   []Connection `json:"connections"`
+}
+
+type Connection struct {
+	ID          string             `json:"id"`
+	Metadata    ConnectionMetadata `json:"metadata"`
+	Chains      []string           `json:"chains"`
+	Download    uint64             `json:"download"`
+	Upload      uint64             `json:"upload"`
+	Start       string             `json:"start"`
+	Rule        string             `json:"rule"`
+	RulePayload string             `json:"rulePayload"`
+}
+
+type ConnectionMetadata struct {
+	Network         string `json:"network"`
+	Host            string `json:"host"`
+	Process         string `json:"process"`
+	ProcessPath     string `json:"processPath"`
+	SourceIP        string `json:"sourceIP"`
+	DestinationIP   string `json:"destinationIP"`
+	DestinationPort string `json:"destinationPort"`
+}
+
 func NewClient(baseURL, secret string) *Client {
 	return &Client{
 		BaseURL: baseURL,
@@ -92,6 +124,38 @@ func (c *Client) GetVersion() (string, error) {
 		return "", err
 	}
 	return v.Version, nil
+}
+
+func (c *Client) GetTraffic() (TrafficResponse, error) {
+	resp, err := c.do("GET", "/traffic", nil)
+	if err != nil {
+		return TrafficResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return TrafficResponse{}, responseError(resp)
+	}
+	var result TrafficResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return TrafficResponse{}, err
+	}
+	return result, nil
+}
+
+func (c *Client) GetConnections() (ConnectionsResponse, error) {
+	resp, err := c.do("GET", "/connections", nil)
+	if err != nil {
+		return ConnectionsResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ConnectionsResponse{}, responseError(resp)
+	}
+	var result ConnectionsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return ConnectionsResponse{}, err
+	}
+	return result, nil
 }
 
 func (c *Client) Upgrade(channel string) error {

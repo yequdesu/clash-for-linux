@@ -271,7 +271,7 @@ func hasCronAutoUpdate(crontab string) bool {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if strings.Contains(line, "clashctl sub update") && strings.Contains(line, "--cron") {
+		if strings.Contains(line, "clashctl sub update") && strings.Contains(line, "--cron") && strings.Contains(line, "--scheduled") {
 			return true
 		}
 	}

@@ -82,6 +82,76 @@ pub struct LogEntry {
     pub payload: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct TrafficPoint {
+    pub ts: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    pub upload_delta: u64,
+    #[serde(default)]
+    pub download_delta: u64,
+    #[serde(default)]
+    pub up_bps: u64,
+    #[serde(default)]
+    pub down_bps: u64,
+    #[serde(default)]
+    pub connections: usize,
+    #[serde(default)]
+    pub dimension: String,
+    #[serde(default)]
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct TrafficTopRow {
+    #[serde(default)]
+    pub dimension: String,
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub upload_delta: u64,
+    #[serde(default)]
+    pub download_delta: u64,
+    #[serde(default)]
+    pub total_delta: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct TrafficSnapshot {
+    pub history: Vec<TrafficPoint>,
+    pub top: Vec<TrafficTopRow>,
+    pub status: TrafficStatus,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct TrafficStatus {
+    #[serde(default)]
+    pub store_dir: String,
+    #[serde(default)]
+    pub raw_samples: usize,
+    #[serde(default)]
+    pub rollup_10s: usize,
+    #[serde(default)]
+    pub rollup_1m: usize,
+    #[serde(default)]
+    pub last_sample: String,
+    #[serde(default)]
+    pub tracked_connections: usize,
+    #[serde(default)]
+    pub collector_running: bool,
+    #[serde(default)]
+    pub collector_stale: bool,
+    #[serde(default)]
+    pub collector_pid: i32,
+    #[serde(default)]
+    pub collector_started_at: String,
+    #[serde(default)]
+    pub collector_interval: String,
+    #[serde(default)]
+    pub collector_log: String,
+    #[serde(default)]
+    pub collector_status_read_error: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProfilesMeta {
     #[serde(default)]
@@ -102,6 +172,24 @@ pub struct ProfileEntry {
     pub updated: String,
     #[serde(default)]
     pub interval: String,
+    #[serde(default)]
+    pub update_enabled: Option<bool>,
+    #[serde(default)]
+    pub update_interval: String,
+    #[serde(default)]
+    pub update_proxy: String,
+    #[serde(default)]
+    pub user_agent: String,
+    #[serde(default)]
+    pub convert_mode: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub last_error: String,
+    #[serde(default)]
+    pub last_updated: String,
+    #[serde(default)]
+    pub next_update: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -153,10 +241,9 @@ fn clashctl_bin() -> &'static str {
     }
 }
 
-pub async fn run_clashctl_sub(action: &str, id: i32) -> Result<String, String> {
-    let id_arg = id.to_string();
+pub async fn run_clashctl(args: &[String]) -> Result<String, String> {
     let mut command = Command::new(clashctl_bin());
-    command.args(["sub", action, &id_arg]);
+    command.args(args);
     if let Some(install) = config::active_install_env() {
         command.env("CLASH_BASE_DIR", &install.base_dir);
         if let Some(service_name) = install.service_name.as_deref() {
@@ -171,15 +258,148 @@ pub async fn run_clashctl_sub(action: &str, id: i32) -> Result<String, String> {
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if output.status.success() {
-        if stdout.is_empty() {
-            Ok(format!("subscription {} [{}] completed", action, id))
-        } else {
-            Ok(stdout.lines().last().unwrap_or("").to_string())
-        }
+        Ok(stdout)
     } else if stderr.is_empty() {
         Err(stdout)
-    } else {
+    } else if stdout.is_empty() {
         Err(stderr)
+    } else {
+        Err(format!("{}\n{}", stderr, stdout))
+    }
+}
+
+pub async fn run_clashctl_sub(action: &str, id: i32) -> Result<String, String> {
+    let id_arg = id.to_string();
+    let args = vec!["sub".to_string(), action.to_string(), id_arg];
+    match run_clashctl(&args).await {
+        Ok(stdout) => {
+            if stdout.is_empty() {
+                Ok(format!("subscription {} [{}] completed", action, id))
+            } else {
+                Ok(stdout.lines().last().unwrap_or("").to_string())
+            }
+        }
+        Err(err) => Err(err),
+    }
+}
+
+pub async fn read_traffic_snapshot(
+    range: &str,
+    step: &str,
+    by: &str,
+    key: Option<&str>,
+) -> Result<TrafficSnapshot, String> {
+    let history_args = vec![
+        "traffic".to_string(),
+        "history".to_string(),
+        "--range".to_string(),
+        range.to_string(),
+        "--step".to_string(),
+        step.to_string(),
+        "--by".to_string(),
+        if key.is_some() {
+            by.to_string()
+        } else {
+            "total".to_string()
+        },
+    ];
+    let mut history_args = history_args;
+    if let Some(key) = key {
+        history_args.push("--key".to_string());
+        history_args.push(key.to_string());
+    }
+    history_args.push("--json".to_string());
+
+    let top_args = vec![
+        "traffic".to_string(),
+        "top".to_string(),
+        "--range".to_string(),
+        range.to_string(),
+        "--by".to_string(),
+        by.to_string(),
+        "--limit".to_string(),
+        "12".to_string(),
+        "--json".to_string(),
+    ];
+    let status_args = vec![
+        "traffic".to_string(),
+        "status".to_string(),
+        "--json".to_string(),
+    ];
+    let history_raw = run_clashctl(&history_args).await?;
+    let top_raw = run_clashctl(&top_args).await?;
+    let status_raw = run_clashctl(&status_args).await?;
+    let history = if history_raw.trim().is_empty() {
+        Vec::new()
+    } else {
+        serde_json::from_str::<Vec<TrafficPoint>>(&history_raw)
+            .map_err(|e| format!("parse traffic history: {}", e))?
+    };
+    let top = if top_raw.trim().is_empty() {
+        Vec::new()
+    } else {
+        serde_json::from_str::<Vec<TrafficTopRow>>(&top_raw)
+            .map_err(|e| format!("parse traffic top: {}", e))?
+    };
+    let status = if status_raw.trim().is_empty() {
+        TrafficStatus::default()
+    } else {
+        serde_json::from_str::<TrafficStatus>(&status_raw)
+            .map_err(|e| format!("parse traffic status: {}", e))?
+    };
+    Ok(TrafficSnapshot {
+        history,
+        top,
+        status,
+    })
+}
+
+pub async fn export_traffic_csv(range: &str, by: &str) -> Result<String, String> {
+    let args = vec![
+        "traffic".to_string(),
+        "export".to_string(),
+        "--range".to_string(),
+        range.to_string(),
+        "--by".to_string(),
+        by.to_string(),
+        "--format".to_string(),
+        "csv".to_string(),
+    ];
+    let csv = run_clashctl(&args).await?;
+    let path = traffic_export_path(range, by, "csv");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, csv).map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
+}
+
+fn traffic_export_path(range: &str, by: &str, extension: &str) -> std::path::PathBuf {
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let filename = format!(
+        "traffic-{}-{}-{}.{}",
+        timestamp,
+        sanitize_filename_token(by),
+        sanitize_filename_token(range),
+        sanitize_filename_token(extension)
+    );
+    crate::settings::export_dir().join(filename)
+}
+
+fn sanitize_filename_token(input: &str) -> String {
+    let mut token = String::with_capacity(input.len());
+    for c in input.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            token.push(c);
+        } else {
+            token.push('-');
+        }
+    }
+    let token = token.trim_matches('-').to_string();
+    if token.is_empty() {
+        "all".into()
+    } else {
+        token
     }
 }
 
@@ -378,7 +598,7 @@ impl ApiClient {
 
 #[cfg(test)]
 mod tests {
-    use super::{clashctl_bin, tun_enabled_from_yaml, ApiClient};
+    use super::{clashctl_bin, sanitize_filename_token, tun_enabled_from_yaml, ApiClient};
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -413,6 +633,14 @@ tun:
     #[test]
     fn tun_status_missing_block_defaults_false() {
         assert_eq!(tun_enabled_from_yaml("mixed-port: 7890\n"), Some(false));
+    }
+
+    #[test]
+    fn export_filename_tokens_are_sanitized() {
+        assert_eq!(sanitize_filename_token("route"), "route");
+        assert_eq!(sanitize_filename_token("24h"), "24h");
+        assert_eq!(sanitize_filename_token("../../route"), "route");
+        assert_eq!(sanitize_filename_token(""), "all");
     }
 
     fn serve_once(status: &str, body: &str) -> String {

@@ -250,6 +250,7 @@ func (c *EnvConfig) RuntimePath() string     { return filepath.Join(c.ResourcesD
 func (c *EnvConfig) TempPath() string        { return filepath.Join(c.ResourcesDir(), "temp.yaml") }
 func (c *EnvConfig) BinDir() string          { return filepath.Join(c.ClashBaseDir, "bin") }
 func (c *EnvConfig) LogDir() string          { return filepath.Join(c.ClashBaseDir, "logs") }
+func (c *EnvConfig) TrafficDir() string      { return filepath.Join(c.ClashBaseDir, "traffic") }
 func (c *EnvConfig) KernelBin() string       { return filepath.Join(c.BinDir(), c.KernelName) }
 func (c *EnvConfig) YQBin() string           { return filepath.Join(c.BinDir(), "yq") }
 func (c *EnvConfig) SubconverterDir() string { return filepath.Join(c.BinDir(), "subconverter") }

@@ -85,8 +85,9 @@ func TestHasCronAutoUpdate(t *testing.T) {
 		crontab string
 		want    bool
 	}{
-		{name: "enabled", crontab: "0 */12 * * * /usr/local/bin/clashctl sub update --cron\n", want: true},
-		{name: "commented", crontab: "# 0 */12 * * * clashctl sub update --cron\n", want: false},
+		{name: "enabled", crontab: "*/10 * * * * /usr/local/bin/clashctl sub update --scheduled --cron\n", want: true},
+		{name: "legacy cron only", crontab: "0 */12 * * * /usr/local/bin/clashctl sub update --cron\n", want: false},
+		{name: "commented", crontab: "# */10 * * * * clashctl sub update --scheduled --cron\n", want: false},
 		{name: "missing cron flag", crontab: "0 */12 * * * clashctl sub update\n", want: false},
 	}
 	for _, tt := range tests {

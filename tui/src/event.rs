@@ -2,7 +2,7 @@ use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::api;
+use crate::{api, mouse::SettingsAction};
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -26,6 +26,13 @@ pub enum DataEvent {
     SwitchResult(Result<(), String>),
     ModeResult(Result<String, String>),
     SubscriptionResult(Result<String, String>),
+    SubscriptionOutputResult(String, Result<String, String>),
+    NetworkResult(String, Result<String, String>),
+    SettingsResult(SettingsAction, Result<String, String>),
+    SettingsCommandResult(String, bool, Result<String, String>),
+    Traffic(Result<api::TrafficSnapshot, String>),
+    TrafficExport(Result<String, String>),
+    TrafficActionResult(String, Result<String, String>),
 }
 
 pub struct EventHandler {

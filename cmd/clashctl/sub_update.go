@@ -44,6 +44,13 @@ func updateSubscription(args []string) error {
 }
 
 func updateSubscriptionCore(args []string) error {
+	if subUpdateAuto {
+		return runAutoUpdate()
+	}
+	if subUpdateScheduled {
+		return updateScheduledSubscriptions()
+	}
+
 	var id int
 	if len(args) > 0 {
 		parsed, err := strconv.Atoi(strings.TrimSpace(args[0]))
@@ -52,7 +59,10 @@ func updateSubscriptionCore(args []string) error {
 		}
 		id = parsed
 	}
+	return updateSubscriptionByID(id)
+}
 
+func updateSubscriptionByID(id int) error {
 	var profile config.Profile
 	if err := config.WithProfilesLock(cfg, func() error {
 		meta, err := config.LoadProfiles(cfg.ProfilesMeta())
@@ -81,13 +91,24 @@ func updateSubscriptionCore(args []string) error {
 	}
 	defer os.Remove(tempPath)
 
+	userAgent := cfg.ClashSubUA
+	if strings.TrimSpace(profile.UserAgent) != "" {
+		userAgent = strings.TrimSpace(profile.UserAgent)
+	}
+	downloadOpts, downloadPath, err := subscriptionDownloadOptions(cfg, profile)
+	if err != nil {
+		return err
+	}
+
 	subscriptionInfo("updating: [%d] %s", id, profile.URL)
-	if err := sub.Download(profile.URL, tempPath, cfg.ClashSubUA); err != nil {
+	subscriptionInfo("update network: %s", downloadPath)
+	if err := sub.DownloadWithOptions(profile.URL, tempPath, userAgent, downloadOpts); err != nil {
 		logSub(fmt.Sprintf("update failed: [%d]", id))
 		return fmt.Errorf("download failed: %w", err)
 	}
-	if err := validateConfigFile(cfg, tempPath); err != nil {
-		subscriptionInfo("trying conversion...")
+	switch strings.ToLower(strings.TrimSpace(profile.ConvertMode)) {
+	case "force":
+		subscriptionInfo("conversion forced by profile metadata...")
 		if err := sub.ConvertDownload(cfg, profile.URL, tempPath); err != nil {
 			logSub(fmt.Sprintf("update failed: [%d]", id))
 			return fmt.Errorf("update failed: %w", err)
@@ -95,6 +116,23 @@ func updateSubscriptionCore(args []string) error {
 		if err := validateConfigFile(cfg, tempPath); err != nil {
 			logSub(fmt.Sprintf("update failed: [%d]", id))
 			return fmt.Errorf("converted config validation failed: %w", err)
+		}
+	case "off":
+		if err := validateConfigFile(cfg, tempPath); err != nil {
+			logSub(fmt.Sprintf("update failed: [%d]", id))
+			return fmt.Errorf("config validation failed: %w", err)
+		}
+	default:
+		if err := validateConfigFile(cfg, tempPath); err != nil {
+			subscriptionInfo("trying conversion...")
+			if err := sub.ConvertDownload(cfg, profile.URL, tempPath); err != nil {
+				logSub(fmt.Sprintf("update failed: [%d]", id))
+				return fmt.Errorf("update failed: %w", err)
+			}
+			if err := validateConfigFile(cfg, tempPath); err != nil {
+				logSub(fmt.Sprintf("update failed: [%d]", id))
+				return fmt.Errorf("converted config validation failed: %w", err)
+			}
 		}
 	}
 	data, err := os.ReadFile(tempPath)
@@ -128,12 +166,36 @@ func updateSubscriptionCore(args []string) error {
 	}
 	subscriptionOk("subscription updated: [%d]", id)
 
-	if subUpdateAuto {
-		if err := runAutoUpdate(); err != nil {
-			return err
-		}
-	}
 	return nil
+}
+
+func subscriptionDownloadOptions(cfg *config.EnvConfig, profile config.Profile) (sub.DownloadOptions, string, error) {
+	mode := strings.ToLower(strings.TrimSpace(profile.UpdateProxy))
+	if mode == "" {
+		mode = "auto"
+	}
+	switch mode {
+	case "direct":
+		return sub.DownloadOptions{ProxyMode: sub.ProxyModeDirect}, "direct", nil
+	case "system":
+		return sub.DownloadOptions{ProxyMode: sub.ProxyModeSystem}, "system proxy env", nil
+	case "core", "auto":
+		info := config.LoadRuntimeInfo(cfg)
+		port := info.ProxyPort
+		if port == "" {
+			port = "7890"
+		}
+		coreProxyURL := fmt.Sprintf("http://127.0.0.1:%s", port)
+		if portOpen(port) {
+			return sub.DownloadOptions{ProxyMode: sub.ProxyModeCore, ProxyURL: coreProxyURL}, "core " + coreProxyURL, nil
+		}
+		if mode == "core" {
+			return sub.DownloadOptions{}, "", fmt.Errorf("subscription update_proxy=core requires kernel proxy port %s to be listening", port)
+		}
+		return sub.DownloadOptions{ProxyMode: sub.ProxyModeSystem}, "system proxy env (core port not listening)", nil
+	default:
+		return sub.DownloadOptions{}, "", fmt.Errorf("unsupported subscription update_proxy %q", profile.UpdateProxy)
+	}
 }
 
 type profileUpdateCommit struct {
@@ -159,7 +221,11 @@ func saveUpdatedProfileData(cfg *config.EnvConfig, id int, data []byte) (profile
 		if err := config.AtomicWriteFile(p.Path, data, 0644); err != nil {
 			return fmt.Errorf("write updated config failed: %w", err)
 		}
-		p.Updated = time.Now().Format("2006-01-02 15:04:05")
+		now := timeNow()
+		p.Updated = now.Format(profileTimeFormat)
+		p.LastUpdated = p.Updated
+		p.LastError = ""
+		p.NextUpdate = nextProfileUpdateString(*p, now)
 		commit.currentUse = meta.Use
 		if err := saveProfiles(cfg.ProfilesMeta(), meta); err != nil {
 			restoreSnapshots(snapshots)
@@ -177,10 +243,12 @@ func saveUpdatedProfileData(cfg *config.EnvConfig, id int, data []byte) (profile
 
 var subUpdateAuto bool
 var subUpdateCron bool
+var subUpdateScheduled bool
 
 func init() {
 	subUpdateCmd.Flags().BoolVar(&subUpdateAuto, "auto", false, "Enable auto-update via cron")
 	subUpdateCmd.Flags().BoolVar(&subUpdateCron, "cron", false, "Run from cron without prompts")
+	subUpdateCmd.Flags().BoolVar(&subUpdateScheduled, "scheduled", false, "Update only subscriptions due by per-profile policy")
 }
 
 func runAutoUpdate() error {
@@ -193,7 +261,7 @@ func runAutoUpdate() error {
 		clashctlBin = "clashctl"
 	}
 
-	cronLine := fmt.Sprintf("0 */12 * * * %s sub update --cron", clashctlBin)
+	cronLine := fmt.Sprintf("*/10 * * * * %s sub update --scheduled --cron", clashctlBin)
 
 	existing, _ := exec.Command("crontab", "-l").Output()
 	newCrontab, changed := mergeAutoUpdateCrontab(string(existing), cronLine)
@@ -206,7 +274,7 @@ func runAutoUpdate() error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to install crontab: %w", err)
 	}
-	subscriptionOk("auto-update enabled (every 12 hours via cron)")
+	subscriptionOk("auto-update enabled (scheduled profiles checked every 10 minutes via cron)")
 	return nil
 }
 
@@ -224,7 +292,7 @@ func mergeAutoUpdateCrontab(existing, cronLine string) (string, bool) {
 				continue
 			}
 			if strings.Contains(line, "clashctl sub update") {
-				if strings.Contains(line, "--cron") {
+				if strings.Contains(line, "--cron") && strings.Contains(line, "--scheduled") {
 					enabled = true
 					lines = append(lines, line)
 				} else {
@@ -244,6 +312,51 @@ func mergeAutoUpdateCrontab(existing, cronLine string) (string, bool) {
 		return "", changed
 	}
 	return strings.Join(lines, "\n") + "\n", changed
+}
+
+func updateScheduledSubscriptions() error {
+	now := timeNow()
+	var due []int
+	if err := config.WithProfilesLock(cfg, func() error {
+		meta, err := config.LoadProfiles(cfg.ProfilesMeta())
+		if err != nil {
+			return err
+		}
+		for _, p := range meta.Profiles {
+			if profileDueForUpdate(p, now) {
+				due = append(due, p.ID)
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if len(due) == 0 {
+		subscriptionInfo("no subscriptions due for scheduled update")
+		return nil
+	}
+
+	var failures []string
+	for _, id := range due {
+		if err := updateSubscriptionByID(id); err != nil {
+			failures = append(failures, fmt.Sprintf("[%d] %v", id, err))
+			if recordErr := recordProfileUpdateError(cfg, id, err, now); recordErr != nil {
+				failures = append(failures, fmt.Sprintf("[%d] record error failed: %v", id, recordErr))
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("scheduled update failed: %s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+func recordProfileUpdateError(cfg *config.EnvConfig, id int, updateErr error, now time.Time) error {
+	return updateProfileMetadata(cfg, id, func(p *config.Profile) error {
+		p.LastError = fmt.Sprintf("%s %v", now.Format(profileTimeFormat), updateErr)
+		p.NextUpdate = nextProfileRetryString(*p, now)
+		return nil
+	})
 }
 
 func validateConfigFile(cfg *config.EnvConfig, path string) error {

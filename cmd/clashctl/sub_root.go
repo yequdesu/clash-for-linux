@@ -21,4 +21,11 @@ func init() {
 	subCmd.AddCommand(subUpdateCmd)
 	subCmd.AddCommand(subImportCmd)
 	subCmd.AddCommand(subLogCmd)
+	subCmd.AddCommand(subRenameCmd)
+	subCmd.AddCommand(subSetURLCmd)
+	subCmd.AddCommand(subSetIntervalCmd)
+	subCmd.AddCommand(subSetUpdateProxyCmd)
+	subCmd.AddCommand(subSetUserAgentCmd)
+	subCmd.AddCommand(subSetConvertCmd)
+	subCmd.AddCommand(subTagCmd)
 }

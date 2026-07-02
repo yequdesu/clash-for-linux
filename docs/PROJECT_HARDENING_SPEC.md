@@ -542,13 +542,14 @@ P2 是产品成熟度提升项，不应早于 P0/P1。
 - 建立统一错误模型：错误必须包含失败命令/API、退出码或 HTTP status、关键 stderr/body、影响范围、是否已回滚和下一步建议。
 - 建立统一鼠标命中模型：渲染阶段记录 hitbox registry，事件阶段根据坐标分派到页签、按钮、表格行、滚动区域、弹窗按钮和输入框，禁止靠散落的坐标 if 判断长期维护。
 - 建立统一滚动模型：表格、日志、帮助、诊断结果、配置预览、节点列表和订阅列表均支持滚轮、PageUp/PageDown、Home/End，并保留可见滚动位置。
-- 建立统一分页模型：一级页面清晰分为 Subscriptions、Proxies、Connections、Network、Logs、Settings、Help；窄终端下必须降级为同样可操作的单列布局。
+- 建立统一分页模型：一级页面清晰分为 Subscriptions、Proxies、Connections、Traffic、Network、Logs、Settings、Help；窄终端下必须降级为同样可操作的单列布局。
 - Subscriptions 页面必须覆盖 `sub add`、`sub import`、`sub list`、`sub use`、`sub update`、`sub remove`、`sub log`；支持 URL/path 输入表单、文件路径输入、active 标记、更新时间、失败历史、cron/auto-update 状态和危险删除确认。
 - Proxies 页面必须覆盖 `node list`、`node switch`、`node delay` 和模式切换；支持搜索、排序、分组展开、节点选择、当前节点标记、延迟测速、批量测速和连接关闭。
 - Connections 页面必须覆盖连接列表、连接详情、关闭单个连接和关闭全部连接；支持搜索、排序、滚轮和危险确认。
-- Network 页面必须覆盖 `start`、`stop`、`restart`、`status`、`tun status/on/off`、`proxy on/off` shell env 输出、`proxy desktop status/on/off`，并展示内核运行状态、API 连接、代理端口、TUN、桌面代理、shell proxy 指引和 DNS/LAN 摘要；TUN 开关必须复用 Go CLI 的回滚和 route guard 语义。
+- Traffic 页面必须覆盖实时流量、历史流量、持久化统计、按 route/rule/proxy group/node/host/process 维度聚合、Line/Bar 图表切换、范围/分辨率选择、导出和 collector 状态诊断；主图表必须占据足够纵向空间，不得只做小型 sparkline。
+- Network 页面必须覆盖 `start`、`stop`、`restart`、`status`、`doctor`、`config doctor`、`tun status/on/off`、`proxy on/off` shell env 输出、`proxy desktop status/on/off`，并展示内核运行状态、API 连接、代理端口、TUN、桌面代理、shell proxy 指引、route guard 风险和 DNS/LAN 摘要；TUN 开关必须复用 Go CLI 的回滚和 route guard 语义。
 - Logs 页面必须覆盖 `log`、`sub log`、本地 TUI 任务日志和最近错误；支持暂停、级别过滤、搜索、清空本地缓冲、滚轮滚动和跳转到最新。
-- Settings 页面必须提供统一设置入口，分为 General、Core、Ports/API、DNS/LAN、Security、Diagnostics、Updates；覆盖中英双语、主题、默认页、鼠标、刷新间隔、`config view/raw/merge/autofix/set-*`、`secret`、`doctor`、`config doctor`、`test`、`version`、`upgrade`、`upgrade-kernel`、`geodata update` 和 install-state。
+- Settings 页面必须提供统一设置入口，分为 General、Core、Ports/API、DNS/LAN、Traffic、Security、Diagnostics、Updates；覆盖中英双语、主题、默认页、鼠标、刷新间隔、流量采样/保留策略、`config view/raw/merge/autofix/set-*`、`secret`、`doctor`、`config doctor`、`test`、`version`、`upgrade`、`upgrade-kernel`、`geodata update` 和 install-state。
 - Settings / General 必须支持 zh-CN/en-US 双语切换；所有页面标题、按钮、状态、错误摘要、Help 和 Command Palette 文案必须来自统一 i18n key。
 - Settings / Diagnostics 必须展示 `doctor` 和 `config doctor` 结果，按 fatal/warn/info 分组，并允许点击某项跳转到对应修复 section。
 - Help 页面必须从 action registry 生成，确保帮助文案和真实快捷键/鼠标行为一致。
@@ -556,7 +557,7 @@ P2 是产品成熟度提升项，不应早于 P0/P1。
 - 排序按名称、延迟、更新时间、状态真实生效，不得只改变本地展示后丢失当前选择。
 - 代理模式 Rule/Global/Direct 必须调用 Mihomo API，并在 API 失败时不更新本地显示为成功。
 - 代理组展开节点列表，选择具体节点后切换。
-- 订阅页支持 add/import/update/use/remove，并显示每次操作结果。
+- 订阅页支持 add/import/update/use/remove/rename/set-url/set-interval/set-update-proxy/set-user-agent/set-convert/tag，并显示每次操作结果。
 - 日志页支持暂停、过滤级别、搜索、清空本地缓冲。
 - 错误提示有明确恢复路径。
 
@@ -612,6 +613,50 @@ P2 是产品成熟度提升项，不应早于 P0/P1。
 - 用户无需手写 YAML 即可完成常见配置。
 - `config set-*` 类命令在 merge 失败时不留下半更新 `mixin.yaml`。
 
+### P2-4 流量统计、持久化与可视化
+
+目标：
+
+- 提供本项目自己的流量统计能力，覆盖实时速率、历史曲线、长期总量、按 Mihomo route/rule/节点/域名/进程聚合，并能在退出 TUI 后继续保留数据。
+
+必须完成：
+
+- 增加 Go 侧 `internal/traffic`，负责采样、delta 计算、rollup、查询、导出、保留策略和文件锁。
+- 增加 `clashctl traffic status/sample/collect/history/top/export/prune/reset`。
+- 采样优先使用 Mihomo `/traffic`；明细维度使用 `/connections` 的 `upload/download/rule/rulePayload/chains/metadata`；不能依赖 TUI 内存。
+- route 统计定义为 Mihomo 路由决策：`rule + rule_payload + outbound chain/current node`，不得与 Linux `ip route` 混淆。
+- 默认保留策略：raw 1s 24h、10s rollup 7d、1m rollup 90d，并可在 Settings / Traffic 调整。
+- TUI Traffic 页必须有大而长的主图表，支持 Line/Bar、时间范围、分辨率、聚合维度、排名列表、图表点击、滚轮历史窗口和导出。
+
+验收：
+
+- Collector 重启后不会重复计算旧连接累计流量。
+- `traffic history/top --json` 能在没有 TUI 的 SSH 环境中稳定返回数据。
+- TUI 关闭后再打开仍能展示历史流量。
+- 真实 Mihomo 流量下，route/rule/node 聚合与当前连接详情一致。
+
+### P2-5 订阅参数化管理
+
+目标：
+
+- 订阅管理达到桌面客户端 profile 管理的易用程度，并保留 CLI 可审计、可脚本化、可回滚的特性。
+
+必须完成：
+
+- 扩展 profile metadata：`name`、`update_enabled`、`update_interval`、兼容旧 `interval`、`update_proxy`、`user_agent`、`convert_mode`、`tags`、`last_error`、`last_updated`、`next_update`。
+- `clashctl sub add` 支持在新增时通过 `--name`、`--interval`、`--update-proxy`、`--user-agent`、`--convert`、`--tag` 写入 profile metadata；首次下载必须使用指定的 User-Agent 和 update proxy 策略。
+- 增加 `clashctl sub rename/set-url/set-interval/set-update-proxy/set-user-agent/set-convert/tag`。
+- `sub update --scheduled` 读取每个 profile 的策略，只更新到期项；失败记录 `last_error`，但不得自动关闭后续更新。
+- `sub update --auto` 只负责安装计划任务入口，不再表达固定 12 小时全量更新。
+- TUI Subscriptions 页提供 Edit profile 表单，支持重命名、修改 URL/path、更新频率、更新开关、更新网络路径、User-Agent、转换模式、标签和立即更新。
+
+验收：
+
+- 修改订阅 metadata 失败时 `profiles.yaml` 不留下半更新状态。
+- 每个订阅可以有不同更新频率，计划任务只更新到期订阅。
+- TUI 和 CLI 修改同一 profile 后展示一致。
+- 订阅更新失败能在 CLI、TUI 和 `sub log` 中定位到 profile、时间和失败原因。
+
 ## 7. 目标目录结构
 
 建议逐步演进为：
@@ -622,6 +667,7 @@ internal/api/          # typed Mihomo API client
 internal/config/       # env/runtime/mixin/profile parsing and atomic writes
 internal/service/      # systemd/nohup service manager
 internal/subscription/ # download/convert/update/profile metadata
+internal/traffic/      # sampling, rollup, retention, query, export
 internal/doctor/       # diagnostics
 internal/release/      # GitHub release asset selection/checksum
 internal/fsutil/       # atomic write, lock, permissions

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,22 @@ import (
 	ilog "github.com/yequdesu/linux-cli-tui-clash/internal/log"
 )
 
+const (
+	ProxyModeSystem = "system"
+	ProxyModeDirect = "direct"
+	ProxyModeCore   = "core"
+)
+
+type DownloadOptions struct {
+	ProxyMode string
+	ProxyURL  string
+}
+
 func Download(url, dest, userAgent string) error {
+	return DownloadWithOptions(url, dest, userAgent, DownloadOptions{ProxyMode: ProxyModeSystem})
+}
+
+func DownloadWithOptions(url, dest, userAgent string, opts DownloadOptions) error {
 	url = strings.TrimSpace(url)
 
 	if strings.HasPrefix(url, "file://") {
@@ -29,7 +45,7 @@ func Download(url, dest, userAgent string) error {
 	}
 
 	ilog.Info("downloading...")
-	return httpDownload(url, dest, userAgent)
+	return httpDownloadWithOptions(url, dest, userAgent, opts)
 }
 
 func copyFile(src, dst string) error {
@@ -50,8 +66,15 @@ func copyFile(src, dst string) error {
 }
 
 func httpDownload(url, dest, userAgent string) error {
-	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest("GET", url, nil)
+	return httpDownloadWithOptions(url, dest, userAgent, DownloadOptions{ProxyMode: ProxyModeSystem})
+}
+
+func httpDownloadWithOptions(rawURL, dest, userAgent string, opts DownloadOptions) error {
+	client, err := httpClientForDownload(opts)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return fmt.Errorf("request: %w", err)
 	}
@@ -75,4 +98,27 @@ func httpDownload(url, dest, userAgent string) error {
 		return fmt.Errorf("write: %w", err)
 	}
 	return nil
+}
+
+func httpClientForDownload(opts DownloadOptions) (*http.Client, error) {
+	mode := strings.ToLower(strings.TrimSpace(opts.ProxyMode))
+	if mode == "" {
+		mode = ProxyModeSystem
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	switch mode {
+	case ProxyModeSystem:
+		transport.Proxy = http.ProxyFromEnvironment
+	case ProxyModeDirect:
+		transport.Proxy = nil
+	case ProxyModeCore:
+		proxyURL, err := url.Parse(strings.TrimSpace(opts.ProxyURL))
+		if err != nil || proxyURL.Scheme == "" || proxyURL.Host == "" {
+			return nil, fmt.Errorf("invalid core proxy URL: %s", opts.ProxyURL)
+		}
+		transport.Proxy = http.ProxyURL(proxyURL)
+	default:
+		return nil, fmt.Errorf("unsupported download proxy mode: %s", opts.ProxyMode)
+	}
+	return &http.Client{Timeout: 15 * time.Second, Transport: transport}, nil
 }
