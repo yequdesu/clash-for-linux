@@ -63,7 +63,8 @@ var tunCmd = &cobra.Command{
 }
 
 func init() {
-	tunCmd.Flags().BoolVar(&tunAllowSSHTunRisk, "allow-ssh-tun-risk", false, "allow enabling TUN auto-route from an SSH session")
+	tunCmd.Flags().BoolVar(&tunAllowSSHTunRisk, "allow-route-risk", false, "allow enabling route-capturing TUN without installing route protections")
+	tunCmd.Flags().BoolVar(&tunAllowSSHTunRisk, "allow-ssh-tun-risk", false, "deprecated alias for --allow-route-risk")
 }
 
 type tunService interface {

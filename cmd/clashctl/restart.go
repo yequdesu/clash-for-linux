@@ -33,5 +33,6 @@ var restartCmd = &cobra.Command{
 }
 
 func init() {
-	restartCmd.Flags().BoolVar(&restartAllowSSHTunRisk, "allow-ssh-tun-risk", false, "allow restarting TUN auto-route from an SSH session")
+	restartCmd.Flags().BoolVar(&restartAllowSSHTunRisk, "allow-route-risk", false, "allow restarting route-capturing TUN without installing route protections")
+	restartCmd.Flags().BoolVar(&restartAllowSSHTunRisk, "allow-ssh-tun-risk", false, "deprecated alias for --allow-route-risk")
 }

@@ -29,7 +29,8 @@ var subUseCmd = &cobra.Command{
 }
 
 func init() {
-	subUseCmd.Flags().BoolVar(&subUseAllowSSHTunRisk, "allow-ssh-tun-risk", false, "allow starting TUN auto-route from an SSH session")
+	subUseCmd.Flags().BoolVar(&subUseAllowSSHTunRisk, "allow-route-risk", false, "allow starting route-capturing TUN without installing route protections")
+	subUseCmd.Flags().BoolVar(&subUseAllowSSHTunRisk, "allow-ssh-tun-risk", false, "deprecated alias for --allow-route-risk")
 }
 
 func switchSubscription(cfg *config.EnvConfig, id int) error {

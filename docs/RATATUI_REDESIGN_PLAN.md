@@ -480,7 +480,7 @@ Tasks: [sub.update #3 running 00:08] [doctor done] [kernel upgrade failed]
 | Core proxy                  | TUN                         | Shell proxy      |
 | [Start] [Stop] [Restart]    | Config: disabled            | Current shell    |
 | API: ok                     | Device: none                | cannot be edited |
-| Proxy port: listening       | SSH route: protected/none   | from inside TUI  |
+| Proxy port: listening       | Route guard: ok/risk/none   | from inside TUI  |
 |                             | [Enable TUN] [Disable TUN]  | [Copy enable]    |
 +-----------------------------+-----------------------------+------------------+
 | Desktop proxy                                                               |
@@ -491,7 +491,7 @@ Tasks: [sub.update #3 running 00:08] [doctor done] [kernel upgrade failed]
 规则：
 
 - Start/Stop/Restart 放在 Network，因为用户理解的是开闭代理。
-- TUN on/off 必须调用 Go CLI，复用 root、SSH route protection 和回滚语义。
+- TUN on/off 必须调用 Go CLI，复用 root、route guard 和回滚语义。
 - Shell proxy 不能伪装成可直接修改父 shell，只提供 `eval "$(clashctl proxy on)"` 和关闭命令。
 - Desktop proxy on/off 需要确认，因为它会修改用户桌面会话设置。
 - DNS/LAN 只显示摘要，修改入口跳到 Settings / DNS/LAN。

@@ -422,10 +422,12 @@ type RuntimeInfo struct {
 
 - 开启 TUN 前先检查 root/capability、`/dev/net/tun`、`ip` 命令、内核支持。
 - sudo/root 执行 `clashctl tun on/off` 时必须解析 `SUDO_USER` 的真实安装目录；缺少安装 marker 时也必须优先查找该用户已有的 `~/clashctl` 或 `~/.clashctl`，不得误判为 `/root/clashctl`。
-- SSH 会话中启动或重启 TUN 自动路由必须优先保护当前 SSH 客户端路由：同网段直连路由可直接放行；需要经默认网关的路由必须在 root/sudo 场景下自动写入高优先级 `ip rule` 和专用路由表，使 SSH 客户端绕过 TUN。
+- 启动或重启 route-capturing TUN 前必须建立通用 route guard 计划：当前 SSH 客户端、用户显式声明的 `CLASH_TUN_PROTECT_ROUTES`、已探测到的隧道连接网段和隧道底层端点都属于保护候选；WireGuard 只是一个探测器，不得把保护策略硬编码成 WireGuard 专用逻辑。
 - sudo 默认清理 `SSH_CONNECTION` 时，CLI 必须通过父进程链、登录会话或等价可靠来源识别 SSH 客户端；不得要求用户记住 `sudo -E` 或手动传 `SSH_CONNECTION`。
-- 只有无法识别 SSH 客户端、当前非 root 且无法安装保护路由、或当前主路由已经落到 tunnel 设备时，才允许在 stop/start 前失败；覆盖必须显式传 `--allow-ssh-tun-risk` 或等价环境变量，并在错误中显示 SSH 客户端和当前路由。
-- `start`、`restart`、`tun on`、`sub use`、`upgrade-kernel` 等所有可能启动内核的入口都必须复用 SSH/TUN 路由保护逻辑。
+- root/sudo 场景下必须在 stop/start 前自动写入高优先级 `ip rule` 和专用路由表，使管理面和已识别隧道控制面绕过 Clash/Mihomo TUN；安装多条保护规则必须事务化，任一失败要回滚本轮已安装规则。
+- 非 root 场景下，只有当前 SSH 客户端属于同网段直连路由时可继续；其他需要保护的隧道网段、网关路由或探测风险必须失败并给出 `sudo`、`--allow-route-risk` 和 `CLASH_TUN_PROTECT_ROUTES` 指导。旧 `--allow-ssh-tun-risk` 与 `CLASH_ALLOW_SSH_TUN_RISK` 只作为兼容别名保留。
+- route guard 不得自动保护 `0.0.0.0/0`、`::/0` 等默认路由，避免等价绕开整个 TUN。
+- `start`、`restart`、`tun on`、`sub use`、`upgrade-kernel` 等所有可能启动内核的入口都必须复用 route guard 逻辑。
 - 修改 mixin 前备份。
 - TUN 开关必须使用结构化 YAML 写入，不得通过外部 `yq -i` 或字符串替换直接改 `mixin.yaml`。
 - 新 runtime 校验通过后才重启。
@@ -437,6 +439,7 @@ type RuntimeInfo struct {
 - 无 `/dev/net/tun` 时命令失败且旧代理继续运行。
 - capability 缺失时给出精确修复命令。
 - 在 SSH 环境、runtime 启用 `tun.auto-route` 或 `tun.strict-route` 时，`clashctl start/restart/tun on/sub use/upgrade-kernel` 必须在 stop/start 前完成 SSH 客户端路由保护；无法保护时才失败，避免切断当前 SSH。
+- 存在 WireGuard/Tailscale/OpenVPN/ZeroTier 等隧道路由或用户设置 `CLASH_TUN_PROTECT_ROUTES` 时，root/sudo 启动必须安装对应 route guard；非 root 必须给出明确风险和继续方式。
 - `sudo clashctl tun on` 在 sudo 清理 SSH 环境变量时仍能识别当前 SSH 客户端并安装保护路由。
 - `sudo clashctl tun off` 能在没有 `/etc/clashctl/install.env` 的情况下命中当前 `SUDO_USER` 的已有安装目录。
 
@@ -543,7 +546,7 @@ P2 是产品成熟度提升项，不应早于 P0/P1。
 - Subscriptions 页面必须覆盖 `sub add`、`sub import`、`sub list`、`sub use`、`sub update`、`sub remove`、`sub log`；支持 URL/path 输入表单、文件路径输入、active 标记、更新时间、失败历史、cron/auto-update 状态和危险删除确认。
 - Proxies 页面必须覆盖 `node list`、`node switch`、`node delay` 和模式切换；支持搜索、排序、分组展开、节点选择、当前节点标记、延迟测速、批量测速和连接关闭。
 - Connections 页面必须覆盖连接列表、连接详情、关闭单个连接和关闭全部连接；支持搜索、排序、滚轮和危险确认。
-- Network 页面必须覆盖 `start`、`stop`、`restart`、`status`、`tun status/on/off`、`proxy on/off` shell env 输出、`proxy desktop status/on/off`，并展示内核运行状态、API 连接、代理端口、TUN、桌面代理、shell proxy 指引和 DNS/LAN 摘要；TUN 开关必须复用 Go CLI 的回滚和 SSH 路由保护语义。
+- Network 页面必须覆盖 `start`、`stop`、`restart`、`status`、`tun status/on/off`、`proxy on/off` shell env 输出、`proxy desktop status/on/off`，并展示内核运行状态、API 连接、代理端口、TUN、桌面代理、shell proxy 指引和 DNS/LAN 摘要；TUN 开关必须复用 Go CLI 的回滚和 route guard 语义。
 - Logs 页面必须覆盖 `log`、`sub log`、本地 TUI 任务日志和最近错误；支持暂停、级别过滤、搜索、清空本地缓冲、滚轮滚动和跳转到最新。
 - Settings 页面必须提供统一设置入口，分为 General、Core、Ports/API、DNS/LAN、Security、Diagnostics、Updates；覆盖中英双语、主题、默认页、鼠标、刷新间隔、`config view/raw/merge/autofix/set-*`、`secret`、`doctor`、`config doctor`、`test`、`version`、`upgrade`、`upgrade-kernel`、`geodata update` 和 install-state。
 - Settings / General 必须支持 zh-CN/en-US 双语切换；所有页面标题、按钮、状态、错误摘要、Help 和 Command Palette 文案必须来自统一 i18n key。

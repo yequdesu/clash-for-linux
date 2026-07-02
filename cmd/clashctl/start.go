@@ -46,7 +46,8 @@ var startCmd = &cobra.Command{
 }
 
 func init() {
-	startCmd.Flags().BoolVar(&startAllowSSHTunRisk, "allow-ssh-tun-risk", false, "allow starting TUN auto-route from an SSH session")
+	startCmd.Flags().BoolVar(&startAllowSSHTunRisk, "allow-route-risk", false, "allow starting route-capturing TUN without installing route protections")
+	startCmd.Flags().BoolVar(&startAllowSSHTunRisk, "allow-ssh-tun-risk", false, "deprecated alias for --allow-route-risk")
 }
 
 func printEnvHint() {

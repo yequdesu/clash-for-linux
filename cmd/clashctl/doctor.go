@@ -198,7 +198,7 @@ func collectDoctorResults(cfg *config.EnvConfig) []doctorResult {
 
 		checkRuntimeDNS(add, runtimeInfo)
 		checkRuntimeTun(add, runtimeInfo)
-		checkSSHTunRisk(add, runtimeInfo)
+		checkTunRouteRisk(add, runtimeInfo)
 	}
 
 	svc := kernel.NewServiceManager(cfg)
@@ -313,15 +313,30 @@ func checkRuntimeTun(add func(doctorLevel, string, string), info config.RuntimeI
 	add(doctorOK, "tun", "enabled")
 }
 
-func checkSSHTunRisk(add func(doctorLevel, string, string), info config.RuntimeInfo) {
-	client, ssh := sshSessionClient()
-	if !ssh || !tunStartCanCaptureRoutes(info, false) {
+func checkTunRouteRisk(add func(doctorLevel, string, string), info config.RuntimeInfo) {
+	if !tunStartCanCaptureRoutes(info, false) {
 		return
 	}
-	if client == "" {
-		client = "unknown"
+	entries, risks := buildTunRouteProtectionPlan()
+	if len(entries) == 0 && len(risks) == 0 {
+		return
 	}
-	add(doctorWarn, "ssh tun", "SSH session detected from "+client+" while TUN auto-route is enabled; start/tun on will protect this route when possible")
+	var labels []string
+	for _, entry := range entries {
+		source := entry.Source
+		if source == "" {
+			source = "route"
+		}
+		labels = append(labels, source+" "+entry.Prefix)
+	}
+	for _, risk := range risks {
+		labels = append(labels, risk)
+	}
+	if protectionRequiresRoot(entries) {
+		add(doctorWarn, "route guard", "route-capturing TUN is enabled; run start/tun on with sudo or --allow-route-risk; detected "+strings.Join(labels, ", "))
+		return
+	}
+	add(doctorWarn, "route guard", "route-capturing TUN is enabled; direct routes detected "+strings.Join(labels, ", "))
 }
 
 func checkSystemdUnitSafety(add func(doctorLevel, string, string), serviceName string, cfg *config.EnvConfig) {
@@ -351,34 +366,34 @@ func checkSSHTunBypassState(add func(doctorLevel, string, string), cfg *config.E
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			add(doctorWarn, "ssh bypass", "cannot read "+path+": "+err.Error())
+			add(doctorWarn, "route guard", "cannot read "+path+": "+err.Error())
 		}
 		return
 	}
 	var state sshTunBypassState
 	if err := json.Unmarshal(data, &state); err != nil {
-		add(doctorWarn, "ssh bypass", "invalid state file: "+path)
+		add(doctorWarn, "route guard", "invalid state file: "+path)
 		return
 	}
 	if len(state.Entries) == 0 {
-		add(doctorWarn, "ssh bypass", "state file has no entries: "+path)
+		add(doctorWarn, "route guard", "state file has no entries: "+path)
 		return
 	}
 	if _, err := exec.LookPath("ip"); err != nil {
-		add(doctorWarn, "ssh bypass", "state exists but ip command is unavailable")
+		add(doctorWarn, "route guard", "state exists but ip command is unavailable")
 		return
 	}
 	for _, entry := range state.Entries {
 		out, err := exec.Command("ip", append(ipFamilyArgsFor(entry.Family), "rule", "show", "priority", entry.Priority)...).Output()
 		if err != nil {
-			add(doctorWarn, "ssh bypass", "cannot inspect ip rule priority "+entry.Priority)
+			add(doctorWarn, "route guard", "cannot inspect ip rule priority "+entry.Priority)
 			continue
 		}
 		text := string(out)
 		if strings.Contains(text, entry.Prefix) && strings.Contains(text, "lookup "+entry.Table) {
-			add(doctorOK, "ssh bypass", fmt.Sprintf("%s lookup %s priority %s", entry.Prefix, entry.Table, entry.Priority))
+			add(doctorOK, "route guard", fmt.Sprintf("%s lookup %s priority %s", entry.Prefix, entry.Table, entry.Priority))
 		} else {
-			add(doctorWarn, "ssh bypass", fmt.Sprintf("state exists but rule missing for %s lookup %s priority %s", entry.Prefix, entry.Table, entry.Priority))
+			add(doctorWarn, "route guard", fmt.Sprintf("state exists but rule missing for %s lookup %s priority %s", entry.Prefix, entry.Table, entry.Priority))
 		}
 	}
 }

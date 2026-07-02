@@ -40,6 +40,8 @@ type sshTunBypassEntry struct {
 	Table    string    `json:"table"`
 	Priority string    `json:"priority"`
 	Route    routeInfo `json:"route"`
+	Source   string    `json:"source,omitempty"`
+	Reason   string    `json:"reason,omitempty"`
 }
 
 type sshTunBypassState struct {
@@ -50,14 +52,20 @@ var (
 	runSSHGuardIPCommand = func(args ...string) ([]byte, error) {
 		return exec.Command("ip", args...).CombinedOutput()
 	}
-	sshGuardGetuid             = os.Getuid
-	sshGuardGetppid            = os.Getppid
-	sshGuardReadFile           = os.ReadFile
-	writeSSHTunBypassStateFile = config.AtomicWriteFile
+	sshGuardGetuid              = os.Getuid
+	sshGuardGetppid             = os.Getppid
+	sshGuardReadFile            = os.ReadFile
+	writeSSHTunBypassStateFile  = config.AtomicWriteFile
+	detectConnectedRouteEntries = detectConnectedRouteProtectionEntries
+	detectWireGuardRouteEntries = detectWireGuardProtectionEntries
 )
 
 func allowSSHTunRisk(flag bool) bool {
 	if flag {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CLASH_ALLOW_ROUTE_RISK"))) {
+	case "1", "true", "yes", "on":
 		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CLASH_ALLOW_SSH_TUN_RISK"))) {
@@ -73,11 +81,6 @@ func ensureSafeKernelStartFromSSH(cfg *config.EnvConfig, allowFlag bool, forceTu
 		return nil
 	}
 
-	session := currentSSHSession()
-	if !session.Active {
-		return nil
-	}
-
 	info, err := config.ReadRuntimeInfo(cfg.RuntimePath())
 	if err != nil && !forceTunEnable {
 		return nil
@@ -86,29 +89,96 @@ func ensureSafeKernelStartFromSSH(cfg *config.EnvConfig, allowFlag bool, forceTu
 		return nil
 	}
 
-	if strings.TrimSpace(session.Client) == "" {
-		return fmt.Errorf("SSH session detected, but SSH_CONNECTION does not expose the client IP; run from a local console or pass --allow-ssh-tun-risk after confirming a recovery path")
-	}
-
-	entry, err := buildSSHTunBypassEntry(session.Client)
-	if err != nil {
-		return err
+	entries, risks := buildTunRouteProtectionPlan()
+	if len(entries) == 0 && len(risks) == 0 {
+		return nil
 	}
 
 	if sshGuardGetuid() == 0 {
-		if err := installSSHTunBypass(cfg, entry); err != nil {
-			return err
+		if len(entries) > 0 {
+			if err := installSSHTunBypass(cfg, entries...); err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				ilog.Info("protected route before TUN: %s (%s) via table %s priority %s", entry.Prefix, entry.Source, entry.Table, entry.Priority)
+			}
 		}
-		ilog.Info("protected SSH client route before TUN: %s via table %s priority %s", entry.Prefix, entry.Table, entry.Priority)
+		if len(risks) > 0 {
+			return fmt.Errorf("%s", strings.Join(risks, "; "))
+		}
 		return nil
 	}
 
-	if routeIsDirectMainLink(entry.Route) {
-		ilog.Info("SSH client route is direct on %s; TUN auto-route can keep this session on the main table", entry.Route.Dev)
-		return nil
+	if len(risks) > 0 || protectionRequiresRoot(entries) {
+		return fmt.Errorf("%s", routeProtectionGuidance(entries, risks))
 	}
 
-	return fmt.Errorf("SSH client %s is reached through gateway route %q; run this command with sudo so clashctl can install an SSH bypass route before enabling TUN, or pass --allow-ssh-tun-risk after confirming another recovery path", session.Client, entry.Route.Raw)
+	for _, entry := range entries {
+		ilog.Info("%s route is direct on %s; TUN auto-route can keep it on the main table", entry.Source, entry.Route.Dev)
+	}
+	return nil
+}
+
+func buildTunRouteProtectionPlan() ([]sshTunBypassEntry, []string) {
+	var entries []sshTunBypassEntry
+	var risks []string
+
+	session := currentSSHSession()
+	if session.Active {
+		sshEntries, sshRisks := sshRouteProtectionEntries(session)
+		entries = append(entries, sshEntries...)
+		risks = append(risks, sshRisks...)
+	}
+
+	manualEntries, manualRisks := manualRouteProtectionEntries()
+	entries = append(entries, manualEntries...)
+	risks = append(risks, manualRisks...)
+
+	detectedEntries, detectedRisks := detectConnectedRouteEntries()
+	entries = append(entries, detectedEntries...)
+	risks = append(risks, detectedRisks...)
+
+	wgEntries, wgRisks := detectWireGuardRouteEntries()
+	entries = append(entries, wgEntries...)
+	risks = append(risks, wgRisks...)
+
+	return dedupeRouteProtectionEntries(entries), risks
+}
+
+func sshRouteProtectionEntries(session sshSessionInfo) ([]sshTunBypassEntry, []string) {
+	if strings.TrimSpace(session.Client) == "" {
+		return nil, []string{"SSH session detected, but SSH_CONNECTION does not expose the client IP"}
+	}
+
+	entry, err := buildRouteProtectionEntry("ssh-client", session.Client, "protect current SSH client")
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
+	return []sshTunBypassEntry{entry}, nil
+}
+
+func manualRouteProtectionEntries() ([]sshTunBypassEntry, []string) {
+	raw := strings.TrimSpace(os.Getenv("CLASH_TUN_PROTECT_ROUTES"))
+	if raw == "" {
+		return nil, nil
+	}
+	var entries []sshTunBypassEntry
+	var risks []string
+	for _, token := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\t' || r == ' '
+	}) {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		entry, err := buildRouteProtectionEntry("manual", token, "user configured protected route")
+		if err != nil {
+			risks = append(risks, err.Error())
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	return entries, risks
 }
 
 func currentSSHSession() sshSessionInfo {
@@ -193,11 +263,6 @@ func readParentPID(pid int) (int, error) {
 	return 0, fmt.Errorf("PPid not found for pid %d", pid)
 }
 
-func sshSessionClient() (string, bool) {
-	session := currentSSHSession()
-	return session.Client, session.Active
-}
-
 func tunStartCanCaptureRoutes(info config.RuntimeInfo, forceTunEnable bool) bool {
 	if forceTunEnable {
 		return true
@@ -206,35 +271,64 @@ func tunStartCanCaptureRoutes(info config.RuntimeInfo, forceTunEnable bool) bool
 }
 
 func buildSSHTunBypassEntry(client string) (sshTunBypassEntry, error) {
-	addr, err := netip.ParseAddr(strings.TrimSpace(client))
+	return buildRouteProtectionEntry("ssh-client", client, "protect current SSH client")
+}
+
+func buildRouteProtectionEntry(source, prefixOrAddr, reason string) (sshTunBypassEntry, error) {
+	prefix, err := parseRouteProtectionPrefix(prefixOrAddr)
 	if err != nil {
-		return sshTunBypassEntry{}, fmt.Errorf("invalid SSH client IP %q: %w", client, err)
+		return sshTunBypassEntry{}, fmt.Errorf("invalid %s protected route %q: %w", source, prefixOrAddr, err)
 	}
+	if isDefaultRoutePrefix(prefix) {
+		return sshTunBypassEntry{}, fmt.Errorf("invalid %s protected route %q: default routes cannot be protected because that would bypass the whole TUN", source, prefixOrAddr)
+	}
+	addr := prefix.Addr()
 	route, err := lookupMainRoute(addr)
 	if err != nil {
 		return sshTunBypassEntry{}, err
 	}
 	if route.Dev == "" {
-		return sshTunBypassEntry{}, fmt.Errorf("cannot determine route device for SSH client %s: %s", addr, route.Raw)
+		return sshTunBypassEntry{}, fmt.Errorf("cannot determine route device for %s %s: %s", source, prefix, route.Raw)
 	}
-	if isLikelyTunnelDevice(route.Dev) {
-		return sshTunBypassEntry{}, fmt.Errorf("main route for SSH client %s already uses tunnel device %s: %s", addr, route.Dev, route.Raw)
+	if isClashTunDevice(route.Dev) {
+		return sshTunBypassEntry{}, fmt.Errorf("main route for %s %s already uses Clash/Mihomo tunnel device %s: %s", source, prefix, route.Dev, route.Raw)
 	}
 
 	return sshTunBypassEntry{
 		Family:   ipFamily(addr),
-		Prefix:   hostPrefix(addr),
+		Prefix:   prefix.String(),
 		Table:    sshTunBypassTable,
 		Priority: sshTunBypassPriority,
 		Route:    route,
+		Source:   source,
+		Reason:   reason,
 	}, nil
+}
+
+func parseRouteProtectionPrefix(value string) (netip.Prefix, error) {
+	value = strings.TrimSpace(value)
+	if strings.Contains(value, "/") {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			return netip.Prefix{}, err
+		}
+		return prefix.Masked(), nil
+	}
+	addr, err := netip.ParseAddr(value)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	if addr.Is6() {
+		return netip.PrefixFrom(addr, 128), nil
+	}
+	return netip.PrefixFrom(addr, 32), nil
 }
 
 func lookupMainRoute(addr netip.Addr) (routeInfo, error) {
 	out, err := runSSHGuardIPCommand(append(ipFamilyArgs(addr), "route", "get", addr.String())...)
 	if err == nil {
 		route := parseRouteGetOutput(out)
-		if route.Raw != "" && !isLikelyTunnelDevice(route.Dev) {
+		if route.Raw != "" && !isClashTunDevice(route.Dev) {
 			return route, nil
 		}
 	}
@@ -328,43 +422,56 @@ func routeDestinationBits(dest string, addr netip.Addr) (int, bool) {
 }
 
 func routeIsDirectMainLink(route routeInfo) bool {
-	return route.Dev != "" && route.Via == "" && !isLikelyTunnelDevice(route.Dev)
+	return route.Dev != "" && route.Via == "" && !isClashTunDevice(route.Dev)
 }
 
-func installSSHTunBypass(cfg *config.EnvConfig, entry sshTunBypassEntry) error {
+func installSSHTunBypass(cfg *config.EnvConfig, entries ...sshTunBypassEntry) error {
 	if err := os.MkdirAll(filepath.Dir(sshTunBypassStatePath(cfg)), 0755); err != nil {
-		return fmt.Errorf("prepare ssh bypass state dir: %w", err)
+		return fmt.Errorf("prepare route guard state dir: %w", err)
 	}
 
-	_ = deleteSSHTunBypassEntry(entry)
-
-	routeArgs := append(ipFamilyArgsFor(entry.Family), "route", "replace", entry.Prefix, "table", entry.Table)
-	if entry.Route.Via != "" {
-		routeArgs = append(routeArgs, "via", entry.Route.Via)
-	}
-	routeArgs = append(routeArgs, "dev", entry.Route.Dev)
-	if entry.Route.Src != "" {
-		routeArgs = append(routeArgs, "src", entry.Route.Src)
-	}
-	if out, err := runSSHGuardIPCommand(routeArgs...); err != nil {
-		return fmt.Errorf("install SSH bypass route failed: ip %s: %s", strings.Join(routeArgs, " "), strings.TrimSpace(string(out)))
+	entries = dedupeRouteProtectionEntries(entries)
+	var installed []sshTunBypassEntry
+	rollback := func() {
+		for _, entry := range installed {
+			_ = deleteSSHTunBypassEntry(entry)
+		}
 	}
 
-	ruleArgs := append(ipFamilyArgsFor(entry.Family), "rule", "add", "priority", entry.Priority, "to", entry.Prefix, "lookup", entry.Table)
-	if out, err := runSSHGuardIPCommand(ruleArgs...); err != nil {
+	for _, entry := range entries {
 		_ = deleteSSHTunBypassEntry(entry)
-		return fmt.Errorf("install SSH bypass rule failed: ip %s: %s", strings.Join(ruleArgs, " "), strings.TrimSpace(string(out)))
+
+		routeArgs := append(ipFamilyArgsFor(entry.Family), "route", "replace", entry.Prefix, "table", entry.Table)
+		if entry.Route.Via != "" {
+			routeArgs = append(routeArgs, "via", entry.Route.Via)
+		}
+		routeArgs = append(routeArgs, "dev", entry.Route.Dev)
+		if entry.Route.Src != "" {
+			routeArgs = append(routeArgs, "src", entry.Route.Src)
+		}
+		if out, err := runSSHGuardIPCommand(routeArgs...); err != nil {
+			rollback()
+			return fmt.Errorf("install route protection failed: ip %s: %s", strings.Join(routeArgs, " "), strings.TrimSpace(string(out)))
+		}
+
+		ruleArgs := append(ipFamilyArgsFor(entry.Family), "rule", "add", "priority", entry.Priority, "to", entry.Prefix, "lookup", entry.Table)
+		if out, err := runSSHGuardIPCommand(ruleArgs...); err != nil {
+			rollback()
+			_ = deleteSSHTunBypassEntry(entry)
+			return fmt.Errorf("install route protection rule failed: ip %s: %s", strings.Join(ruleArgs, " "), strings.TrimSpace(string(out)))
+		}
+		installed = append(installed, entry)
 	}
 
-	state := sshTunBypassState{Entries: []sshTunBypassEntry{entry}}
+	state := sshTunBypassState{Entries: entries}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		_ = deleteSSHTunBypassEntry(entry)
+		rollback()
 		return err
 	}
 	if err := writeSSHTunBypassStateFile(sshTunBypassStatePath(cfg), append(data, '\n'), 0644); err != nil {
-		_ = deleteSSHTunBypassEntry(entry)
-		return fmt.Errorf("write SSH bypass state: %w", err)
+		rollback()
+		return fmt.Errorf("write route guard state: %w", err)
 	}
 	return nil
 }
@@ -381,7 +488,7 @@ func cleanupSSHTunBypass(cfg *config.EnvConfig) error {
 	var state sshTunBypassState
 	if err := json.Unmarshal(data, &state); err != nil {
 		_ = os.Remove(path)
-		return fmt.Errorf("parse ssh bypass state: %w", err)
+		return fmt.Errorf("parse route guard state: %w", err)
 	}
 	for _, entry := range state.Entries {
 		_ = deleteSSHTunBypassEntry(entry)
@@ -405,6 +512,171 @@ func sshTunBypassStatePath(cfg *config.EnvConfig) string {
 	return filepath.Join(filepath.Dir(cfg.PidFile()), "ssh-tun-bypass.json")
 }
 
+func dedupeRouteProtectionEntries(entries []sshTunBypassEntry) []sshTunBypassEntry {
+	seen := map[string]bool{}
+	var out []sshTunBypassEntry
+	for _, entry := range entries {
+		key := strings.Join([]string{entry.Family, entry.Prefix, entry.Table, entry.Priority}, "|")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, entry)
+	}
+	return out
+}
+
+func protectionRequiresRoot(entries []sshTunBypassEntry) bool {
+	for _, entry := range entries {
+		if entry.Source == "ssh-client" && routeIsDirectMainLink(entry.Route) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func routeProtectionGuidance(entries []sshTunBypassEntry, risks []string) string {
+	var lines []string
+	lines = append(lines, "route-capturing TUN may interrupt existing management or tunnel routes")
+	if len(entries) > 0 {
+		lines = append(lines, "detected routes that should be protected before enabling TUN:")
+		for _, entry := range entries {
+			via := entry.Route.Dev
+			if entry.Route.Via != "" {
+				via = entry.Route.Via + " dev " + entry.Route.Dev
+			}
+			lines = append(lines, fmt.Sprintf("- %s %s via %s", entry.Source, entry.Prefix, via))
+		}
+	}
+	for _, risk := range risks {
+		lines = append(lines, "- "+risk)
+	}
+	lines = append(lines, "run this command with sudo so clashctl can install high-priority bypass routes, or rerun with --allow-route-risk after confirming another recovery path")
+	lines = append(lines, "for custom tunnels, set CLASH_TUN_PROTECT_ROUTES=cidr1,cidr2 before running the command")
+	return strings.Join(lines, "\n")
+}
+
+func detectConnectedRouteProtectionEntries() ([]sshTunBypassEntry, []string) {
+	var entries []sshTunBypassEntry
+	var risks []string
+
+	for _, family := range []string{"-4", "-6"} {
+		out, err := runSSHGuardIPCommand(family, "route", "show", "table", "main", "scope", "link")
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			route := parseRouteLine(line)
+			if route.Dev == "" || !isLikelyProtectedTunnelInterface(route.Dev) || isClashTunDevice(route.Dev) {
+				continue
+			}
+			dest := strings.Fields(line)[0]
+			if dest == "default" {
+				continue
+			}
+			entry, err := routeProtectionEntryFromRoute("connected-route", dest, route, "protect connected tunnel route")
+			if err != nil {
+				risks = append(risks, err.Error())
+				continue
+			}
+			entries = append(entries, entry)
+		}
+	}
+	return entries, risks
+}
+
+func detectWireGuardProtectionEntries() ([]sshTunBypassEntry, []string) {
+	var entries []sshTunBypassEntry
+	var risks []string
+
+	if out, err := exec.Command("wg", "show", "all", "endpoints").Output(); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 3 {
+				continue
+			}
+			host := endpointHost(fields[2])
+			if host == "" {
+				continue
+			}
+			entry, err := buildRouteProtectionEntry("tunnel-endpoint", host, "protect detected tunnel endpoint")
+			if err != nil {
+				risks = append(risks, err.Error())
+				continue
+			}
+			entries = append(entries, entry)
+		}
+	}
+
+	if out, err := exec.Command("wg", "show", "all", "allowed-ips").Output(); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 3 {
+				continue
+			}
+			for _, allowed := range fields[2:] {
+				if prefix, err := parseRouteProtectionPrefix(allowed); err == nil && isDefaultRoutePrefix(prefix) {
+					continue
+				}
+				entry, err := buildRouteProtectionEntry("tunnel-route", allowed, "protect detected tunnel allowed IP route")
+				if err != nil {
+					risks = append(risks, err.Error())
+					continue
+				}
+				entries = append(entries, entry)
+			}
+		}
+	}
+
+	return entries, risks
+}
+
+func routeProtectionEntryFromRoute(source, prefixText string, route routeInfo, reason string) (sshTunBypassEntry, error) {
+	prefix, err := parseRouteProtectionPrefix(prefixText)
+	if err != nil {
+		return sshTunBypassEntry{}, fmt.Errorf("invalid %s protected route %q: %w", source, prefixText, err)
+	}
+	if isDefaultRoutePrefix(prefix) {
+		return sshTunBypassEntry{}, fmt.Errorf("invalid %s protected route %q: default routes cannot be protected because that would bypass the whole TUN", source, prefixText)
+	}
+	return sshTunBypassEntry{
+		Family:   ipFamily(prefix.Addr()),
+		Prefix:   prefix.String(),
+		Table:    sshTunBypassTable,
+		Priority: sshTunBypassPriority,
+		Route:    route,
+		Source:   source,
+		Reason:   reason,
+	}, nil
+}
+
+func isDefaultRoutePrefix(prefix netip.Prefix) bool {
+	return prefix.Bits() == 0
+}
+
+func endpointHost(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" || endpoint == "(none)" {
+		return ""
+	}
+	if strings.HasPrefix(endpoint, "[") {
+		end := strings.Index(endpoint, "]")
+		if end > 1 {
+			return endpoint[1:end]
+		}
+	}
+	idx := strings.LastIndex(endpoint, ":")
+	if idx <= 0 {
+		return endpoint
+	}
+	return endpoint[:idx]
+}
+
 func ipFamily(addr netip.Addr) string {
 	if addr.Is6() {
 		return "ipv6"
@@ -423,14 +695,27 @@ func ipFamilyArgsFor(family string) []string {
 	return []string{"-4"}
 }
 
-func hostPrefix(addr netip.Addr) string {
-	if addr.Is6() {
-		return addr.String() + "/128"
-	}
-	return addr.String() + "/32"
+func isClashTunDevice(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.Contains(lower, "mihomo") || strings.Contains(lower, "clash") || strings.Contains(lower, "sakurai")
 }
 
-func isLikelyTunnelDevice(name string) bool {
-	lower := strings.ToLower(name)
-	return strings.Contains(lower, "tun") || strings.Contains(lower, "tap") || strings.Contains(lower, "mihomo") || strings.Contains(lower, "clash")
+func isLikelyProtectedTunnelInterface(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower == "" || lower == "lo" || isClashTunDevice(lower) {
+		return false
+	}
+	skipPrefixes := []string{"eth", "en", "wl", "docker", "br-", "veth", "virbr", "cni", "flannel"}
+	for _, prefix := range skipPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return false
+		}
+	}
+	protectedTokens := []string{"wg", "tun", "tap", "tailscale", "zt", "zerotier", "vpn", "ppp", "ipsec", "warp", "nebula", "netbird", "openvpn", "ovpn", "tinc"}
+	for _, token := range protectedTokens {
+		if strings.Contains(lower, token) {
+			return true
+		}
+	}
+	return false
 }
