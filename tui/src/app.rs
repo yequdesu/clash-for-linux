@@ -5,6 +5,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Row, Table, TableS
 use ratatui::Frame;
 use std::collections::HashMap;
 use std::sync::mpsc;
+use unicode_width::UnicodeWidthStr;
 
 use crate::action_registry::{self, ActionDanger, ActionExecutor};
 use crate::api::{
@@ -3404,7 +3405,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         title.clone(),
         Style::default().fg(CLASH_THEME.primary).bold(),
     );
-    let decor = "─".repeat(inner.width.saturating_sub(title.len() as u16) as usize);
+    let decor = "─".repeat(inner.width.saturating_sub(display_width(&title)) as usize);
     let title_line = Line::from(vec![
         title_span,
         Span::styled(decor, Style::default().fg(CLASH_THEME.muted)),
@@ -3661,7 +3662,7 @@ fn render_network_actions(frame: &mut Frame, area: Rect, app: &mut App) {
             continue;
         };
         let label = format!("[{}]", app.action_button(spec));
-        let width = label.chars().count() as u16 + 1;
+        let width = display_width(&label).saturating_add(1);
         if x.saturating_add(width) > inner.x.saturating_add(inner.width) {
             x = inner.x;
             y = y.saturating_add(1);
@@ -3726,7 +3727,7 @@ where
 fn register_tab_hitboxes(area: Rect, app: &mut App) {
     let mut x = area.x;
     for tab in Tab::all() {
-        let width = (app.t(tab.msg()).chars().count() as u16).saturating_add(2);
+        let width = display_width(app.t(tab.msg())).saturating_add(2);
         if x >= area.x.saturating_add(area.width) {
             break;
         }
@@ -4809,7 +4810,11 @@ fn action_fg(danger: ActionDanger) -> Color {
 }
 
 fn action_button_width(label: &str) -> u16 {
-    label.chars().count() as u16 + 2
+    display_width(label).saturating_add(2)
+}
+
+fn display_width(value: &str) -> u16 {
+    UnicodeWidthStr::width(value).min(u16::MAX as usize) as u16
 }
 
 fn hitbox_for_action_spec(spec: &action_registry::ActionSpec) -> Option<HitboxAction> {
@@ -6447,15 +6452,15 @@ fn is_auto_default_page(raw: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        action_button_width, command_output_lines, hitbox_for_action_spec,
+        action_button_width, command_output_lines, display_width, hitbox_for_action_spec,
         initial_tab_for_profiles, log_line_rank, mode_display, next_default_page, next_mode,
         parse_config_set_api_args, parse_config_set_ports_args, parse_geodata_update_version_args,
         parse_traffic_prune_retention_args, profile_interval_label, redact_sensitive_output,
         register_subscription_action_hitboxes, register_subscription_form_hitboxes,
-        subscription_action_buttons, traffic_line_chart_lines, traffic_locked_bucket_lines,
-        traffic_status_lines, traffic_summary, traffic_window_bounds, App, LogLevelFilter,
-        SettingsPromptKind, SubscriptionAddForm, SubscriptionEditField, SubscriptionEditForm,
-        SubscriptionPrompt, TrafficChartKind, TrafficDimension, TrafficRange,
+        register_tab_hitboxes, subscription_action_buttons, traffic_line_chart_lines,
+        traffic_locked_bucket_lines, traffic_status_lines, traffic_summary, traffic_window_bounds,
+        App, LogLevelFilter, SettingsPromptKind, SubscriptionAddForm, SubscriptionEditField,
+        SubscriptionEditForm, SubscriptionPrompt, TrafficChartKind, TrafficDimension, TrafficRange,
     };
     use crate::action_registry;
     use crate::api::{ProfileEntry, ProxyInfo, TrafficPoint, TrafficStatus};
@@ -6508,6 +6513,31 @@ mod tests {
         assert_eq!(Tab::Subscriptions.next(), Tab::Proxies);
         assert_eq!(Tab::Traffic.next(), Tab::Network);
         assert_eq!(Tab::Help.next(), Tab::Subscriptions);
+    }
+
+    #[test]
+    fn hitbox_width_uses_terminal_display_columns_for_cjk_labels() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let mut app = test_app(&rt);
+        app.ui_settings.language = LanguageSetting::ZhCn;
+
+        assert_eq!(display_width("添加"), 4);
+        assert_eq!(action_button_width("添加"), 6);
+
+        register_tab_hitboxes(Rect::new(0, 0, 80, 1), &mut app);
+
+        assert_eq!(
+            app.hitboxes.action_at(0, 0),
+            Some(HitboxAction::SwitchTab(Tab::Subscriptions))
+        );
+        assert_eq!(
+            app.hitboxes.action_at(5, 0),
+            Some(HitboxAction::SwitchTab(Tab::Subscriptions))
+        );
+        assert_eq!(
+            app.hitboxes.action_at(6, 0),
+            Some(HitboxAction::SwitchTab(Tab::Proxies))
+        );
     }
 
     #[test]
