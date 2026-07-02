@@ -1,11 +1,13 @@
 # Ratatui Component Refactor Plan
 
-Status: deterministic architecture plan
+Status: worktree-first deterministic architecture plan
 Date: 2026-07-02
 
 This document is the governing plan for refactoring the current TUI implementation from a large procedural `app.rs` into a component-oriented, retained-state, declarative-layout architecture.
 
-This plan intentionally prioritizes correctness of architecture over short-term edit speed. No large TUI refactor should begin without first updating this document or a phase-specific implementation plan derived from it.
+This plan intentionally prioritizes refactor quality over short-term edit speed. The primary objective is to prevent `tui/src/app.rs` from remaining or becoming a monolithic file. Test infrastructure is not a goal of this plan; lightweight checks are useful, but they must not become the center of the refactor.
+
+Large refactors must happen in a separate git worktree so the current working tree can remain a usable baseline for comparison. Do not destructively reshape the only checkout.
 
 ## 1. Refactor Direction And Feasibility
 
@@ -16,7 +18,8 @@ The project should keep `ratatui` as the rendering backend and build an internal
 The target architecture is:
 
 - `ratatui` remains the low-level immediate-mode renderer.
-- Project-owned components own retained UI state, focus, scroll, modal stack, and hitboxes.
+- Project-owned `UiState` owns retained UI state, focus, scroll, modal stack, and hitboxes.
+- Components are mostly stateless render/event adapters over explicit props and explicit retained state.
 - Layout is declared through project-owned `Stack`, `Flex`, `Grid`, `Panel`, and `Slot` primitives instead of hand-splitting rectangles inside each page.
 - Event routing is component-id based, not area-function based.
 - Pages are thin compositions of reusable components.
@@ -83,16 +86,22 @@ Reasons:
 - The immediate problem is not ratatui itself. The problem is that project code has no stable UI architecture boundary.
 - A small internal UI kit can be introduced incrementally while preserving visible behavior.
 
-External framework usage is allowed only after a spike proves it reduces total project code and does not weaken auditability. Such a spike must be isolated from mainline and must compare:
+External framework usage is allowed only after a spike proves it reduces total project code and does not weaken auditability. Such a spike must be isolated in its own worktree or branch and must compare:
 
 - event routing,
 - mouse hitbox behavior,
 - modal focus behavior,
 - scroll behavior,
-- testability,
+- code reduction in the migrated vertical slice,
 - dependency risk,
 - binary size and build complexity,
 - ability to preserve current CLI/API action coverage.
+
+Adoption threshold:
+
+- The vertical slice should remove more code than it adds after old code is deleted.
+- The framework must not force command execution, route-risk handling, sudo prompts, or action registry metadata into hidden framework callbacks.
+- A dependency that significantly increases compile time, binary size, or maintenance risk requires an explicit follow-up decision before adoption.
 
 ## 2. Current Code State Analysis
 
@@ -101,10 +110,16 @@ External framework usage is allowed only after a spike proves it reduces total p
 Current measured TUI file sizes:
 
 ```text
-tui/src/app.rs              8193 lines
+tui/src/app.rs              8823 physical lines
 tui/src/action_registry.rs  1795 lines
 tui/src/main.rs              535 lines
 tui/src/mouse.rs             470 lines
+```
+
+Line counts should be measured with physical line count, for example:
+
+```powershell
+(Get-Content tui/src/app.rs).Count
 ```
 
 Current dependency baseline:
@@ -160,7 +175,7 @@ The refactor should preserve these assets:
 - Current visible page ordering and page design unless separately changed.
 - Current mouse support requirement.
 - Current traffic chart and persistence feature direction.
-- Existing `widgets/` primitives where they are already clean.
+- Existing `widgets/` primitives only if they are explicitly classified as keep, migrate, or delete.
 
 ### 2.4 Current Anti-Patterns To Remove
 
@@ -243,6 +258,8 @@ tui/src/
     command_palette.rs
 ```
 
+The current `tui/src/widgets/` directory is transitional. It must not become a second permanent component system. Each existing widget must be migrated into `ui/components/`, merged into a richer component, or deleted.
+
 ### 3.2 State Split
 
 Use a hard split between business model and UI model.
@@ -260,13 +277,18 @@ AppModel
 
 UiState
   active page
-  page-local selected rows
-  page-local scroll offsets
+  page states
   focused component
   modal stack
-  current form field
   last layout/hitboxes
   user visual settings
+
+PageState
+  selected rows
+  scroll offsets
+  chart viewport
+  current form field
+  local filters/sort mode
 ```
 
 Rules:
@@ -274,7 +296,9 @@ Rules:
 - Business data does not know about `Rect`.
 - Rendering does not spawn commands.
 - Components emit `UiAction`; update code decides what that means.
-- Page state is explicit and typed. No loose `usize` fields in root `App` unless they are truly global.
+- Page state is explicit and typed.
+- No loose `usize` fields remain in root `App` unless they are truly global.
+- Stateful components receive state from `UiState` or page state. They do not hide retained state inside ad-hoc component structs.
 
 ### 3.3 Component Contract
 
@@ -282,13 +306,10 @@ Initial internal component trait:
 
 ```rust
 pub trait Component {
-    type Props;
-    type State;
-
     fn id(&self) -> ComponentId;
-    fn layout(&self, props: &Self::Props, cx: &mut LayoutCtx) -> LayoutNode;
-    fn render(&self, props: &Self::Props, state: &Self::State, area: Rect, cx: &mut RenderCtx);
-    fn event(&self, state: &mut Self::State, event: UiEvent, cx: &mut EventCtx) -> EventResult;
+    fn layout(&self, cx: &mut LayoutCtx) -> LayoutNode;
+    fn render(&self, area: Rect, cx: &mut RenderCtx);
+    fn event(&self, event: UiEvent, cx: &mut EventCtx) -> EventResult;
 }
 ```
 
@@ -297,7 +318,26 @@ This trait may be simplified during implementation. The invariant is more import
 - layout and render must be separate,
 - event routing must use component identity,
 - hitbox registration must live with the component that draws the interactive element,
-- local retained state must be typed and owned.
+- retained state must be typed and owned by `UiState` or page state, not hidden in render helpers.
+- components may be simple structs carrying props; they should not become mini application containers.
+
+Stateful component examples:
+
+```rust
+ScrollArea {
+    id: ComponentId,
+    state_key: ScrollStateKey,
+    child: Box<dyn Renderable>,
+}
+
+DataTable {
+    id: ComponentId,
+    selection_key: SelectionStateKey,
+    rows: Vec<TableRow>,
+}
+```
+
+The state key points to typed state owned outside the component. This keeps retention explicit and makes it possible to inspect or reset UI state from page logic.
 
 ### 3.4 Retained Mode Definition For This Project
 
@@ -325,6 +365,17 @@ Not retained:
 
 ### 3.5 Declarative Layout DSL
 
+Breakpoints are part of the foundation, not a late-stage detail.
+
+Initial breakpoint constants:
+
+```text
+narrow: < 100 columns
+wide:   >= 100 columns
+short:  < 24 rows
+tall:   >= 36 rows
+```
+
 Minimum internal layout API:
 
 ```rust
@@ -348,7 +399,7 @@ Implementation phases:
 
 1. Wrap ratatui `Layout` with a project DSL.
 2. Add breakpoint helpers and named slots.
-3. Add testable layout snapshots.
+3. Add simple layout helpers that can be visually compared in the worktree.
 4. Only introduce `taffy` after a spike proves ratatui constraints are insufficient.
 
 The first goal is not full CSS parity. The first goal is to remove ad-hoc rectangle math from page render functions.
@@ -395,42 +446,116 @@ Rules:
 - Modals own event priority. If a modal is open, underlying page hitboxes are ignored.
 - Scroll areas must register their own scroll hitboxes.
 
+### 3.8 Text And I18n Model
+
+Reusable components must not hard-code display strings.
+
+Use a small text abstraction:
+
+```rust
+pub enum UiText {
+    Msg(Msg),
+    ActionLabel(&'static str),
+    ActionButton(&'static str),
+    Static(&'static str),
+    Owned(String),
+}
+```
+
+Resolution happens through `RenderCtx`, which has access to language settings and action registry helpers.
+
+Rules:
+
+- `Button` should usually receive an action id or `UiText::ActionButton`, not a pretranslated raw label.
+- `Panel` titles should usually be `UiText::Msg`.
+- Page-specific dynamic values may use `Owned(String)`.
+- Components must not call global translation functions directly unless passed through `RenderCtx`.
+- Action labels, button labels, shortcut text, and command palette entries remain registry-driven.
+
+### 3.9 Existing `widgets/` Migration Map
+
+Current widgets must be handled explicitly:
+
+```text
+tui/src/widgets/card.rs        -> migrate into ui/components/panel.rs, then delete or leave as shim briefly.
+tui/src/widgets/gauge.rs       -> migrate into ui/components/chart.rs or gauge.rs.
+tui/src/widgets/sparkline.rs   -> migrate into ui/components/chart.rs.
+tui/src/widgets/status_dot.rs  -> migrate into ui/components/status_bar.rs or status.rs.
+tui/src/widgets/tab_bar.rs     -> migrate into ui/components/nav.rs.
+tui/src/widgets/table.rs       -> migrate into ui/components/data_table.rs.
+tui/src/widgets/mod.rs         -> deleted or re-export transitional shims only during migration.
+```
+
+Final state should not have both `widgets/` and `ui/components/` as competing component systems. Keeping `widgets/` is allowed only if it becomes a compatibility re-export layer with no independent logic, and even that should be temporary.
+
 ## 4. Deterministic Refactor Plan
 
-### Phase 0: Freeze Baseline
+### 4.1 Worktree-First Workflow
 
-Goal: establish a measurable baseline before architecture movement.
+All real refactor work should happen in a separate git worktree. The current checkout remains the visual and behavioral baseline.
+
+Recommended setup from the current repository:
+
+```powershell
+git fetch origin
+git worktree add ..\clash-for-linux-tui-refactor -b codex/tui-component-refactor origin/codex/harden-clash-linux
+```
+
+If the branch already exists:
+
+```powershell
+git worktree add ..\clash-for-linux-tui-refactor codex/tui-component-refactor
+```
+
+Workflow rules:
+
+- Keep the original checkout available for comparison.
+- Do not perform destructive architecture work in the only checkout.
+- Use the refactor worktree for all module moves, page migrations, and deletion.
+- Compare against the baseline worktree visually and with `git diff` when needed.
+- A failed phase can be abandoned by removing the worktree and branch.
+- A successful phase can be squashed or merged back intentionally.
+
+Useful commands:
+
+```powershell
+git worktree list
+git -C ..\clash-for-linux-tui-refactor status -sb
+git -C ..\clash-for-linux-tui-refactor diff --stat origin/codex/harden-clash-linux...HEAD
+```
+
+The point of this workflow is not bureaucracy. It is to make architecture refactoring reversible and comparable while the current TUI remains usable.
+
+### Phase 0: Establish Refactor Worktree And Baseline
+
+Goal: create a safe place to refactor without damaging the baseline checkout.
 
 Tasks:
 
-- Record current screenshot set for all pages at 80x24, 120x36, 180x48.
-- Record current mouse smoke scenarios:
-  - sidebar/top nav click,
-  - action button click,
-  - modal button click,
-  - scroll command output,
-  - scroll help,
-  - scroll traffic chart/table.
-- Record current test commands:
-  - `cargo fmt --check`
-  - `cargo test`
-  - `cargo clippy -- -D warnings`
-  - `go test ./...`
-  - `go vet ./...`
-  - `git diff --check`
-- Add this document to the refactor checklist.
+- Create the worktree.
+- Open the current TUI once in the baseline checkout and once in the refactor worktree when needed.
+- Record only the observations that matter for refactor quality:
+  - page layout still recognizable,
+  - mouse clicks still hit visible buttons,
+  - modals still block underlying pages,
+  - `app.rs` line count is decreasing after page migrations.
+
+No dedicated screenshot infrastructure, golden tests, or snapshot framework is required.
 
 Exit criteria:
 
-- Baseline screenshots and smoke actions are documented.
-- No refactor branch starts with unknown current behavior.
+- Refactor worktree exists.
+- Baseline checkout remains untouched.
+- The branch purpose is clear.
 
-### Phase 1: Extract Core UI Infrastructure
+### Phase 1: State, Action, Layout, And Text Foundation
 
-Goal: create the reusable core without migrating pages.
+Goal: create the foundations that stateful components need before those components are migrated.
 
 Create:
 
+- `ui/model.rs`
+- `ui/action.rs`
 - `ui/component.rs`
 - `ui/layout.rs`
 - `ui/hitbox.rs`
@@ -438,102 +563,109 @@ Create:
 - `ui/style.rs`
 - `ui/text.rs`
 
-Move or duplicate temporarily:
+Define:
 
-- display width helpers,
-- truncation helpers,
-- action button width calculation,
-- hitbox registration helpers,
-- semantic styles.
+- `UiState`
+- `PageStates`
+- `ModalState`
+- `FocusPath`
+- `ComponentId`
+- `UiAction`
+- `UiText`
+- `Breakpoint`
+- `LayoutCtx`
+- `RenderCtx`
+- `EventCtx`
 
 Rules:
 
-- New infrastructure must have unit tests before page migration uses it.
-- No page behavior changes in this phase unless required to compile.
-- Existing `app.rs` may call the new helpers, but page functions stay where they are until Phase 2.
+- This phase may increase total code temporarily.
+- This phase should not attempt to migrate all pages.
+- This phase must make state ownership explicit before `ScrollArea`, `Form`, `DataTable`, `Modal`, or `Chart` are migrated.
+- Breakpoints are defined here, not delayed until a later layout phase.
+- i18n resolution strategy is defined here through `UiText` and `RenderCtx`.
 
 Exit criteria:
 
-- Shared button width and hitbox tests pass.
-- Shared layout split tests pass.
-- `app.rs` line count starts decreasing only after helpers are used.
+- New core modules exist.
+- `UiState` has typed page state containers, even if not every page uses them yet.
+- Event and render contexts exist.
+- Old code still runs.
 
-### Phase 2: Componentize Primitive Controls
+### Phase 2: Stateless Visual Components And Existing Widget Classification
 
-Goal: remove duplicated rendering patterns.
+Goal: remove obvious rendering duplication without touching retained behavior first.
 
 Implement:
 
 - `Button`
 - `ActionBar`
 - `Panel`
+- `Nav`
+- `StatusBar`
+- `KeyHint`
+
+Classify and migrate existing `widgets/`:
+
+- `card.rs` -> `Panel`
+- `tab_bar.rs` -> `Nav`
+- `status_dot.rs` -> `StatusBar` or status component
+- `gauge.rs` -> later chart/gauge component
+- `sparkline.rs` -> later chart component
+- `table.rs` -> later `DataTable`
+
+Rules:
+
+- Stateless components can be adopted before the full state split.
+- If a component draws an interactive element, it owns the hitbox.
+- Delete old helpers as soon as an equivalent component replaces them.
+- Do not leave `widgets/` and `ui/components/` as two permanent systems.
+
+Exit criteria:
+
+- Common button/action/panel/nav rendering no longer lives in page functions.
+- Existing clean widgets have a declared migration target.
+- `app.rs` starts losing duplicated rendering helpers.
+
+### Phase 3: Stateful Components, Modal Stack, And Event Router
+
+Goal: make retained interactions explicit before migrating complex pages.
+
+Implement:
+
+- `ScrollState`
+- `SelectionState`
+- `FormState`
+- `ModalStack`
+- `CommandOutputState`
+- `ChartViewport`
+- `EventRouter`
+
+Then implement components that depend on retained state:
+
 - `ScrollArea`
 - `CommandOutput`
 - `DataTable`
 - `Modal`
 - `Form`
-- `Nav`
-- `StatusBar`
-
-Migration order:
-
-1. `Button`
-2. `ActionBar`
-3. `Panel`
-4. `ScrollArea`
-5. `Modal`
-6. `Form`
-7. `DataTable`
-8. `Chart`
+- `Chart`
 
 Rules:
 
-- Each component owns rendering and hitboxes.
-- Each component has a small test for layout/hitbox behavior.
-- Replace old helpers immediately after equivalent component is adopted.
+- Stateful components receive state keys or typed state references.
+- Stateful components must not hide their own retained state in render-only structs.
+- Modal routing is centralized. Open modals receive keyboard and mouse events before pages.
+- Scroll routing is centralized. Scrollable components register scroll areas through the same hitbox path used for clicks.
 
 Exit criteria:
 
-- No page-local button rendering remains.
-- No page-local action button hitbox math remains.
-- Modal buttons share one implementation.
-- Scroll areas share one implementation.
+- Modal, form, scroll, table selection, and chart viewport behavior all have typed state owners.
+- Existing page code can call these components without duplicating state fields.
+- Root `App` starts moving page-local state into `UiState`.
 
-### Phase 3: Split App State And Update Logic
+### Phase 4: Page Migration In Vertical Slices
 
-Goal: make rendering independent from command execution and async result application.
-
-Create:
-
-- `ui/model.rs` for `UiState`, page states, modal states.
-- `update.rs` for data event application and command dispatch.
-- `ui/action.rs` for UI-level actions.
-
-Move from `app.rs`:
-
-- data event application,
-- command result normalization,
-- sudo retry state,
-- confirmation state,
-- page-local selection and scroll fields,
-- command palette state,
-- form state.
-
-Rules:
-
-- `App` becomes a container of `AppModel`, `UiState`, API client, runtime handle, and channels.
-- Rendering functions cannot spawn tasks.
-- Event handling cannot directly call shell commands; it emits actions.
-
-Exit criteria:
-
-- `app.rs` no longer contains page render functions.
-- `app.rs` no longer contains low-level widget layout.
-- async result handling is tested independently from rendering.
-
-### Phase 4: Migrate Pages One By One
-
-Goal: move pages from procedural rendering into declarative page modules.
+Goal: move pages out of procedural `app.rs` one by one and delete the old code in the same slice.
 
 Migration order:
 
@@ -548,90 +680,87 @@ Migration order:
 
 Rationale:
 
-- Help and Logs are simplest and prove scroll behavior.
-- Settings and Network stress action bars, command output, forms, sudo, and modal rules.
-- Traffic stresses chart layout and retained viewport state.
-- Proxies and Subscriptions are interaction-heavy and should migrate after primitives are stable.
+- Help and Logs prove scroll and panel basics.
+- Settings and Network prove action bars, forms, command output, sudo modal behavior, and page sections.
+- Traffic proves chart state and long visual areas.
+- Connections, Proxies, and Subscriptions migrate after table/list/form components are stable.
 
 Per-page method:
 
-1. Write a page-specific design sketch in comments or a phase note.
-2. Define page state type.
-3. Define page props/view model.
-4. Implement page composition using components.
-5. Route events through `UiAction`.
-6. Delete old page render function.
-7. Delete old page-specific helper functions.
-8. Run tests.
+1. Define page view model.
+2. Define page state type if the page has local retained state.
+3. Compose the page from components.
+4. Route events through `UiAction`.
+5. Delete old page render function from `app.rs`.
+6. Delete old page-specific hitbox/layout helpers.
+7. Delete obsolete i18n keys and dead helpers.
+8. Compare visually with baseline checkout.
 
 Exit criteria per page:
 
-- Old render function deleted.
-- Old hitbox math deleted.
-- Page tests cover layout, action hitboxes, and primary keyboard/mouse actions.
-- Screenshots match or intentionally improve baseline.
+- The old page render function is gone.
+- The old page-specific hitbox math is gone.
+- The page module owns page composition.
+- `app.rs` line count decreases unless a documented temporary move is still in progress.
 
-### Phase 5: Replace Layout Internals With Constraint DSL
+### Phase 5: App.rs Demolition And Ownership Cleanup
 
-Goal: make responsive layout declarative and testable.
+Goal: reduce `app.rs` to orchestration only.
 
-Tasks:
+Move out of `app.rs`:
 
-- Add named slots for common page patterns:
-  - `ShellLayout`
-  - `TwoColumnLayout`
-  - `SummaryActionsLayout`
-  - `ChartWithSidebarLayout`
-  - `FormModalLayout`
-- Add breakpoint definitions:
-  - narrow: `< 100 columns`
-  - wide: `>= 100 columns`
-  - short: `< 24 rows`
-  - tall: `>= 36 rows`
-- Add snapshot tests for slot rectangles.
+- data event application,
+- command execution decisions,
+- command output normalization,
+- modal state transitions,
+- page-local state,
+- page rendering,
+- form rendering,
+- chart rendering,
+- table rendering,
+- hitbox routing.
 
-Only after this, evaluate `taffy`.
+Final `app.rs` responsibilities:
 
-Taffy adoption criteria:
-
-- Current DSL cannot express required wrapping or responsive behavior without complex manual code.
-- The taffy adapter can return deterministic `Rect` trees for terminal cell sizes.
-- It does not make simple page layout harder to read.
-- It has tests for width/height rounding and terminal cell constraints.
+- create `AppModel`,
+- create `UiState`,
+- own runtime/channel handles,
+- call update layer,
+- call render entry point,
+- coordinate top-level refresh.
 
 Exit criteria:
 
-- Page modules no longer call raw `Layout::vertical/horizontal` except inside layout infrastructure.
-- Layout snapshots cover all major page templates.
+- `app.rs` is no longer the place where pages are implemented.
+- Adding a page or component does not require editing thousands of lines in `app.rs`.
+- The file is small enough to review in one pass.
 
-### Phase 6: Optional Framework Spike
+### Phase 6: Optional Layout Engine Or Framework Spike
 
-Goal: decide whether external framework adoption is worth it.
+Goal: decide whether a bigger dependency is worth it after the internal architecture exists.
 
 Allowed candidates:
 
-- `tui-realm`
-- `iocraft`
-- a direct `taffy` layout adapter
+- direct `taffy` layout adapter,
+- `tui-realm`,
+- `iocraft`.
 
-The spike must not touch mainline page code. It must implement one vertical slice:
+The spike must happen in a separate worktree or branch and must implement one vertical slice:
 
-- Settings page shell,
+- one page shell,
 - one action bar,
-- one form modal,
+- one modal/form,
 - one scroll area,
-- one table/list.
+- one table/list or chart.
 
 Decision criteria:
 
-- Less code than internal UI kit.
-- Equal or better testability.
-- Equal or better mouse support.
-- No loss of action registry auditability.
-- No loss of modal/focus predictability.
-- No dependency fragility.
+- The slice deletes more project code than it adds.
+- The resulting code is easier to read than the internal UI kit.
+- Mouse routing, modal priority, and action registry integration stay explicit.
+- Dependency cost is justified by removed complexity.
 
-If the spike fails any criterion, do not adopt the framework.
+If the spike fails, discard the worktree. Do not merge a framework experiment that makes the architecture harder to understand.
 
 ## 5. Old Code Cleanup Method
 
@@ -660,22 +789,25 @@ For each migrated page or component:
 - Delete old ad-hoc text formatter if the new component handles it.
 - Delete old page-local action button code.
 - Delete obsolete tests.
-- Add or update behavior tests.
 - Run `rg` for old function names.
-- Run `cargo clippy -- -D warnings`.
-- Run `git diff --check`.
+- Run lightweight checks when practical.
+- Prefer deleting old code over preserving obsolete tests.
 
 ### 5.3 Root `app.rs` Shrink Targets
 
 Line-count targets:
 
 ```text
-Current app.rs: about 8193 lines
-After Phase 2: <= 6500 lines
-After Phase 3: <= 4500 lines
-After Phase 4: <= 1800 lines
+Current app.rs: about 8823 physical lines
+After Phase 1: app.rs may stay similar or grow slightly while foundations land
+After Phase 2: <= 7800 lines
+After Phase 3: <= 6500 lines
+After four migrated pages: <= 4500 lines
+After all pages migrate: <= 1800 lines
 Final target:  <= 1200 lines
 ```
+
+These targets are not production metrics. They exist to prevent the refactor from becoming another layer on top of the same monolithic `app.rs`. If a phase adds abstractions but does not eventually delete old `app.rs` code, the phase is incomplete.
 
 Final `app.rs` should contain:
 
@@ -701,7 +833,7 @@ Abstractions must reduce total complexity. They are justified only when they:
 
 - remove real duplication,
 - make hitboxes and rendering share one source of truth,
-- make responsive layout testable,
+- make responsive layout easier to reason about,
 - isolate state ownership,
 - make event routing predictable,
 - reduce page code size,
@@ -826,19 +958,19 @@ trait IntoReactiveActionBarNodeWithLifecycleHooks<'a, M, E>
 
 Generic abstractions are allowed only after at least two concrete components prove the same shape.
 
-### 6.9 Test The Architecture, Not Just Functions
+### 6.9 Prefer Structural Clarity Over Test Infrastructure
 
-Required test categories:
+This project is not currently treated as a production system, so a heavy TUI testing stack is not required for the refactor.
 
-- layout rectangle tests,
-- hitbox visual-width tests,
-- modal event priority tests,
-- scroll dispatch tests,
-- action registry coverage tests,
-- page smoke render tests,
-- command result update tests.
+Useful lightweight checks:
 
-Tests should fail when visual and hitbox geometry diverge.
+- compile the TUI when practical,
+- run existing tests when they are cheap,
+- compare the refactor worktree visually with the baseline worktree,
+- manually check mouse click and scroll behavior for migrated pages,
+- inspect `app.rs` line count and deleted old functions.
+
+Do not build elaborate snapshot or golden-image infrastructure just to start the refactor. The main success criterion is architectural: fewer responsibilities in `app.rs`, less duplication, clearer state ownership, and components that own their rendering/hitbox behavior.
 
 ## 7. Refactor Process Rules
 
@@ -850,7 +982,7 @@ No major refactor phase starts without:
 - affected files,
 - exact old code to delete,
 - migration order,
-- verification commands,
+- optional verification commands,
 - rollback criteria.
 
 Implementation speed is secondary. A fast patch that worsens architecture is not acceptable.
@@ -875,12 +1007,12 @@ When a missing abstraction is discovered, choose one:
 
 ### 7.3 Refactor In Vertical Slices
 
-Each slice must leave the app compiling and tested.
+Each slice should leave the app compiling when practical. It does not need to introduce new test infrastructure.
 
 A good slice:
 
 ```text
-Introduce ActionBar -> migrate Network actions -> delete old Network action rendering -> test.
+Introduce ActionBar -> migrate Network actions -> delete old Network action rendering -> compile or visually check.
 ```
 
 A bad slice:
@@ -916,29 +1048,33 @@ Not allowed without a user-facing design decision:
 - reducing i18n coverage,
 - weakening route-risk/sudo safety behavior.
 
-### 7.6 Verification Gates
+### 7.6 Lightweight Verification
 
-Every refactor slice must run at minimum:
+Recommended checks:
 
 ```bash
+cargo check
 cargo fmt --check
 cargo test
 cargo clippy -- -D warnings
 git diff --check
 ```
 
-If Go-facing behavior is touched:
+These checks are recommended, not the purpose of the refactor. If a check becomes noisy because old tests assert obsolete internals, update or delete those tests instead of preserving the old architecture.
+
+If Go-facing behavior is touched, these remain useful:
 
 ```bash
 go test ./...
 go vet ./...
 ```
 
-If visual layout is touched:
+If visual layout is touched, a manual worktree comparison is enough:
 
-- capture screenshots for narrow/wide terminal sizes,
-- test mouse clicks in tmux if the change affects hitboxes,
-- test scroll behavior for every changed scroll area.
+- open the same page in the baseline checkout,
+- open the migrated page in the refactor worktree,
+- compare layout and core interactions,
+- verify that old code was deleted.
 
 ### 7.7 Stop Conditions
 
@@ -948,7 +1084,7 @@ Stop and redesign if any of these happen:
 - modal priority becomes unclear,
 - hitboxes are calculated away from the visible component,
 - page code grows after migration,
-- tests need large brittle snapshots to pass,
+- a phase adds new abstractions but does not delete old `app.rs` code,
 - a component needs access to unrelated global state,
 - an abstraction needs many optional fields to support first use.
 
@@ -985,4 +1121,3 @@ ui/hitbox.rs
 ```
 
 The desired end state is not "more framework code". The desired end state is less page code, fewer special cases, deterministic mouse behavior, stable modal behavior, and a TUI codebase that can keep adding features without turning `app.rs` into a larger procedural file.
-
