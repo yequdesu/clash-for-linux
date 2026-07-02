@@ -1413,6 +1413,8 @@ Current local status:
 - Settings / Updates 已接入 `geodata update --version` 表单动作，支持 `latest` 或单个 release tag；`geodata update --version` 已从参数级 CLI-only 矩阵中移除。
 - Network 已为 `clashctl env` 接入独立 `network.env` 动作，支持按钮、`e` 快捷键、Command Palette、Help 和鼠标点击；该动作只打印可 `eval` 的 shell 环境变量，不伪装成能修改父 shell。
 - Network 页主要运行态标题和空状态提示已迁移到统一 i18n key，覆盖 Current Proxy、Actions、System Info、Command Output、No proxy selected 和 shell env 输出提示。
+- 主窗口 shell 已开始按 V2 布局落地：宽屏使用左侧一级导航、顶部状态栏、主工作区、底部状态栏；窄屏保留紧凑导航。action/bottom 区已抽出背景色按钮布局，支持按终端显示列宽自动换行并复用同一套 hitbox，Subscriptions/Proxies/Connections/Traffic/Network/Logs 的可见动作不再依赖中括号文本。
+- Help 页已支持鼠标滚轮滚动完整 action registry；Network 命令输出区已支持鼠标滚轮滚动；`traffic reset` 已从 Traffic 观察页迁移到 Settings / Traffic 维护动作。
 - Connections 页主要运行态标题、表头、空状态和动作提示已迁移到统一 i18n key，覆盖 Host、Type、Chain、No active connections 和 close selected/close all 提示。
 - Proxies 页主表、动作区和节点弹窗主要运行态标签已迁移到统一 i18n key，覆盖代理组表头、空状态、节点数量单位、动作提示、节点表头和节点弹窗提示。
 - Traffic、Settings、Logs 的主要运行态标签已迁移到统一 i18n key，覆盖 Traffic 摘要/历史图/排行/详情/collector 状态、Settings 卡片/分组/结果区、Logs 标题/空状态/动作提示。

@@ -88,6 +88,18 @@ fn run(
                 }
 
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                if app.sudo_prompt_active() {
+                    if !ctrl {
+                        match key.code {
+                            KeyCode::Esc => app.cancel_sudo_prompt(),
+                            KeyCode::Enter => app.submit_sudo_prompt(),
+                            KeyCode::Backspace => app.pop_sudo_prompt_char(),
+                            KeyCode::Char(c) => app.push_sudo_prompt_char(c),
+                            _ => {}
+                        }
+                    }
+                    continue;
+                }
                 if ctrl {
                     match key.code {
                         KeyCode::Char('l') | KeyCode::Char('L') => app.toggle_language(),
@@ -188,7 +200,10 @@ fn run(
                             app.should_quit = true;
                         }
                     }
-                    KeyCode::Tab | KeyCode::Char('\t') | KeyCode::Right => app.next_tab(),
+                    KeyCode::Tab | KeyCode::Char('\t') => app.next_tab(),
+                    KeyCode::Right if app.tab == Tab::Settings => app.next_settings_section(),
+                    KeyCode::Left if app.tab == Tab::Settings => app.prev_settings_section(),
+                    KeyCode::Right => app.next_tab(),
                     KeyCode::Left => app.prev_tab(),
                     KeyCode::Char('?') | KeyCode::Char('h') => {
                         app.tab = Tab::Help;
@@ -298,9 +313,6 @@ fn run(
                     KeyCode::Char('p') if app.tab == Tab::Traffic => {
                         app.run_traffic_action(TrafficAction::PruneDefault);
                     }
-                    KeyCode::Char('D') if app.tab == Tab::Traffic => {
-                        app.run_traffic_action(TrafficAction::Reset);
-                    }
                     KeyCode::Char('u') if app.tab == Tab::Subscriptions => {
                         app.update_selected_subscription();
                     }
@@ -386,6 +398,9 @@ fn run(
                     }
                     KeyCode::Char('d') if app.tab == Tab::Settings => {
                         app.run_settings_action(SettingsAction::Doctor);
+                    }
+                    KeyCode::Char('D') if app.tab == Tab::Settings => {
+                        app.run_traffic_action(TrafficAction::Reset);
                     }
                     KeyCode::Char('c') if app.tab == Tab::Settings => {
                         app.run_settings_action(SettingsAction::ConfigDoctor);

@@ -276,8 +276,12 @@ pub enum HitboxAction {
     CancelPendingAction,
     FocusSettingsPromptValue,
     SelectSettingsPromptField(usize),
+    SelectSettingsSection(usize),
     SubmitSettingsPrompt,
     CancelSettingsPrompt,
+    FocusSudoPromptValue,
+    SubmitSudoPrompt,
+    CancelSudoPrompt,
     CycleUiLanguage,
     CycleThemePreference,
     CycleDefaultPage,
@@ -303,6 +307,8 @@ pub enum HitboxAction {
     ScrollProxyNodes,
     ScrollTrafficChart,
     ScrollTrafficRows,
+    ScrollHelp,
+    ScrollNetworkOutput,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

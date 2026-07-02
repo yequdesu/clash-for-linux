@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::process::Stdio;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::config;
@@ -244,6 +246,30 @@ fn clashctl_bin() -> &'static str {
 pub async fn run_clashctl(args: &[String]) -> Result<String, String> {
     let mut command = Command::new(clashctl_bin());
     command.args(args);
+    apply_install_env(&mut command);
+    command_output(command).await
+}
+
+pub async fn run_clashctl_sudo(args: &[String], password: &str) -> Result<String, String> {
+    let mut command = Command::new("sudo");
+    command.arg("-S").arg("-p").arg("").arg(clashctl_bin());
+    command.args(args);
+    apply_install_env(&mut command);
+    command.stdin(Stdio::piped());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|e| e.to_string())?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(password.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+        stdin.write_all(b"\n").await.map_err(|e| e.to_string())?;
+    }
+    output_result(child.wait_with_output().await.map_err(|e| e.to_string())?)
+}
+
+fn apply_install_env(command: &mut Command) {
     if let Some(install) = config::active_install_env() {
         command.env("CLASH_BASE_DIR", &install.base_dir);
         if let Some(service_name) = install.service_name.as_deref() {
@@ -253,8 +279,13 @@ pub async fn run_clashctl(args: &[String]) -> Result<String, String> {
             command.env("KERNEL_NAME", kernel_name);
         }
     }
-    let output = command.output().await.map_err(|e| e.to_string())?;
+}
 
+async fn command_output(mut command: Command) -> Result<String, String> {
+    output_result(command.output().await.map_err(|e| e.to_string())?)
+}
+
+fn output_result(output: std::process::Output) -> Result<String, String> {
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if output.status.success() {

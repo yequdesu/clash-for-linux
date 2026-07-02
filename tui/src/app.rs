@@ -79,6 +79,41 @@ impl LogLevelFilter {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsSection {
+    General,
+    Core,
+    Traffic,
+    Security,
+    Diagnostics,
+    Updates,
+}
+
+impl SettingsSection {
+    fn all() -> &'static [SettingsSection] {
+        &[
+            SettingsSection::General,
+            SettingsSection::Core,
+            SettingsSection::Traffic,
+            SettingsSection::Security,
+            SettingsSection::Diagnostics,
+            SettingsSection::Updates,
+        ]
+    }
+
+    fn next(self) -> Self {
+        let all = Self::all();
+        let idx = all.iter().position(|section| *section == self).unwrap_or(0);
+        all[(idx + 1) % all.len()]
+    }
+
+    fn prev(self) -> Self {
+        let all = Self::all();
+        let idx = all.iter().position(|section| *section == self).unwrap_or(0);
+        all[(idx + all.len() - 1) % all.len()]
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SubscriptionEditField {
     ImportDirectory,
     Url,
@@ -1266,6 +1301,22 @@ pub struct PendingConfirmation {
     pub action: PendingAction,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SudoTarget {
+    Network,
+    Settings(SettingsAction),
+    SettingsCommand { redact_output: bool },
+    Traffic,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SudoPrompt {
+    pub label: String,
+    pub args: Vec<String>,
+    target: SudoTarget,
+    pub password: String,
+}
+
 pub struct App {
     pub tab: Tab,
     pub should_quit: bool,
@@ -1303,6 +1354,7 @@ pub struct App {
 
     pub logs: Vec<String>,
     pub log_scroll: usize,
+    pub help_scroll: usize,
     pub log_paused: bool,
     pub log_level: LogLevelFilter,
 
@@ -1315,8 +1367,12 @@ pub struct App {
     pub subscription_output: Vec<String>,
     pub pending_confirmation: Option<PendingConfirmation>,
     pub network_output: Vec<String>,
+    pub network_output_scroll: usize,
     pub settings_output: Vec<String>,
     pub settings_prompt: Option<SettingsPrompt>,
+    pub settings_section: SettingsSection,
+    pub sudo_prompt: Option<SudoPrompt>,
+    sudo_candidate: Option<SudoPrompt>,
     pub tun_enabled: bool,
     pub traffic_points: Vec<TrafficPoint>,
     pub traffic_top: Vec<TrafficTopRow>,
@@ -1404,6 +1460,7 @@ impl App {
             connections_selected: 0,
             logs: Vec::new(),
             log_scroll: 0,
+            help_scroll: 0,
             log_paused: false,
             log_level: LogLevelFilter::Info,
             profiles: profiles_meta.profiles,
@@ -1415,8 +1472,12 @@ impl App {
             subscription_output: Vec::new(),
             pending_confirmation: None,
             network_output: Vec::new(),
+            network_output_scroll: 0,
             settings_output: Vec::new(),
             settings_prompt: None,
+            settings_section: SettingsSection::General,
+            sudo_prompt: None,
+            sudo_candidate: None,
             tun_enabled: crate::api::read_tun_status(),
             traffic_points: Vec::new(),
             traffic_top: Vec::new(),
@@ -1629,20 +1690,29 @@ impl App {
                 self.subscription_output = command_output_lines(&e);
             }
             DataEvent::NetworkResult(label, Ok(output)) => {
+                self.clear_sudo_candidate(&label);
                 self.error_msg = None;
                 self.status_msg = Some(format!("network action completed: {}", label));
                 self.network_output = command_output_lines(&output);
+                self.network_output_scroll = 0;
                 self.tun_enabled = crate::api::read_tun_status();
                 self.refresh_data();
             }
             DataEvent::NetworkResult(label, Err(e)) => {
+                if self.maybe_open_sudo_prompt(&label, &e) {
+                    self.network_output = command_output_lines("sudo password required");
+                    self.network_output_scroll = 0;
+                    return;
+                }
                 self.error_msg = Some(format!("Network action failed: {}: {}", label, e));
                 self.network_output = command_output_lines(&e);
+                self.network_output_scroll = 0;
                 self.tun_enabled = crate::api::read_tun_status();
             }
             DataEvent::SettingsResult(action, Ok(output)) => {
                 self.error_msg = None;
                 let label = action.label();
+                self.clear_sudo_candidate(label);
                 self.status_msg = Some(format!("settings action completed: {}", label));
                 let output = if action.redact_output() {
                     redact_sensitive_output(&output)
@@ -1654,10 +1724,15 @@ impl App {
             }
             DataEvent::SettingsResult(action, Err(e)) => {
                 let label = action.label();
+                if self.maybe_open_sudo_prompt(label, &e) {
+                    self.settings_output = command_output_lines("sudo password required");
+                    return;
+                }
                 self.error_msg = Some(format!("Settings action failed: {}: {}", label, e));
                 self.settings_output = command_output_lines(&redact_sensitive_output(&e));
             }
             DataEvent::SettingsCommandResult(label, redact_output, Ok(output)) => {
+                self.clear_sudo_candidate(&label);
                 self.error_msg = None;
                 self.status_msg = Some(format!("settings action completed: {}", label));
                 let output = if redact_output {
@@ -1669,6 +1744,10 @@ impl App {
                 self.refresh_data();
             }
             DataEvent::SettingsCommandResult(label, _redact_output, Err(e)) => {
+                if self.maybe_open_sudo_prompt(&label, &e) {
+                    self.settings_output = command_output_lines("sudo password required");
+                    return;
+                }
                 self.error_msg = Some(format!("Settings action failed: {}: {}", label, e));
                 self.settings_output = command_output_lines(&redact_sensitive_output(&e));
             }
@@ -1693,12 +1772,17 @@ impl App {
                 self.traffic_output = command_output_lines(&e);
             }
             DataEvent::TrafficActionResult(label, Ok(output)) => {
+                self.clear_sudo_candidate(&label);
                 self.error_msg = None;
                 self.status_msg = Some(format!("traffic action completed: {}", label));
                 self.traffic_output = command_output_lines(&output);
                 self.refresh_traffic();
             }
             DataEvent::TrafficActionResult(label, Err(e)) => {
+                if self.maybe_open_sudo_prompt(&label, &e) {
+                    self.traffic_output = command_output_lines("sudo password required");
+                    return;
+                }
                 self.error_msg = Some(format!("Traffic action failed: {}: {}", label, e));
                 self.traffic_output = command_output_lines(&e);
             }
@@ -2647,6 +2731,16 @@ impl App {
         {
             return;
         }
+        if self.sudo_prompt.is_some()
+            && !matches!(
+                action,
+                Some(HitboxAction::FocusSudoPromptValue)
+                    | Some(HitboxAction::SubmitSudoPrompt)
+                    | Some(HitboxAction::CancelSudoPrompt)
+            )
+        {
+            return;
+        }
         if self.subscription_input_active()
             && !matches!(
                 action,
@@ -2776,8 +2870,12 @@ impl App {
             HitboxAction::CancelPendingAction => self.cancel_pending_action(),
             HitboxAction::FocusSettingsPromptValue => self.focus_settings_prompt_value(),
             HitboxAction::SelectSettingsPromptField(idx) => self.select_settings_prompt_field(idx),
+            HitboxAction::SelectSettingsSection(idx) => self.select_settings_section(idx),
             HitboxAction::SubmitSettingsPrompt => self.submit_settings_prompt(),
             HitboxAction::CancelSettingsPrompt => self.cancel_settings_prompt(),
+            HitboxAction::FocusSudoPromptValue => self.focus_sudo_prompt_value(),
+            HitboxAction::SubmitSudoPrompt => self.submit_sudo_prompt(),
+            HitboxAction::CancelSudoPrompt => self.cancel_sudo_prompt(),
             HitboxAction::CycleUiLanguage => self.toggle_language(),
             HitboxAction::CycleThemePreference => self.cycle_theme_preference(),
             HitboxAction::CycleDefaultPage => self.cycle_default_page(),
@@ -2813,7 +2911,9 @@ impl App {
             HitboxAction::ClearLogs => self.clear_logs(),
             HitboxAction::ScrollLogs
             | HitboxAction::ScrollProxyNodes
-            | HitboxAction::ScrollTrafficRows => {}
+            | HitboxAction::ScrollTrafficRows
+            | HitboxAction::ScrollHelp
+            | HitboxAction::ScrollNetworkOutput => {}
         }
     }
 
@@ -2839,6 +2939,25 @@ impl App {
             }
             Some(HitboxAction::ScrollTrafficChart) | Some(HitboxAction::SelectTrafficBucket(_)) => {
                 self.pan_traffic_window(amount);
+            }
+            Some(HitboxAction::ScrollHelp) => {
+                if amount > 0 {
+                    self.help_scroll = self.help_scroll.saturating_add(amount as usize);
+                } else {
+                    self.help_scroll = self
+                        .help_scroll
+                        .saturating_sub(amount.unsigned_abs() as usize);
+                }
+            }
+            Some(HitboxAction::ScrollNetworkOutput) => {
+                if amount > 0 {
+                    self.network_output_scroll =
+                        self.network_output_scroll.saturating_add(amount as usize);
+                } else {
+                    self.network_output_scroll = self
+                        .network_output_scroll
+                        .saturating_sub(amount.unsigned_abs() as usize);
+                }
             }
             Some(HitboxAction::ScrollProxyNodes) | Some(HitboxAction::SelectProxyNode(_)) => {
                 if amount > 0 {
@@ -2932,6 +3051,7 @@ impl App {
     fn execute_network_action(&mut self, action: NetworkAction) {
         let label = action.label().to_string();
         let args = action.args();
+        self.prepare_sudo_candidate(label.clone(), args.clone(), SudoTarget::Network);
         let tx = self.data_tx.clone();
         self.status_msg = Some(format!("running network action: {}", label));
         self.rt.spawn(async move {
@@ -2967,6 +3087,35 @@ impl App {
 
     pub fn begin_secret_set(&mut self) {
         self.begin_settings_prompt(SettingsPromptKind::SecretSet);
+    }
+
+    fn settings_section_label(&self, section: SettingsSection) -> &'static str {
+        match section {
+            SettingsSection::General => self.t(Msg::SettingsGeneral),
+            SettingsSection::Core => self.t(Msg::SettingsCoreApi),
+            SettingsSection::Traffic => self.t(Msg::SettingsTraffic),
+            SettingsSection::Security => self.t(Msg::SettingsSecurity),
+            SettingsSection::Diagnostics => self.t(Msg::SettingsDiagnostics),
+            SettingsSection::Updates => self.t(Msg::SettingsUpdates),
+        }
+    }
+
+    pub fn next_settings_section(&mut self) {
+        if self.tab == Tab::Settings {
+            self.settings_section = self.settings_section.next();
+        }
+    }
+
+    pub fn prev_settings_section(&mut self) {
+        if self.tab == Tab::Settings {
+            self.settings_section = self.settings_section.prev();
+        }
+    }
+
+    pub fn select_settings_section(&mut self, idx: usize) {
+        if let Some(section) = SettingsSection::all().get(idx).copied() {
+            self.settings_section = section;
+        }
     }
 
     pub fn cancel_settings_prompt(&mut self) {
@@ -3065,6 +3214,11 @@ impl App {
 
     fn execute_settings_action(&mut self, action: SettingsAction) {
         let args = action.args();
+        self.prepare_sudo_candidate(
+            action.label().to_string(),
+            args.clone(),
+            SudoTarget::Settings(action),
+        );
         let tx = self.data_tx.clone();
         self.status_msg = Some(format!("running settings action: {}", action.label()));
         self.rt.spawn(async move {
@@ -3074,6 +3228,11 @@ impl App {
     }
 
     fn execute_settings_command(&mut self, label: String, args: Vec<String>, redact_output: bool) {
+        self.prepare_sudo_candidate(
+            label.clone(),
+            args.clone(),
+            SudoTarget::SettingsCommand { redact_output },
+        );
         let tx = self.data_tx.clone();
         self.status_msg = Some(format!("running settings action: {}", label));
         self.rt.spawn(async move {
@@ -3088,6 +3247,117 @@ impl App {
 
     fn should_confirm(&self) -> bool {
         self.ui_settings.confirm_dangerous_actions
+    }
+
+    fn prepare_sudo_candidate(&mut self, label: String, args: Vec<String>, target: SudoTarget) {
+        self.sudo_candidate = Some(SudoPrompt {
+            label,
+            args,
+            target,
+            password: String::new(),
+        });
+    }
+
+    fn clear_sudo_candidate(&mut self, label: &str) {
+        if self
+            .sudo_candidate
+            .as_ref()
+            .is_some_and(|candidate| candidate.label == label)
+        {
+            self.sudo_candidate = None;
+        }
+    }
+
+    fn maybe_open_sudo_prompt(&mut self, label: &str, error: &str) -> bool {
+        if !sudo_required_error(error) {
+            return false;
+        }
+        let Some(mut prompt) = self
+            .sudo_candidate
+            .take()
+            .filter(|candidate| candidate.label == label)
+        else {
+            return false;
+        };
+        prompt.password.clear();
+        self.error_msg = None;
+        self.status_msg = Some(format!("sudo password required for {}", label));
+        self.sudo_prompt = Some(prompt);
+        true
+    }
+
+    pub fn sudo_prompt_active(&self) -> bool {
+        self.sudo_prompt.is_some()
+    }
+
+    pub fn push_sudo_prompt_char(&mut self, c: char) {
+        if let Some(prompt) = self.sudo_prompt.as_mut() {
+            prompt.password.push(c);
+        }
+    }
+
+    pub fn pop_sudo_prompt_char(&mut self) {
+        if let Some(prompt) = self.sudo_prompt.as_mut() {
+            prompt.password.pop();
+        }
+    }
+
+    pub fn focus_sudo_prompt_value(&mut self) {
+        if let Some(prompt) = self.sudo_prompt.as_ref() {
+            self.status_msg = Some(format!("enter sudo password for {}", prompt.label));
+            self.error_msg = None;
+        }
+    }
+
+    pub fn cancel_sudo_prompt(&mut self) {
+        if self.sudo_prompt.take().is_some() {
+            self.status_msg = Some("sudo action cancelled".into());
+        }
+    }
+
+    pub fn submit_sudo_prompt(&mut self) {
+        let Some(prompt) = self.sudo_prompt.take() else {
+            return;
+        };
+        if prompt.password.is_empty() {
+            self.error_msg = Some("sudo password cannot be empty".into());
+            self.sudo_prompt = Some(prompt);
+            return;
+        }
+        let retry_candidate = SudoPrompt {
+            label: prompt.label.clone(),
+            args: prompt.args.clone(),
+            target: prompt.target.clone(),
+            password: String::new(),
+        };
+        self.sudo_candidate = Some(retry_candidate);
+        let label = prompt.label.clone();
+        let args = prompt.args.clone();
+        let target = prompt.target.clone();
+        let password = prompt.password;
+        let tx = self.data_tx.clone();
+        self.status_msg = Some(format!("running sudo action: {}", label));
+        self.rt.spawn(async move {
+            let result = crate::api::run_clashctl_sudo(&args, &password).await;
+            match target {
+                SudoTarget::Network => {
+                    let _ = tx.send(DataEvent::NetworkResult(label, result));
+                }
+                SudoTarget::Settings(action) => {
+                    let _ = tx.send(DataEvent::SettingsResult(action, result));
+                }
+                SudoTarget::SettingsCommand { redact_output } => {
+                    let _ = tx.send(DataEvent::SettingsCommandResult(
+                        label,
+                        redact_output,
+                        result,
+                    ));
+                }
+                SudoTarget::Traffic => {
+                    let _ = tx.send(DataEvent::TrafficActionResult(label, result));
+                }
+            }
+        });
     }
 
     pub fn confirm_pending_action(&mut self) {
@@ -3201,7 +3471,7 @@ impl App {
     }
 
     pub fn run_traffic_action(&mut self, action: TrafficAction) {
-        if self.tab != Tab::Traffic {
+        if self.tab != Tab::Traffic && self.tab != Tab::Settings {
             return;
         }
         if self.should_confirm() && action.requires_confirmation() {
@@ -3219,11 +3489,17 @@ impl App {
     fn execute_traffic_action(&mut self, action: TrafficAction) {
         let label = action.label().to_string();
         let args = action.args();
+        self.prepare_sudo_candidate(label.clone(), args.clone(), SudoTarget::Traffic);
         let tx = self.data_tx.clone();
+        let report_to_settings = self.tab == Tab::Settings;
         self.status_msg = Some(format!("running traffic action: {}", label));
         self.rt.spawn(async move {
             let result = crate::api::run_clashctl(&args).await;
-            let _ = tx.send(DataEvent::TrafficActionResult(label, result));
+            if report_to_settings {
+                let _ = tx.send(DataEvent::SettingsCommandResult(label, true, result));
+            } else {
+                let _ = tx.send(DataEvent::TrafficActionResult(label, result));
+            }
         });
     }
 
@@ -3432,12 +3708,25 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     fill_area(frame, chunks[0], CLASH_THEME.bg);
-    crate::widgets::tab_bar::render_tab_bar(frame, chunks[0], app.tab, app.ui_settings.language);
-    register_tab_hitboxes(chunks[0], app);
+    render_top_status(frame, chunks[0], app);
 
-    let content_area = chunks[1];
+    let content_shell = chunks[1];
+    let content_area = if content_shell.width >= 100 && content_shell.height >= 8 {
+        let shell =
+            Layout::horizontal([Constraint::Length(18), Constraint::Min(20)]).split(content_shell);
+        render_sidebar_nav(frame, shell[0], app);
+        shell[1]
+    } else {
+        render_compact_nav(frame, chunks[0], app);
+        content_shell
+    };
     fill_area(frame, content_area, CLASH_THEME.bg);
+    render_active_page(frame, content_area, app);
 
+    render_status_bar(frame, chunks[2], app);
+}
+
+fn render_active_page(frame: &mut Frame, content_area: Rect, app: &mut App) {
     if app.show_help {
         render_help(frame, content_area, app);
     } else {
@@ -3451,24 +3740,108 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Tab::Settings => render_settings(frame, content_area, app),
             Tab::Help => render_help(frame, content_area, app),
         }
-        if app.node_picker_open {
-            render_node_picker(frame, content_area, app);
-        }
-        if app.subscription_prompt.is_some() {
-            render_subscription_prompt(frame, content_area, app);
-        }
-        if app.settings_prompt.is_some() {
-            render_settings_prompt(frame, content_area, app);
-        }
-        if app.pending_confirmation.is_some() {
-            render_confirmation_prompt(frame, content_area, app);
-        }
-        if app.command_palette_open {
-            render_command_palette(frame, content_area, app);
-        }
     }
+    if app.node_picker_open {
+        render_node_picker(frame, content_area, app);
+    }
+    if app.subscription_prompt.is_some() {
+        render_subscription_prompt(frame, content_area, app);
+    }
+    if app.settings_prompt.is_some() {
+        render_settings_prompt(frame, content_area, app);
+    }
+    if app.sudo_prompt.is_some() {
+        render_sudo_prompt(frame, content_area, app);
+    }
+    if app.pending_confirmation.is_some() {
+        render_confirmation_prompt(frame, content_area, app);
+    }
+    if app.command_palette_open {
+        render_command_palette(frame, content_area, app);
+    }
+}
 
-    render_status_bar(frame, chunks[2], app);
+fn render_top_status(frame: &mut Frame, area: Rect, app: &App) {
+    fill_area(frame, area, CLASH_THEME.bg);
+    if area.height == 0 {
+        return;
+    }
+    let tun = if app.tun_enabled { "TUN on" } else { "TUN off" };
+    let kernel = if app.version.is_empty() {
+        "kernel --".to_string()
+    } else {
+        format!("kernel {}", app.version)
+    };
+    let line = Line::from(vec![
+        Span::styled(
+            format!(" {} ", app.t(app.tab.msg())),
+            Style::default()
+                .fg(CLASH_THEME.bg)
+                .bg(CLASH_THEME.primary)
+                .bold(),
+        ),
+        Span::styled(format!("  {}  ", kernel), CLASH_THEME.text),
+        Span::styled(format!("{}  ", app.mode), CLASH_THEME.muted),
+        Span::styled(tun, CLASH_THEME.muted),
+        Span::styled(
+            format!(
+                "    ↓ {}/s ↑ {}/s",
+                format_bytes(app.download_rate as u64),
+                format_bytes(app.upload_rate as u64)
+            ),
+            CLASH_THEME.text,
+        ),
+    ]);
+    frame.render_widget(
+        Paragraph::new(line).style(Style::default().bg(CLASH_THEME.bg)),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+}
+
+fn render_compact_nav(frame: &mut Frame, area: Rect, app: &mut App) {
+    crate::widgets::tab_bar::render_tab_bar(frame, area, app.tab, app.ui_settings.language);
+    register_tab_hitboxes(area, app);
+}
+
+fn render_sidebar_nav(frame: &mut Frame, area: Rect, app: &mut App) {
+    fill_area(frame, area, CLASH_THEME.surface);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(
+            Style::default()
+                .fg(CLASH_THEME.border)
+                .bg(CLASH_THEME.surface),
+        )
+        .style(Style::default().bg(CLASH_THEME.surface))
+        .title(Span::styled(
+            " NAV ",
+            Style::default().fg(CLASH_THEME.primary).bold(),
+        ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    fill_area(frame, inner, CLASH_THEME.surface);
+
+    for (idx, tab) in Tab::all().iter().enumerate() {
+        let y = inner.y.saturating_add(idx as u16);
+        if y >= inner.y.saturating_add(inner.height) {
+            break;
+        }
+        let rect = Rect::new(inner.x, y, inner.width, 1);
+        let active = *tab == app.tab;
+        let style = if active {
+            Style::default()
+                .fg(CLASH_THEME.bg)
+                .bg(CLASH_THEME.primary)
+                .bold()
+        } else {
+            Style::default()
+                .fg(CLASH_THEME.text)
+                .bg(CLASH_THEME.surface)
+        };
+        let label = format!(" {} {}", idx + 1, app.t(tab.msg()));
+        frame.render_widget(Paragraph::new(label).style(style), rect);
+        app.hitboxes.register(rect, HitboxAction::SwitchTab(*tab));
+    }
 }
 
 fn render_network(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -3622,7 +3995,7 @@ fn render_network(frame: &mut Frame, area: Rect, app: &mut App) {
         sys_lines,
     );
 
-    let output_lines = if app.network_output.is_empty() {
+    let mut output_lines = if app.network_output.is_empty() {
         vec![
             Line::from(format!("  {}", app.t(Msg::NetworkLastCommandOutput))),
             Line::from(format!("  {}", app.t(Msg::NetworkShellProxyPrinted))),
@@ -3633,6 +4006,18 @@ fn render_network(frame: &mut Frame, area: Rect, app: &mut App) {
             .map(|line| Line::from(Span::styled(format!("  {}", line), CLASH_THEME.text)))
             .collect()
     };
+    let output_visible_height = mid_bot[1].height.saturating_sub(2) as usize;
+    if !app.network_output.is_empty() && output_visible_height > 0 {
+        let max_scroll = output_lines.len().saturating_sub(output_visible_height);
+        app.network_output_scroll = app.network_output_scroll.min(max_scroll);
+        output_lines = output_lines
+            .into_iter()
+            .skip(app.network_output_scroll)
+            .take(output_visible_height)
+            .collect();
+    }
+    app.hitboxes
+        .register(mid_bot[1], HitboxAction::ScrollNetworkOutput);
     crate::widgets::card::Card::new(app.t(Msg::NetworkCommandOutput)).render(
         frame,
         mid_bot[1],
@@ -3656,74 +4041,8 @@ fn render_network_actions(frame: &mut Frame, area: Rect, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     fill_area(frame, inner, CLASH_THEME.surface);
-
-    let mut x = inner.x;
-    let mut y = inner.y;
-    for spec in action_registry::network_action_specs() {
-        let ActionExecutor::Network(action) = spec.executor else {
-            continue;
-        };
-        let label = format!("[{}]", app.action_button(spec));
-        let width = display_width(&label).saturating_add(1);
-        if x.saturating_add(width) > inner.x.saturating_add(inner.width) {
-            x = inner.x;
-            y = y.saturating_add(1);
-        }
-        if y >= inner.y.saturating_add(inner.height) {
-            break;
-        }
-        let area = Rect::new(
-            x,
-            y,
-            width.min(inner.x.saturating_add(inner.width).saturating_sub(x)),
-            1,
-        );
-        app.hitboxes
-            .register(area, HitboxAction::RunNetwork(action));
-        let fg = match spec.danger {
-            ActionDanger::Dangerous => CLASH_THEME.danger,
-            ActionDanger::Confirm | ActionDanger::Sensitive => CLASH_THEME.warning,
-            ActionDanger::Safe => CLASH_THEME.text,
-        };
-        frame.render_widget(
-            Paragraph::new(label).style(Style::default().fg(fg).bg(CLASH_THEME.surface)),
-            area,
-        );
-        x = x.saturating_add(width);
-    }
-}
-
-fn action_specs_line<'a, I>(app: &App, specs: I) -> Line<'static>
-where
-    I: IntoIterator<Item = &'a action_registry::ActionSpec>,
-{
-    let mut spans = vec![Span::styled("  ", CLASH_THEME.text)];
-    for spec in specs {
-        spans.push(Span::styled(
-            format!("[{}] ", app.action_button(spec)),
-            Style::default().fg(action_fg(spec.danger)),
-        ));
-    }
-    Line::from(spans)
-}
-
-fn register_action_specs_hitboxes<'a, I>(app: &mut App, area: Rect, specs: I)
-where
-    I: IntoIterator<Item = &'a action_registry::ActionSpec>,
-{
-    if area.width < 6 || area.height == 0 {
-        return;
-    }
-    let y = area.y + area.height.saturating_sub(2);
-    let mut x = area.x + 3;
-    for spec in specs {
-        let Some(action) = hitbox_for_action_spec(spec) else {
-            continue;
-        };
-        let width = action_button_width(app.action_button(spec));
-        register_clamped_hitbox(app, x, y, width, area, action);
-        x = x.saturating_add(width + 1);
-    }
+    let buttons = action_buttons_from_specs(app, action_registry::network_action_specs());
+    render_action_buttons(frame, app, inner, &buttons);
 }
 
 fn register_tab_hitboxes(area: Rect, app: &mut App) {
@@ -3867,15 +4186,8 @@ fn render_proxy_actions(frame: &mut Frame, area: Rect, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     fill_area(frame, inner, CLASH_THEME.surface);
-    frame.render_widget(
-        Paragraph::new(action_specs_line(
-            app,
-            action_registry::proxy_action_specs(),
-        ))
-        .style(Style::default().bg(CLASH_THEME.surface)),
-        inner,
-    );
-    register_action_specs_hitboxes(app, area, action_registry::proxy_action_specs());
+    let buttons = action_buttons_from_specs(app, action_registry::proxy_action_specs());
+    render_action_buttons(frame, app, inner, &buttons);
 }
 
 fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -3977,19 +4289,8 @@ fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
         frame.render_widget(table, table_area);
     }
     if let Some(action_area) = action_area {
-        frame.render_widget(
-            Paragraph::new(action_specs_line(
-                app,
-                action_registry::node_picker_action_specs(),
-            ))
-            .style(Style::default().bg(CLASH_THEME.bg)),
-            action_area,
-        );
-        register_action_specs_hitboxes(
-            app,
-            action_area,
-            action_registry::node_picker_action_specs(),
-        );
+        let buttons = action_buttons_from_specs(app, action_registry::node_picker_action_specs());
+        render_action_buttons(frame, app, action_area, &buttons);
     }
 }
 
@@ -4011,11 +4312,19 @@ fn centered_rect(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
 fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
     fill_area(frame, area, CLASH_THEME.surface);
 
-    let (table_area, output_area) = if area.height >= 14 {
-        let rows = Layout::vertical([Constraint::Min(8), Constraint::Length(5)]).split(area);
-        (rows[0], Some(rows[1]))
+    let (table_area, actions_area, output_area) = if area.height >= 18 {
+        let rows = Layout::vertical([
+            Constraint::Min(8),
+            Constraint::Length(4),
+            Constraint::Length(5),
+        ])
+        .split(area);
+        (rows[0], Some(rows[1]), Some(rows[2]))
+    } else if area.height >= 12 {
+        let rows = Layout::vertical([Constraint::Min(8), Constraint::Length(4)]).split(area);
+        (rows[0], Some(rows[1]), None)
     } else {
-        (area, None)
+        (area, None, None)
     };
 
     let header = Row::new(vec![
@@ -4100,16 +4409,11 @@ fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
         .title(Span::styled(
             format!(" {} ", app.t(Msg::PageSubscriptions)),
             Style::default().fg(CLASH_THEME.primary).bold(),
-        ))
-        .title_bottom(Span::styled(
-            format!(" {} ", subscription_actions_line_text(app)),
-            Style::default().fg(CLASH_THEME.muted),
         ));
     let inner = block.inner(table_area);
     frame.render_widget(block, table_area);
     fill_area(frame, inner, CLASH_THEME.surface);
     register_table_row_hitboxes(app, inner, row_count, HitboxAction::SelectSubscription);
-    register_subscription_action_hitboxes(app, table_area);
     if app.profiles.is_empty() {
         frame.render_widget(
             Paragraph::new(app.t(Msg::SubscriptionsNoProfiles)).style(
@@ -4125,27 +4429,18 @@ fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
     if let Some(output_area) = output_area {
         render_subscription_output(frame, output_area, app);
     }
-}
-
-fn register_subscription_action_hitboxes(app: &mut App, area: Rect) {
-    if area.height < 2 || area.width < 12 {
-        return;
-    }
-    let y = area.y + area.height.saturating_sub(1);
-    let mut x = area.x + 2;
-    for (label, action) in subscription_action_buttons(app) {
-        let width = action_button_width(&label);
-        register_clamped_hitbox(app, x, y, width, area, action);
-        x = x.saturating_add(width + 1);
+    if let Some(actions_area) = actions_area {
+        render_subscription_actions(frame, actions_area, app);
     }
 }
 
-fn subscription_actions_line_text(app: &App) -> String {
-    subscription_action_buttons(app)
+fn render_subscription_actions(frame: &mut Frame, area: Rect, app: &mut App) {
+    let inner = crate::widgets::card::Card::new(app.t(Msg::ProxyActions)).render_block(frame, area);
+    let buttons: Vec<ActionButtonItem> = subscription_action_buttons(app)
         .into_iter()
-        .map(|(label, _)| format!("[{}]", label))
-        .collect::<Vec<_>>()
-        .join(" ")
+        .map(|(label, action)| action_button_item(label, action, ActionDanger::Safe))
+        .collect();
+    render_action_buttons(frame, app, inner, &buttons);
 }
 
 fn subscription_action_buttons(app: &App) -> Vec<(String, HitboxAction)> {
@@ -4271,11 +4566,14 @@ fn render_subscription_prompt(frame: &mut Frame, area: Rect, app: &mut App) {
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled(format!("[{}]", app.t(Msg::CommonSave)), CLASH_THEME.primary),
+            Span::styled(
+                format!(" {} ", app.t(Msg::CommonSave)),
+                button_style(ActionDanger::Safe),
+            ),
             Span::styled("   ", CLASH_THEME.text),
             Span::styled(
-                format!("[{}]", app.t(Msg::CommonCancel)),
-                CLASH_THEME.warning,
+                format!(" {} ", app.t(Msg::CommonCancel)),
+                button_style(ActionDanger::Confirm),
             ),
         ]),
     ];
@@ -4366,11 +4664,14 @@ fn render_subscription_edit_form(frame: &mut Frame, area: Rect, app: &mut App) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
-        Span::styled(format!("[{}]", app.t(Msg::CommonSave)), CLASH_THEME.primary),
+        Span::styled(
+            format!(" {} ", app.t(Msg::CommonSave)),
+            button_style(ActionDanger::Safe),
+        ),
         Span::styled("   ", CLASH_THEME.text),
         Span::styled(
-            format!("[{}]", app.t(Msg::CommonCancel)),
-            CLASH_THEME.warning,
+            format!(" {} ", app.t(Msg::CommonCancel)),
+            button_style(ActionDanger::Confirm),
         ),
     ]));
 
@@ -4438,11 +4739,14 @@ fn render_subscription_add_form(frame: &mut Frame, area: Rect, app: &mut App) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
-        Span::styled(format!("[{}]", app.t(Msg::CommonSave)), CLASH_THEME.primary),
+        Span::styled(
+            format!(" {} ", app.t(Msg::CommonSave)),
+            button_style(ActionDanger::Safe),
+        ),
         Span::styled("   ", CLASH_THEME.text),
         Span::styled(
-            format!("[{}]", app.t(Msg::CommonCancel)),
-            CLASH_THEME.warning,
+            format!(" {} ", app.t(Msg::CommonCancel)),
+            button_style(ActionDanger::Confirm),
         ),
     ]));
 
@@ -4614,13 +4918,13 @@ fn render_settings_prompt(frame: &mut Frame, area: Rect, app: &mut App) {
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled(
-            format!("[{}]", app.t(Msg::CommonContinue)),
-            CLASH_THEME.warning,
+            format!(" {} ", app.t(Msg::CommonContinue)),
+            button_style(ActionDanger::Safe),
         ),
         Span::styled("   ", CLASH_THEME.text),
         Span::styled(
-            format!("[{}]", app.t(Msg::CommonCancel)),
-            CLASH_THEME.primary,
+            format!(" {} ", app.t(Msg::CommonCancel)),
+            button_style(ActionDanger::Confirm),
         ),
     ]));
     frame.render_widget(block, popup);
@@ -4661,6 +4965,90 @@ fn render_settings_prompt(frame: &mut Frame, area: Rect, app: &mut App) {
     );
 }
 
+fn render_sudo_prompt(frame: &mut Frame, area: Rect, app: &mut App) {
+    let Some(prompt) = app.sudo_prompt.as_ref() else {
+        return;
+    };
+    let popup = centered_rect(area, 62, 28);
+    fill_area(frame, popup, CLASH_THEME.bg);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLASH_THEME.warning))
+        .title(Span::styled(
+            format!(" sudo · {} ", prompt.label),
+            Style::default().fg(CLASH_THEME.warning).bold(),
+        ));
+    let inner = block.inner(popup).inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
+    let masked = if prompt.password.is_empty() {
+        "<password>".to_string()
+    } else {
+        "•".repeat(prompt.password.chars().count())
+    };
+    let lines = vec![
+        Line::from(Span::styled(
+            "  This action needs elevated privileges.",
+            CLASH_THEME.muted,
+        )),
+        Line::from(Span::styled(
+            format!("  clashctl {}", prompt.args.join(" ")),
+            CLASH_THEME.text,
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Password  ", CLASH_THEME.muted),
+            Span::styled(masked, CLASH_THEME.text),
+            Span::styled("█", CLASH_THEME.primary),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                format!(" {} ", app.t(Msg::CommonContinue)),
+                button_style(ActionDanger::Safe),
+            ),
+            Span::styled("   ", CLASH_THEME.text),
+            Span::styled(
+                format!(" {} ", app.t(Msg::CommonCancel)),
+                button_style(ActionDanger::Confirm),
+            ),
+        ]),
+    ];
+    frame.render_widget(block, popup);
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.bg)),
+        inner,
+    );
+
+    app.hitboxes.register(
+        Rect::new(inner.x, inner.y.saturating_add(3), inner.width, 1),
+        HitboxAction::FocusSudoPromptValue,
+    );
+    let action_y = inner.y.saturating_add(5);
+    app.hitboxes.register(
+        Rect::new(
+            inner.x,
+            action_y,
+            action_button_width(app.t(Msg::CommonContinue)),
+            1,
+        ),
+        HitboxAction::SubmitSudoPrompt,
+    );
+    app.hitboxes.register(
+        Rect::new(
+            inner
+                .x
+                .saturating_add(action_button_width(app.t(Msg::CommonContinue)).saturating_add(3)),
+            action_y,
+            action_button_width(app.t(Msg::CommonCancel)),
+            1,
+        ),
+        HitboxAction::CancelSudoPrompt,
+    );
+}
+
 fn render_confirmation_prompt(frame: &mut Frame, area: Rect, app: &mut App) {
     let Some(prompt) = app.pending_confirmation.clone() else {
         return;
@@ -4694,13 +5082,13 @@ fn render_confirmation_prompt(frame: &mut Frame, area: Rect, app: &mut App) {
         Line::from(""),
         Line::from(vec![
             Span::styled(
-                format!("[{}]", app.t(Msg::CommonConfirm)),
-                CLASH_THEME.warning,
+                format!(" {} ", app.t(Msg::CommonConfirm)),
+                button_style(ActionDanger::Dangerous),
             ),
             Span::styled("   ", CLASH_THEME.text),
             Span::styled(
-                format!("[{}]", app.t(Msg::CommonCancel)),
-                CLASH_THEME.primary,
+                format!(" {} ", app.t(Msg::CommonCancel)),
+                button_style(ActionDanger::Confirm),
             ),
         ]),
     ];
@@ -4808,12 +5196,89 @@ fn register_clamped_hitbox(
         .register(Rect::new(x, y, width.min(available), 1), action);
 }
 
-fn action_fg(danger: ActionDanger) -> Color {
-    match danger {
+#[derive(Clone)]
+struct ActionButtonItem {
+    label: String,
+    action: HitboxAction,
+    danger: ActionDanger,
+}
+
+fn action_button_item(
+    label: impl Into<String>,
+    action: HitboxAction,
+    danger: ActionDanger,
+) -> ActionButtonItem {
+    ActionButtonItem {
+        label: label.into(),
+        action,
+        danger,
+    }
+}
+
+fn action_buttons_from_specs<'a, I>(app: &App, specs: I) -> Vec<ActionButtonItem>
+where
+    I: IntoIterator<Item = &'a action_registry::ActionSpec>,
+{
+    specs
+        .into_iter()
+        .filter_map(|spec| {
+            hitbox_for_action_spec(spec)
+                .map(|action| action_button_item(app.action_button(spec), action, spec.danger))
+        })
+        .collect()
+}
+
+fn button_style(danger: ActionDanger) -> Style {
+    let bg = match danger {
         ActionDanger::Dangerous => CLASH_THEME.danger,
         ActionDanger::Confirm | ActionDanger::Sensitive => CLASH_THEME.warning,
-        ActionDanger::Safe => CLASH_THEME.text,
+        ActionDanger::Safe => CLASH_THEME.primary,
+    };
+    Style::default().fg(CLASH_THEME.bg).bg(bg).bold()
+}
+
+fn render_action_buttons(
+    frame: &mut Frame,
+    app: &mut App,
+    area: Rect,
+    buttons: &[ActionButtonItem],
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
     }
+    fill_area(frame, area, CLASH_THEME.surface);
+    for (rect, idx) in action_button_rects(area, buttons) {
+        let button = &buttons[idx];
+        app.hitboxes.register(rect, button.action.clone());
+        frame.render_widget(
+            Paragraph::new(format!(" {} ", button.label)).style(button_style(button.danger)),
+            rect,
+        );
+    }
+}
+
+fn action_button_rects(area: Rect, buttons: &[ActionButtonItem]) -> Vec<(Rect, usize)> {
+    let mut rects = Vec::new();
+    let mut x = area.x;
+    let mut y = area.y;
+    let max_x = area.x.saturating_add(area.width);
+    let max_y = area.y.saturating_add(area.height);
+
+    for (idx, button) in buttons.iter().enumerate() {
+        let width = action_button_width(&button.label);
+        if x > area.x && x.saturating_add(width) > max_x {
+            x = area.x;
+            y = y.saturating_add(1);
+        }
+        if y >= max_y {
+            break;
+        }
+        let available = max_x.saturating_sub(x);
+        let rect = Rect::new(x, y, width.min(available), 1);
+        rects.push((rect, idx));
+        x = x.saturating_add(width + 1);
+    }
+    rects
 }
 
 fn action_button_width(label: &str) -> u16 {
@@ -5322,7 +5787,6 @@ fn render_traffic_detail(frame: &mut Frame, area: Rect, app: &mut App) {
         ];
         lines.extend(traffic_status_lines(app));
         lines.extend(traffic_locked_bucket_lines(app));
-        lines.push(traffic_action_line(app));
         lines.extend(traffic_output_lines(app));
         lines
     } else {
@@ -5332,26 +5796,34 @@ fn render_traffic_detail(frame: &mut Frame, area: Rect, app: &mut App) {
         ))];
         lines.extend(traffic_status_lines(app));
         lines.extend(traffic_locked_bucket_lines(app));
-        lines.push(traffic_action_line(app));
         lines.extend(traffic_output_lines(app));
         lines
     };
-    if area.width > 16 && area.height > 2 {
-        register_traffic_action_hitboxes(app, area);
+    let inner =
+        crate::widgets::card::Card::new(app.t(Msg::TrafficDetail)).render_block(frame, area);
+    fill_area(frame, inner, CLASH_THEME.surface);
+    if inner.width == 0 || inner.height == 0 {
+        return;
     }
-    crate::widgets::card::Card::new(app.t(Msg::TrafficDetail)).render(frame, area, lines);
-}
-
-fn traffic_action_line(app: &App) -> Line<'static> {
-    let mut spans = vec![Span::styled("  ", CLASH_THEME.text)];
-    for spec in action_registry::traffic_action_specs() {
-        let label = app.action_button(spec);
-        spans.push(Span::styled(
-            format!("[{}] ", label),
-            Style::default().fg(action_fg(spec.danger)),
-        ));
+    let action_height = if inner.height >= 6 { 2 } else { 1 };
+    let text_height = inner.height.saturating_sub(action_height);
+    let text_area = Rect::new(inner.x, inner.y, inner.width, text_height);
+    if text_area.height > 0 {
+        frame.render_widget(
+            Paragraph::new(lines).style(Style::default().bg(CLASH_THEME.surface)),
+            text_area,
+        );
     }
-    Line::from(spans)
+    if action_height > 0 {
+        let action_area = Rect::new(
+            inner.x,
+            inner.y.saturating_add(text_height),
+            inner.width,
+            action_height,
+        );
+        let buttons = action_buttons_from_specs(app, action_registry::traffic_action_specs());
+        render_action_buttons(frame, app, action_area, &buttons);
+    }
 }
 
 fn traffic_locked_bucket_lines(app: &App) -> Vec<Line<'static>> {
@@ -5382,19 +5854,6 @@ fn traffic_locked_bucket_lines(app: &App) -> Vec<Line<'static>> {
             CLASH_THEME.text,
         ),
     ])]
-}
-
-fn register_traffic_action_hitboxes(app: &mut App, area: Rect) {
-    let y = area.y + area.height.saturating_sub(2);
-    let mut x = area.x + 2;
-    for spec in action_registry::traffic_action_specs() {
-        let Some(action) = hitbox_for_action_spec(spec) else {
-            continue;
-        };
-        let width = action_button_width(app.action_button(spec));
-        register_clamped_hitbox(app, x, y, width, area, action);
-        x = x.saturating_add(width + 1);
-    }
 }
 
 fn traffic_output_lines(app: &App) -> Vec<Line<'static>> {
@@ -5619,15 +6078,8 @@ fn render_connection_actions(frame: &mut Frame, area: Rect, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     fill_area(frame, inner, CLASH_THEME.surface);
-    frame.render_widget(
-        Paragraph::new(action_specs_line(
-            app,
-            action_registry::connection_action_specs(),
-        ))
-        .style(Style::default().bg(CLASH_THEME.surface)),
-        inner,
-    );
-    register_action_specs_hitboxes(app, area, action_registry::connection_action_specs());
+    let buttons = action_buttons_from_specs(app, action_registry::connection_action_specs());
+    render_action_buttons(frame, app, inner, &buttons);
 }
 
 fn render_logs(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -5650,10 +6102,15 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &mut App) {
     let end = (start + max_lines).min(visible_logs.len());
 
     let lines: Vec<Line> = if visible_logs.is_empty() {
-        vec![Line::from(Span::styled(
-            app.t(Msg::LogsEmpty),
-            CLASH_THEME.muted,
-        ))]
+        let hint = if app.ui_settings.language.is_zh() {
+            "  在 Network 页运行诊断，或启动内核后刷新。"
+        } else {
+            "  Run diagnostics from Network, or refresh after the kernel starts."
+        };
+        vec![
+            Line::from(Span::styled(app.t(Msg::LogsEmpty), CLASH_THEME.muted)),
+            Line::from(Span::styled(hint, CLASH_THEME.muted)),
+        ]
     } else {
         visible_logs[start..end]
             .iter()
@@ -5722,161 +6179,47 @@ fn render_log_actions(frame: &mut Frame, area: Rect, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     fill_area(frame, inner, CLASH_THEME.surface);
-    frame.render_widget(
-        Paragraph::new(action_specs_line(app, action_registry::log_action_specs()))
-            .style(Style::default().bg(CLASH_THEME.surface)),
-        inner,
-    );
-    register_action_specs_hitboxes(app, area, action_registry::log_action_specs());
+    let buttons = action_buttons_from_specs(app, action_registry::log_action_specs());
+    render_action_buttons(frame, app, inner, &buttons);
 }
 
 fn render_settings(frame: &mut Frame, area: Rect, app: &mut App) {
     fill_area(frame, area, CLASH_THEME.surface);
-    let rows = Layout::vertical([
-        Constraint::Length(5),
-        Constraint::Length(5),
-        Constraint::Length(5),
-        Constraint::Min(5),
-    ])
-    .split(area);
-
-    crate::widgets::card::Card::new(app.t(Msg::SettingsGeneral)).render(
-        frame,
-        rows[0],
-        vec![
-            Line::from(vec![
-                Span::styled(
-                    format!("  {} ", app.t(Msg::SettingsLanguage)),
-                    CLASH_THEME.muted,
+    let rows = Layout::vertical([Constraint::Length(3), Constraint::Min(5)]).split(area);
+    render_settings_sections(frame, rows[0], app);
+    match app.settings_section {
+        SettingsSection::General => render_settings_general(frame, rows[1], app),
+        SettingsSection::Core => render_settings_core(frame, rows[1], app),
+        SettingsSection::Traffic => render_settings_traffic(frame, rows[1], app),
+        SettingsSection::Security => render_settings_action_panel(
+            frame,
+            rows[1],
+            app,
+            app.t(Msg::SettingsSecurity),
+            &[(app.t(Msg::SettingsSecurity), SETTINGS_SECURITY_ACTION_IDS)],
+        ),
+        SettingsSection::Diagnostics => render_settings_action_panel(
+            frame,
+            rows[1],
+            app,
+            app.t(Msg::SettingsDiagnostics),
+            &[
+                (
+                    app.t(Msg::SettingsDiagnostics),
+                    SETTINGS_DIAGNOSTIC_ACTION_IDS,
                 ),
-                Span::styled(app.ui_settings.language.label(), CLASH_THEME.text),
-                Span::styled(
-                    format!("  {} ", app.t(Msg::SettingsTheme)),
-                    CLASH_THEME.muted,
-                ),
-                Span::styled(theme_label(&app.ui_settings.theme), CLASH_THEME.text),
-                Span::styled(
-                    format!("  {} ", app.t(Msg::SettingsRefreshInterval)),
-                    CLASH_THEME.muted,
-                ),
-                Span::styled(app.ui_settings.refresh_interval_label(), CLASH_THEME.text),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    format!("  {} ", app.t(Msg::SettingsDefaultPage)),
-                    CLASH_THEME.muted,
-                ),
-                Span::styled(app.default_page_label(), CLASH_THEME.text),
-                Span::styled(
-                    format!("  {} ", app.t(Msg::SettingsMouse)),
-                    CLASH_THEME.muted,
-                ),
-                Span::styled(
-                    if app.ui_settings.mouse_enabled {
-                        app.t(Msg::CommonEnabled)
-                    } else {
-                        app.t(Msg::CommonDisabled)
-                    },
-                    CLASH_THEME.accent,
-                ),
-                Span::styled(
-                    format!("  {} ", app.t(Msg::SettingsConfirmDanger)),
-                    CLASH_THEME.muted,
-                ),
-                Span::styled(
-                    if app.ui_settings.confirm_dangerous_actions {
-                        app.t(Msg::CommonOn)
-                    } else {
-                        app.t(Msg::CommonOff)
-                    },
-                    CLASH_THEME.text,
-                ),
-            ]),
-            action_specs_line(
-                app,
-                SETTINGS_GENERAL_ACTION_IDS
-                    .iter()
-                    .filter_map(|id| action_registry::action_by_id(id)),
-            ),
-        ],
-    );
-    render_settings_general_hitboxes(app, rows[0]);
-
-    crate::widgets::card::Card::new(app.t(Msg::SettingsCoreApi)).render(
-        frame,
-        rows[1],
-        vec![
-            Line::from(vec![
-                Span::styled(format!("  {} ", app.t(Msg::SettingsApi)), CLASH_THEME.muted),
-                Span::styled(&app.config.api_url, CLASH_THEME.text),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    format!("  {} ", app.t(Msg::SettingsKernel)),
-                    CLASH_THEME.muted,
-                ),
-                Span::styled(
-                    if app.version.is_empty() {
-                        app.t(Msg::SettingsNotConnected)
-                    } else {
-                        app.version.as_str()
-                    },
-                    CLASH_THEME.text,
-                ),
-            ]),
-        ],
-    );
-
-    crate::widgets::card::Card::new(app.t(Msg::SettingsTraffic)).render(
-        frame,
-        rows[2],
-        vec![
-            Line::from(vec![
-                Span::styled(
-                    format!("  {} ", app.t(Msg::TrafficStore)),
-                    CLASH_THEME.muted,
-                ),
-                Span::styled(
-                    trunc_str(&app.traffic_status.store_dir, 48),
-                    CLASH_THEME.text,
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    format!("  {} ", app.t(Msg::SettingsDefaultChart)),
-                    CLASH_THEME.muted,
-                ),
-                Span::styled(
-                    TrafficChartKind::from_setting_key(&app.ui_settings.traffic_default_chart)
-                        .label(),
-                    CLASH_THEME.text,
-                ),
-                Span::styled(
-                    format!("  {} ", app.t(Msg::TrafficRange)),
-                    CLASH_THEME.muted,
-                ),
-                Span::styled(
-                    TrafficRange::from_setting_key(&app.ui_settings.traffic_default_range).label(),
-                    CLASH_THEME.text,
-                ),
-                Span::styled(format!("  {} ", app.t(Msg::TrafficBy)), CLASH_THEME.muted),
-                Span::styled(
-                    TrafficDimension::from_setting_key(&app.ui_settings.traffic_default_dimension)
-                        .label(),
-                    CLASH_THEME.text,
-                ),
-            ]),
-            action_specs_line(
-                app,
-                SETTINGS_TRAFFIC_ACTION_IDS
-                    .iter()
-                    .filter_map(|id| action_registry::action_by_id(id)),
-            ),
-        ],
-    );
-    render_settings_traffic_hitboxes(app, rows[2]);
-
-    render_settings_actions(frame, rows[3], app);
+                (app.t(Msg::SettingsConfig), SETTINGS_CONFIG_ACTION_IDS),
+                (app.t(Msg::SettingsForms), SETTINGS_FORM_ACTION_IDS),
+            ],
+        ),
+        SettingsSection::Updates => render_settings_action_panel(
+            frame,
+            rows[1],
+            app,
+            app.t(Msg::SettingsUpdates),
+            &[(app.t(Msg::SettingsUpdates), SETTINGS_UPDATE_ACTION_IDS)],
+        ),
+    }
 }
 
 const SETTINGS_GENERAL_ACTION_IDS: &[&str] = &[
@@ -5893,74 +6236,8 @@ const SETTINGS_TRAFFIC_ACTION_IDS: &[&str] = &[
     "settings.traffic.default_chart",
     "settings.traffic.default_dimension",
     "settings.traffic.prune_retention",
+    "traffic.reset",
 ];
-
-fn render_settings_general_hitboxes(app: &mut App, area: Rect) {
-    render_settings_inline_action_hitboxes(app, area, SETTINGS_GENERAL_ACTION_IDS);
-}
-
-fn render_settings_traffic_hitboxes(app: &mut App, area: Rect) {
-    render_settings_inline_action_hitboxes(app, area, SETTINGS_TRAFFIC_ACTION_IDS);
-}
-
-fn render_settings_inline_action_hitboxes(app: &mut App, area: Rect, action_ids: &[&str]) {
-    if area.height < 5 || area.width < 12 {
-        return;
-    }
-    let y = area.y + 3;
-    let mut x = area.x + 3;
-    for spec in action_ids
-        .iter()
-        .filter_map(|id| action_registry::action_by_id(id))
-    {
-        let Some(action) = hitbox_for_action_spec(spec) else {
-            continue;
-        };
-        let width = action_button_width(app.action_button(spec));
-        register_clamped_hitbox(app, x, y, width, area, action);
-        x = x.saturating_add(width + 1);
-    }
-}
-
-fn render_settings_actions(frame: &mut Frame, area: Rect, app: &mut App) {
-    let mut lines = vec![
-        settings_action_line(
-            app,
-            app.t(Msg::SettingsDiagnostics),
-            SETTINGS_DIAGNOSTIC_ACTION_IDS,
-        ),
-        settings_action_line(app, app.t(Msg::SettingsConfig), SETTINGS_CONFIG_ACTION_IDS),
-        settings_action_line(app, app.t(Msg::SettingsForms), SETTINGS_FORM_ACTION_IDS),
-        settings_action_line(
-            app,
-            app.t(Msg::SettingsSecurity),
-            SETTINGS_SECURITY_ACTION_IDS,
-        ),
-        settings_action_line(app, app.t(Msg::SettingsUpdates), SETTINGS_UPDATE_ACTION_IDS),
-    ];
-    if app.settings_output.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            format!("  {}", app.t(Msg::SettingsResultsPlaceholder)),
-            CLASH_THEME.muted,
-        )));
-    } else {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            format!("  {}", app.t(Msg::SettingsLastResult)),
-            CLASH_THEME.primary,
-        )));
-        for line in &app.settings_output {
-            lines.push(Line::from(Span::styled(
-                format!("  {}", line),
-                CLASH_THEME.text,
-            )));
-        }
-    }
-    crate::widgets::card::Card::new(app.t(Msg::SettingsDiagnosticsUpdates))
-        .render(frame, area, lines);
-    register_settings_action_hitboxes(app, area);
-}
 
 const SETTINGS_DIAGNOSTIC_ACTION_IDS: &[&str] = &[
     "settings.doctor",
@@ -5992,53 +6269,292 @@ const SETTINGS_UPDATE_ACTION_IDS: &[&str] = &[
     "settings.kernel.upgrade",
 ];
 
-fn settings_action_line(app: &App, group: &'static str, action_ids: &[&str]) -> Line<'static> {
-    let mut spans = vec![
-        Span::styled(format!("  {:<11}", group), CLASH_THEME.muted),
-        Span::styled(" ", CLASH_THEME.text),
-    ];
-    for spec in action_ids
-        .iter()
-        .filter_map(|id| action_registry::action_by_id(id))
-    {
-        let label = app.action_button(spec);
-        spans.push(Span::styled(
-            format!("[{}] ", label),
-            Style::default().fg(action_fg(spec.danger)),
-        ));
-    }
-    Line::from(spans)
-}
-
-fn register_settings_action_hitboxes(app: &mut App, area: Rect) {
-    if area.height < 6 || area.width < 12 {
+fn render_settings_sections(frame: &mut Frame, area: Rect, app: &mut App) {
+    let inner = crate::widgets::card::Card::new(app.t(Msg::PageSettings)).render_block(frame, area);
+    fill_area(frame, inner, CLASH_THEME.surface);
+    if inner.width == 0 || inner.height == 0 {
         return;
     }
-    let rows: [(u16, &[&str]); 5] = [
-        (1, SETTINGS_DIAGNOSTIC_ACTION_IDS),
-        (2, SETTINGS_CONFIG_ACTION_IDS),
-        (3, SETTINGS_FORM_ACTION_IDS),
-        (4, SETTINGS_SECURITY_ACTION_IDS),
-        (5, SETTINGS_UPDATE_ACTION_IDS),
-    ];
-    for (row_offset, action_ids) in rows {
-        let y = area.y + row_offset;
-        let mut x = area.x + 15;
-        for spec in action_ids
-            .iter()
-            .filter_map(|id| action_registry::action_by_id(id))
-        {
-            let Some(action) = hitbox_for_action_spec(spec) else {
-                continue;
-            };
-            let width = action_button_width(app.action_button(spec));
-            register_clamped_hitbox(app, x, y, width, area, action);
-            x = x.saturating_add(width + 1);
+
+    let mut x = inner.x;
+    let mut y = inner.y;
+    let max_x = inner.x.saturating_add(inner.width);
+    let max_y = inner.y.saturating_add(inner.height);
+    for (idx, section) in SettingsSection::all().iter().copied().enumerate() {
+        let label = app.settings_section_label(section);
+        let width = display_width(label).saturating_add(4);
+        if x > inner.x && x.saturating_add(width) > max_x {
+            x = inner.x;
+            y = y.saturating_add(1);
         }
+        if y >= max_y {
+            break;
+        }
+        let rect = Rect::new(x, y, width.min(max_x.saturating_sub(x)), 1);
+        let style = if app.settings_section == section {
+            Style::default()
+                .fg(CLASH_THEME.bg)
+                .bg(CLASH_THEME.primary)
+                .bold()
+        } else {
+            Style::default()
+                .fg(CLASH_THEME.text)
+                .bg(CLASH_THEME.surface)
+        };
+        frame.render_widget(Paragraph::new(format!(" {} ", label)).style(style), rect);
+        app.hitboxes
+            .register(rect, HitboxAction::SelectSettingsSection(idx));
+        x = x.saturating_add(width + 1);
     }
 }
 
-fn render_help(frame: &mut Frame, area: Rect, app: &App) {
+fn render_settings_general(frame: &mut Frame, area: Rect, app: &mut App) {
+    let (summary_area, action_area) = settings_summary_action_areas(area);
+    let mouse = if app.ui_settings.mouse_enabled {
+        "on"
+    } else {
+        "off"
+    };
+    let confirm = if app.ui_settings.confirm_dangerous_actions {
+        "on"
+    } else {
+        "off"
+    };
+    let lines = vec![
+        setting_value_line(
+            app.t(Msg::SettingsLanguage),
+            app.ui_settings.language.label(),
+        ),
+        setting_value_line(
+            app.t(Msg::SettingsTheme),
+            theme_label(&app.ui_settings.theme),
+        ),
+        setting_value_line(app.t(Msg::SettingsDefaultPage), app.default_page_label()),
+        setting_value_line(
+            app.t(Msg::SettingsRefreshInterval),
+            app.ui_settings.refresh_interval_label(),
+        ),
+        setting_value_line(app.t(Msg::SettingsMouse), mouse),
+        setting_value_line(app.t(Msg::SettingsConfirmDanger), confirm),
+    ];
+    render_settings_summary(frame, summary_area, app.t(Msg::SettingsGeneral), lines);
+    render_settings_action_panel(
+        frame,
+        action_area,
+        app,
+        app.t(Msg::SettingsGeneral),
+        &[(app.t(Msg::SettingsGeneral), SETTINGS_GENERAL_ACTION_IDS)],
+    );
+}
+
+fn render_settings_core(frame: &mut Frame, area: Rect, app: &mut App) {
+    let (summary_area, action_area) = settings_summary_action_areas(area);
+    let api = if app.config.api_url.is_empty() {
+        app.t(Msg::SettingsNotConnected).to_string()
+    } else {
+        app.config.api_url.clone()
+    };
+    let kernel = if app.version.is_empty() {
+        app.t(Msg::SettingsNotConnected).to_string()
+    } else {
+        app.version.clone()
+    };
+    let secret = if app.config.api_key.is_empty() {
+        "empty"
+    } else {
+        "configured"
+    };
+    let lines = vec![
+        setting_value_line(app.t(Msg::SettingsApi), api),
+        setting_value_line(app.t(Msg::SettingsKernel), kernel),
+        setting_value_line("Mode", app.mode.clone()),
+        setting_value_line("API secret", secret),
+    ];
+    render_settings_summary(frame, summary_area, app.t(Msg::SettingsCoreApi), lines);
+    render_settings_action_panel(
+        frame,
+        action_area,
+        app,
+        app.t(Msg::SettingsCoreApi),
+        &[
+            (app.t(Msg::SettingsConfig), SETTINGS_CONFIG_ACTION_IDS),
+            (app.t(Msg::SettingsForms), SETTINGS_FORM_ACTION_IDS),
+        ],
+    );
+}
+
+fn render_settings_traffic(frame: &mut Frame, area: Rect, app: &mut App) {
+    let (summary_area, action_area) = settings_summary_action_areas(area);
+    let lines = vec![
+        setting_value_line("Default range", app.traffic_range.label()),
+        setting_value_line(app.t(Msg::SettingsDefaultChart), app.traffic_chart.label()),
+        setting_value_line("Default by", app.traffic_dimension.label()),
+        setting_value_line("Store", app.traffic_status.store_dir.clone()),
+        setting_value_line(
+            "Collector",
+            if app.traffic_status.collector_running {
+                "running"
+            } else if app.traffic_status.collector_stale {
+                "stale"
+            } else {
+                "stopped"
+            },
+        ),
+    ];
+    render_settings_summary(frame, summary_area, app.t(Msg::SettingsTraffic), lines);
+    render_settings_action_panel(
+        frame,
+        action_area,
+        app,
+        app.t(Msg::SettingsTraffic),
+        &[(app.t(Msg::SettingsTraffic), SETTINGS_TRAFFIC_ACTION_IDS)],
+    );
+}
+
+fn settings_summary_action_areas(area: Rect) -> (Rect, Rect) {
+    if area.width >= 100 && area.height >= 8 {
+        let chunks =
+            Layout::horizontal([Constraint::Ratio(2, 5), Constraint::Ratio(3, 5)]).split(area);
+        (chunks[0], chunks[1])
+    } else if area.height >= 14 {
+        let chunks = Layout::vertical([Constraint::Length(7), Constraint::Min(5)]).split(area);
+        (chunks[0], chunks[1])
+    } else {
+        let chunks =
+            Layout::vertical([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).split(area);
+        (chunks[0], chunks[1])
+    }
+}
+
+fn render_settings_summary(
+    frame: &mut Frame,
+    area: Rect,
+    title: &'static str,
+    lines: Vec<Line<'static>>,
+) {
+    let inner = crate::widgets::card::Card::new(title).render_block(frame, area);
+    fill_area(frame, inner, CLASH_THEME.surface);
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(CLASH_THEME.surface)),
+        inner,
+    );
+}
+
+fn setting_value_line(label: impl Into<String>, value: impl Into<String>) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("  {:<18}", trunc_str(&label.into(), 18)),
+            CLASH_THEME.muted,
+        ),
+        Span::styled(trunc_str(&value.into(), 86), CLASH_THEME.text),
+    ])
+}
+
+fn render_settings_action_panel(
+    frame: &mut Frame,
+    area: Rect,
+    app: &mut App,
+    title: &'static str,
+    groups: &[(&'static str, &[&str])],
+) {
+    let inner = crate::widgets::card::Card::new(title).render_block(frame, area);
+    fill_area(frame, inner, CLASH_THEME.surface);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let mut y = inner.y;
+    let max_y = inner.y.saturating_add(inner.height);
+    for (group, action_ids) in groups {
+        if y >= max_y {
+            return;
+        }
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!("  {}", group),
+                CLASH_THEME.primary,
+            )))
+            .style(Style::default().bg(CLASH_THEME.surface)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y = y.saturating_add(1);
+
+        let buttons = action_buttons_from_ids(app, action_ids);
+        let button_height = action_buttons_needed_height(inner.width, &buttons)
+            .max(1)
+            .min(max_y.saturating_sub(y));
+        if button_height > 0 {
+            let button_area = Rect::new(inner.x, y, inner.width, button_height);
+            render_action_buttons(frame, app, button_area, &buttons);
+            y = y.saturating_add(button_height);
+        }
+        if y < max_y {
+            y = y.saturating_add(1);
+        }
+    }
+
+    if y >= max_y {
+        return;
+    }
+    let result_area = Rect::new(inner.x, y, inner.width, max_y.saturating_sub(y));
+    render_settings_result(frame, result_area, app);
+}
+
+fn render_settings_result(frame: &mut Frame, area: Rect, app: &App) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    fill_area(frame, area, CLASH_THEME.surface);
+    let mut lines = vec![Line::from(Span::styled(
+        format!("  {}", app.t(Msg::SettingsLastResult)),
+        CLASH_THEME.primary,
+    ))];
+    if app.settings_output.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", app.t(Msg::SettingsResultsPlaceholder)),
+            CLASH_THEME.muted,
+        )));
+    } else {
+        lines.extend(
+            app.settings_output
+                .iter()
+                .take(area.height.saturating_sub(1) as usize)
+                .map(|line| Line::from(Span::styled(format!("  {}", line), CLASH_THEME.text))),
+        );
+    }
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(CLASH_THEME.surface)),
+        area,
+    );
+}
+
+fn action_buttons_from_ids(app: &App, action_ids: &[&str]) -> Vec<ActionButtonItem> {
+    action_buttons_from_specs(
+        app,
+        action_ids
+            .iter()
+            .filter_map(|id| action_registry::action_by_id(id)),
+    )
+}
+
+fn action_buttons_needed_height(width: u16, buttons: &[ActionButtonItem]) -> u16 {
+    if width == 0 || buttons.is_empty() {
+        return 0;
+    }
+    let mut rows = 1u16;
+    let mut x = 0u16;
+    for button in buttons {
+        let button_width = action_button_width(&button.label).min(width);
+        if x > 0 && x.saturating_add(button_width) > width {
+            rows = rows.saturating_add(1);
+            x = 0;
+        }
+        x = x.saturating_add(button_width.saturating_add(1));
+    }
+    rows
+}
+
+fn render_help(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLASH_THEME.primary).bg(CLASH_THEME.bg))
@@ -6049,6 +6565,8 @@ fn render_help(frame: &mut Frame, area: Rect, app: &App) {
         ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    fill_area(frame, inner, CLASH_THEME.bg);
+    app.hitboxes.register(inner, HitboxAction::ScrollHelp);
 
     let mut lines = vec![
         Line::from(""),
@@ -6106,18 +6624,8 @@ fn render_help(frame: &mut Frame, area: Rect, app: &App) {
         ]),
     ];
 
-    let max_registry_rows = inner.height.saturating_sub(6) as usize;
-    for spec in action_registry::all_actions()
-        .iter()
-        .take(max_registry_rows)
-    {
+    for spec in action_registry::all_actions() {
         lines.push(action_help_line(app, spec));
-    }
-    if action_registry::all_actions().len() > max_registry_rows {
-        lines.push(Line::from(Span::styled(
-            format!("  {}", app.t(Msg::HelpMoreActions)),
-            CLASH_THEME.muted,
-        )));
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
@@ -6131,8 +6639,16 @@ fn render_help(frame: &mut Frame, area: Rect, app: &App) {
         ),
         CLASH_THEME.muted,
     )));
+    let max_scroll = lines.len().saturating_sub(inner.height as usize);
+    let scroll = app.help_scroll.min(max_scroll);
+    app.help_scroll = scroll;
+    let visible = lines
+        .into_iter()
+        .skip(scroll)
+        .take(inner.height as usize)
+        .collect::<Vec<_>>();
     frame.render_widget(
-        Paragraph::new(lines).style(Style::default().fg(CLASH_THEME.text)),
+        Paragraph::new(visible).style(Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.bg)),
         inner,
     );
 }
@@ -6260,26 +6776,46 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         String::new()
     };
-    let status = format!(
-        " {}{}[q] {}  [tab] {}  [r] {}  [?] {}    {}",
-        search_info,
-        mode_info,
-        app.t(Msg::StatusQuit),
-        app.t(Msg::StatusSwitch),
-        app.t(Msg::StatusRefresh),
-        app.t(Msg::PageHelp),
-        if app.error_msg.is_some() {
-            error_text
-        } else {
-            app.status_msg.as_deref().unwrap_or("")
-        }
-    );
     let color = if app.error_msg.is_some() {
         CLASH_THEME.danger
     } else {
         CLASH_THEME.muted
     };
-    let line = Line::from(Span::styled(status, Style::default().fg(color)));
+    let key_style = Style::default()
+        .fg(CLASH_THEME.bg)
+        .bg(CLASH_THEME.secondary)
+        .bold();
+    let message = if app.error_msg.is_some() {
+        error_text
+    } else {
+        app.status_msg.as_deref().unwrap_or("")
+    };
+    let line = Line::from(vec![
+        Span::styled(
+            format!(" {}{}", search_info, mode_info),
+            Style::default().fg(color),
+        ),
+        Span::styled(" q ", key_style),
+        Span::styled(
+            format!(" {}  ", app.t(Msg::StatusQuit)),
+            Style::default().fg(color),
+        ),
+        Span::styled(" tab ", key_style),
+        Span::styled(
+            format!(" {}  ", app.t(Msg::StatusSwitch)),
+            Style::default().fg(color),
+        ),
+        Span::styled(" r ", key_style),
+        Span::styled(
+            format!(" {}  ", app.t(Msg::StatusRefresh)),
+            Style::default().fg(color),
+        ),
+        Span::styled(" ? ", key_style),
+        Span::styled(
+            format!(" {}    {}", app.t(Msg::PageHelp), message),
+            Style::default().fg(color),
+        ),
+    ]);
     frame.render_widget(
         Paragraph::new(line).style(Style::default().bg(CLASH_THEME.bg)),
         area,
@@ -6412,10 +6948,21 @@ fn command_output_lines(output: &str) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .map(|line| trunc_str(line, 120))
         .collect();
-    if lines.len() > 8 {
-        lines = lines[lines.len() - 8..].to_vec();
+    if lines.len() > 200 {
+        lines = lines[lines.len() - 200..].to_vec();
     }
     lines
+}
+
+fn sudo_required_error(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("requires root")
+        || lower.contains("interactive authentication required")
+        || lower.contains("authentication required")
+        || lower.contains("permission denied")
+        || lower.contains("operation not permitted")
+        || lower.contains("not running as root")
+        || lower.contains("sudo")
 }
 
 fn redact_sensitive_output(output: &str) -> String {
@@ -6471,17 +7018,18 @@ fn is_auto_default_page(raw: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        action_button_width, command_output_lines, display_width, hitbox_for_action_spec,
-        initial_tab_for_profiles, log_line_rank, mode_display, next_default_page, next_mode,
-        parse_config_set_api_args, parse_config_set_ports_args, parse_geodata_update_version_args,
+        action_button_item, action_button_rects, action_button_width, command_output_lines,
+        display_width, hitbox_for_action_spec, initial_tab_for_profiles, log_line_rank,
+        mode_display, next_default_page, next_mode, parse_config_set_api_args,
+        parse_config_set_ports_args, parse_geodata_update_version_args,
         parse_traffic_prune_retention_args, profile_interval_label, redact_sensitive_output,
-        register_subscription_action_hitboxes, register_subscription_form_hitboxes,
-        register_tab_hitboxes, scaled_bar, subscription_action_buttons, traffic_line_chart_lines,
-        traffic_locked_bucket_lines, traffic_status_lines, traffic_summary, traffic_window_bounds,
-        App, LogLevelFilter, SettingsPromptKind, SubscriptionAddForm, SubscriptionEditField,
-        SubscriptionEditForm, SubscriptionPrompt, TrafficChartKind, TrafficDimension, TrafficRange,
+        register_subscription_form_hitboxes, register_tab_hitboxes, scaled_bar,
+        subscription_action_buttons, traffic_line_chart_lines, traffic_locked_bucket_lines,
+        traffic_status_lines, traffic_summary, traffic_window_bounds, App, LogLevelFilter,
+        SettingsPromptKind, SubscriptionAddForm, SubscriptionEditField, SubscriptionEditForm,
+        SubscriptionPrompt, TrafficChartKind, TrafficDimension, TrafficRange,
     };
-    use crate::action_registry;
+    use crate::action_registry::{self, ActionDanger};
     use crate::api::{ProfileEntry, ProxyInfo, TrafficPoint, TrafficStatus};
     use crate::config::Config;
     use crate::event::DataEvent;
@@ -6586,8 +7134,8 @@ mod tests {
     fn command_output_lines_trim_empty_and_keep_recent_lines() {
         let input = "\n  first  \n\nsecond\nthird\nfourth\nfifth\nsixth\nseventh\neighth\nninth\n";
         let lines = command_output_lines(input);
-        assert_eq!(lines.len(), 8);
-        assert_eq!(lines.first().unwrap(), "second");
+        assert_eq!(lines.len(), 9);
+        assert_eq!(lines.first().unwrap(), "first");
         assert_eq!(lines.last().unwrap(), "ninth");
     }
 
@@ -8084,15 +8632,16 @@ mod tests {
         let mut app = test_app(&rt);
         app.ui_settings.language = LanguageSetting::ZhCn;
         let area = Rect::new(10, 20, 180, 4);
-        let y = area.y + area.height.saturating_sub(1);
-        let mut x = area.x + 2;
-
-        let buttons = subscription_action_buttons(&app);
-        register_subscription_action_hitboxes(&mut app, area);
-
-        for (label, action) in buttons {
-            assert_eq!(app.hitboxes.action_at(x, y), Some(action));
-            x = x.saturating_add(action_button_width(&label) + 1);
+        let buttons = subscription_action_buttons(&app)
+            .into_iter()
+            .map(|(label, action)| action_button_item(label, action, ActionDanger::Safe))
+            .collect::<Vec<_>>();
+        for (rect, idx) in action_button_rects(area, &buttons) {
+            app.hitboxes.register(rect, buttons[idx].action.clone());
+            assert_eq!(
+                app.hitboxes.action_at(rect.x, rect.y),
+                Some(buttons[idx].action.clone())
+            );
         }
     }
 

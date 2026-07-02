@@ -483,7 +483,7 @@ const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         id: "traffic.reset",
-        page: Tab::Traffic,
+        page: Tab::Settings,
         label: "Reset traffic",
         shortcut: "D",
         mouse: "Reset",
