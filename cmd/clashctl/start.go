@@ -9,6 +9,8 @@ import (
 	ilog "github.com/yequdesu/linux-cli-tui-clash/internal/log"
 )
 
+var startAllowSSHTunRisk bool
+
 var startCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start proxy kernel",
@@ -20,6 +22,10 @@ var startCmd = &cobra.Command{
 			ilog.Info("kernel already running on :%s", svc.ProxyPort())
 			printEnvHint()
 			return
+		}
+
+		if err := ensureSafeKernelStartFromSSH(cfg, startAllowSSHTunRisk, false); err != nil {
+			ilog.Fatal("%v", err)
 		}
 
 		if svc.IsRunning() {
@@ -36,6 +42,10 @@ var startCmd = &cobra.Command{
 		ilog.Ok("kernel started on :%s", svc.ProxyPort())
 		printEnvHint()
 	},
+}
+
+func init() {
+	startCmd.Flags().BoolVar(&startAllowSSHTunRisk, "allow-ssh-tun-risk", false, "allow starting TUN auto-route from an SSH session")
 }
 
 func printEnvHint() {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -47,5 +48,39 @@ func TestLoadEnvProcessOverrides(t *testing.T) {
 	}
 	if cfg.PidFile() != filepath.Join(baseDir, "runtime", "custom-mihomo.pid") {
 		t.Fatalf("PidFile = %q", cfg.PidFile())
+	}
+}
+
+func TestDefaultBaseDirPrefersExistingInstallDirs(t *testing.T) {
+	home := t.TempDir()
+	hidden := filepath.Join(home, ".clashctl")
+	if err := os.Mkdir(hidden, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := defaultBaseDir(home); got != hidden {
+		t.Fatalf("defaultBaseDir = %q, want existing hidden dir %q", got, hidden)
+	}
+
+	legacy := filepath.Join(home, "clashctl")
+	if err := os.Mkdir(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := defaultBaseDir(home); got != legacy {
+		t.Fatalf("defaultBaseDir = %q, want existing legacy dir %q", got, legacy)
+	}
+}
+
+func TestReadBaseDirFromEnvFileExpandsHomeOverride(t *testing.T) {
+	home := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "install.env")
+	if err := os.WriteFile(marker, []byte("CLASH_BASE_DIR=~/.clashctl\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := readBaseDirFromEnvFile(marker, home)
+	if !ok {
+		t.Fatal("readBaseDirFromEnvFile did not find CLASH_BASE_DIR")
+	}
+	if want := filepath.Join(home, ".clashctl"); got != want {
+		t.Fatalf("base dir = %q, want %q", got, want)
 	}
 }

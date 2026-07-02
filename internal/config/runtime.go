@@ -23,6 +23,10 @@ type RuntimeInfo struct {
 	DNSEnhancedMode    string
 	FakeIPFilter       []string
 	TunEnabled         bool
+	TunStack           string
+	TunAutoRoute       bool
+	TunStrictRoute     bool
+	TunDevice          string
 }
 
 func LoadRuntimeInfo(cfg *EnvConfig) RuntimeInfo {
@@ -51,7 +55,11 @@ func ParseRuntimeInfo(data []byte) (RuntimeInfo, error) {
 			FakeIPFilter []string `yaml:"fake-ip-filter"`
 		} `yaml:"dns"`
 		Tun struct {
-			Enable bool `yaml:"enable"`
+			Enable      bool   `yaml:"enable"`
+			Stack       string `yaml:"stack"`
+			AutoRoute   bool   `yaml:"auto-route"`
+			StrictRoute bool   `yaml:"strict-route"`
+			Device      string `yaml:"device"`
 		} `yaml:"tun"`
 	}
 	if err := yaml.Unmarshal(data, &raw); err != nil {
@@ -68,6 +76,10 @@ func ParseRuntimeInfo(data []byte) (RuntimeInfo, error) {
 		DNSEnhancedMode:    strings.TrimSpace(raw.DNS.EnhancedMode),
 		FakeIPFilter:       raw.DNS.FakeIPFilter,
 		TunEnabled:         raw.Tun.Enable,
+		TunStack:           strings.TrimSpace(raw.Tun.Stack),
+		TunAutoRoute:       raw.Tun.AutoRoute,
+		TunStrictRoute:     raw.Tun.StrictRoute,
+		TunDevice:          strings.TrimSpace(raw.Tun.Device),
 	}
 	if info.MixedPort != "" {
 		info.ProxyPort = info.MixedPort

@@ -11,6 +11,8 @@ import (
 	ilog "github.com/yequdesu/linux-cli-tui-clash/internal/log"
 )
 
+var subUseAllowSSHTunRisk bool
+
 var subUseCmd = &cobra.Command{
 	Use:   "use <id>",
 	Short: "Switch to a subscription",
@@ -24,6 +26,10 @@ var subUseCmd = &cobra.Command{
 			ilog.Fatal("%v", err)
 		}
 	},
+}
+
+func init() {
+	subUseCmd.Flags().BoolVar(&subUseAllowSSHTunRisk, "allow-ssh-tun-risk", false, "allow starting TUN auto-route from an SSH session")
 }
 
 func switchSubscription(cfg *config.EnvConfig, id int) error {
@@ -59,6 +65,10 @@ func switchSubscription(cfg *config.EnvConfig, id int) error {
 	if err := mergeRuntimeConfig(cfg, false); err != nil {
 		restoreSnapshots(snapshots)
 		return fmt.Errorf("merge failed, restored previous config: %w", err)
+	}
+	if err := ensureSafeKernelStartFromSSH(cfg, subUseAllowSSHTunRisk, false); err != nil {
+		restoreSnapshots(snapshots)
+		return err
 	}
 
 	svc := newSubscriptionService(cfg)

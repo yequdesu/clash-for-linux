@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"os"
+	osuser "os/user"
 	"path/filepath"
 	"strings"
 )
@@ -46,65 +47,106 @@ func resolveBaseDir() string {
 		return expandHome(dir)
 	}
 
-	if data, err := os.ReadFile("/etc/clashctl/install.env"); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "CLASH_BASE_DIR=") {
-				return expandHome(strings.TrimPrefix(line, "CLASH_BASE_DIR="))
-			}
-		}
+	if dir, ok := readBaseDirFromEnvFile("/etc/clashctl/install.env", ""); ok {
+		return dir
 	}
 
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && os.Getuid() == 0 {
-		for _, homeBase := range []string{"/home", "/root"} {
-			markerFile := filepath.Join(homeBase, sudoUser, ".config", "clashctl", "install.env")
-			if f, err := os.Open(markerFile); err == nil {
-				defer f.Close()
-				sc := bufio.NewScanner(f)
-				for sc.Scan() {
-					line := strings.TrimSpace(sc.Text())
-					if strings.HasPrefix(line, "CLASH_BASE_DIR=") {
-						return expandHome(strings.TrimPrefix(line, "CLASH_BASE_DIR="))
-					}
-				}
-			}
+		if dir := resolveSudoUserBaseDir(sudoUser); dir != "" {
+			return dir
 		}
 	}
 
 	home, _ := os.UserHomeDir()
 
-	markerFile := filepath.Join(home, ".config", "clashctl", "install.env")
-	if f, err := os.Open(markerFile); err == nil {
-		defer f.Close()
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			line := strings.TrimSpace(sc.Text())
-			if strings.HasPrefix(line, "CLASH_BASE_DIR=") {
-				return expandHome(strings.TrimPrefix(line, "CLASH_BASE_DIR="))
-			}
-		}
+	if dir, ok := readBaseDirFromEnvFile(filepath.Join(home, ".config", "clashctl", "install.env"), home); ok {
+		return dir
 	}
 
+	return defaultBaseDir(home)
+}
+
+func resolveSudoUserBaseDir(sudoUser string) string {
+	home := lookupUserHome(sudoUser)
+	if home == "" {
+		return ""
+	}
+	if dir, ok := readBaseDirFromEnvFile(filepath.Join(home, ".config", "clashctl", "install.env"), home); ok {
+		return dir
+	}
+	return defaultBaseDir(home)
+}
+
+func readBaseDirFromEnvFile(path, homeOverride string) (string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if strings.HasPrefix(line, "CLASH_BASE_DIR=") {
+			return expandHomeFor(strings.TrimSpace(strings.TrimPrefix(line, "CLASH_BASE_DIR=")), homeOverride), true
+		}
+	}
+	return "", false
+}
+
+func defaultBaseDir(home string) string {
 	defaultDir := filepath.Join(home, "clashctl")
 	if _, err := os.Stat(defaultDir); err == nil {
 		return defaultDir
 	}
-	return filepath.Join(home, ".clashctl")
+	hiddenDir := filepath.Join(home, ".clashctl")
+	if _, err := os.Stat(hiddenDir); err == nil {
+		return hiddenDir
+	}
+	return hiddenDir
+}
+
+func lookupUserHome(name string) string {
+	u, err := osuser.Lookup(name)
+	if err == nil && u.HomeDir != "" {
+		return u.HomeDir
+	}
+	if name == "root" {
+		return "/root"
+	}
+	candidate := filepath.Join("/home", name)
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return ""
 }
 
 func expandHome(path string) string {
+	return expandHomeFor(path, "")
+}
+
+func expandHomeFor(path, homeOverride string) string {
 	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
+		home := homeOverride
+		if home == "" {
+			home, _ = os.UserHomeDir()
+		}
 		return filepath.Join(home, path[2:])
 	}
 	if path == "~" {
-		home, _ := os.UserHomeDir()
+		home := homeOverride
+		if home == "" {
+			home, _ = os.UserHomeDir()
+		}
 		return home
 	}
 	return path
 }
 
 func parseEnvFile(path string, cfg *EnvConfig) {
+	parseEnvFileWithHome(path, cfg, "")
+}
+
+func parseEnvFileWithHome(path string, cfg *EnvConfig, homeOverride string) {
 	f, err := os.Open(path)
 	if err != nil {
 		return
@@ -128,7 +170,7 @@ func parseEnvFile(path string, cfg *EnvConfig) {
 		case "SERVICE_NAME", "CLASH_SERVICE_NAME":
 			cfg.ServiceName = val
 		case "CLASH_BASE_DIR":
-			cfg.ClashBaseDir = expandHome(val)
+			cfg.ClashBaseDir = expandHomeFor(val, homeOverride)
 		case "CLASH_CONFIG_URL":
 			cfg.ClashConfigURL = val
 		case "CLASH_SUB_UA":
@@ -150,11 +192,17 @@ func parseEnvFile(path string, cfg *EnvConfig) {
 }
 
 func parseUserInstallMarker(cfg *EnvConfig) {
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && os.Getuid() == 0 {
+		if home := lookupUserHome(sudoUser); home != "" {
+			parseEnvFileWithHome(filepath.Join(home, ".config", "clashctl", "install.env"), cfg, home)
+			return
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return
 	}
-	parseEnvFile(filepath.Join(home, ".config", "clashctl", "install.env"), cfg)
+	parseEnvFileWithHome(filepath.Join(home, ".config", "clashctl", "install.env"), cfg, home)
 }
 
 func applyProcessEnv(cfg *EnvConfig) {

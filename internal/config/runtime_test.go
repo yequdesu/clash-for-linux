@@ -16,6 +16,10 @@ dns:
     - "*.lan"
 tun:
   enable: true
+  stack: gvisor
+  auto-route: true
+  strict-route: true
+  device: SakuraiTunnel
 `))
 	if err != nil {
 		t.Fatalf("ParseRuntimeInfo: %v", err)
@@ -37,6 +41,9 @@ tun:
 	}
 	if !info.TunEnabled {
 		t.Fatal("TunEnabled = false, want true")
+	}
+	if info.TunStack != "gvisor" || !info.TunAutoRoute || !info.TunStrictRoute || info.TunDevice != "SakuraiTunnel" {
+		t.Fatalf("Tun details = stack %q auto %v strict %v device %q", info.TunStack, info.TunAutoRoute, info.TunStrictRoute, info.TunDevice)
 	}
 }
 

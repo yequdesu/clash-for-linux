@@ -198,9 +198,16 @@ func collectDoctorResults(cfg *config.EnvConfig) []doctorResult {
 
 		checkRuntimeDNS(add, runtimeInfo)
 		checkRuntimeTun(add, runtimeInfo)
+		checkSSHTunRisk(add, runtimeInfo)
 	}
 
 	svc := kernel.NewServiceManager(cfg)
+	if serviceUnitExists(cfg.ServiceName) {
+		systemdActive := exec.Command("systemctl", "is-active", "--quiet", cfg.ServiceName).Run() == nil
+		if pid := svc.PID(); pid > 0 && !systemdActive {
+			add(doctorWarn, "service state", fmt.Sprintf("kernel pid %d running outside active systemd unit", pid))
+		}
+	}
 	if svc.InitType() == "systemd" {
 		if serviceUnitExists(cfg.ServiceName) {
 			add(doctorOK, "systemd unit", cfg.ServiceName+".service")
@@ -299,6 +306,17 @@ func checkRuntimeTun(add func(doctorLevel, string, string), info config.RuntimeI
 		return
 	}
 	add(doctorOK, "tun", "enabled")
+}
+
+func checkSSHTunRisk(add func(doctorLevel, string, string), info config.RuntimeInfo) {
+	client, ssh := sshSessionClient()
+	if !ssh || !tunStartCanCaptureRoutes(info, false) {
+		return
+	}
+	if client == "" {
+		client = "unknown"
+	}
+	add(doctorWarn, "ssh tun", "SSH session detected from "+client+" while TUN auto-route is enabled")
 }
 
 func validateInstallState(path string, cfg *config.EnvConfig) (string, error) {

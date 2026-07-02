@@ -65,6 +65,10 @@ This command:
 			return
 		}
 
+		if err := ensureSafeKernelStartFromSSH(cfg, upgradeKernelAllowSSHTunRisk, false); err != nil {
+			ilog.Fatal("%v", err)
+		}
+
 		ilog.Info("downloading kernel %s ...", latestVer)
 		tmpPath := filepath.Join(cfg.BinDir(), cfg.KernelName+".new")
 		checksumVerified, err := downloadKernelBinary(downloadURL, checksumURL, tmpPath, upgradeKernelAllowUnsigned)
@@ -129,9 +133,11 @@ This command:
 }
 
 var upgradeKernelAllowUnsigned bool
+var upgradeKernelAllowSSHTunRisk bool
 
 func init() {
 	upgradeKernelCmd.Flags().BoolVar(&upgradeKernelAllowUnsigned, "allow-unsigned", false, "allow upgrade when no SHA256 checksum asset is available")
+	upgradeKernelCmd.Flags().BoolVar(&upgradeKernelAllowSSHTunRisk, "allow-ssh-tun-risk", false, "allow restarting TUN auto-route from an SSH session")
 }
 
 type releaseAsset struct {

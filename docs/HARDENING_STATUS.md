@@ -76,11 +76,60 @@ WSL 只读探测结果：
 - WSL 证明了 shell 语法、静态安全、nohup pid 归属 smoke、Rust TUI 格式和 Rust 单元测试在 Linux 用户态下可通过。
 - WSL 没有证明 Go Linux 测试、真实 root 安装、真实 systemd unit 生命周期、真实 Mihomo、真实 TUN 路由、桌面代理、GitHub Actions 和 release artifact。
 
+## 真实 Debian SSH/TUN 事故快照
+
+执行日期：2026-07-02
+
+环境事实：
+
+- 真机主机名：`YeQuDesuDebian`。
+- 真机局域网地址：`192.168.1.23/24`，SSH 客户端为 `192.168.1.20`。
+- 事故发生时 runtime 中 `tun.enable=true`、`tun.auto-route=true`、`tun.strict-route=true`、设备名 `SakuraiTunnel`。
+- TUN 开启后公网路由进入 table 2022：`default via 198.18.0.2 dev SakuraiTunnel`。
+- 当前 SSH 回程路由在恢复后为：`192.168.1.20 dev wlp5s0 src 192.168.1.23`。
+- `sudo clashctl tun off` 曾失败为 `clashctl not installed. Run install.sh first.`，实际原因不是二进制缺失，而是 sudo 下 `HOME=/root` 且缺少安装 marker，root 进程把 base dir 误判为 `/root/clashctl`。
+- 机器上存在 `/etc/systemd/system/clashctl.service`，但当时 `systemctl is-active clashctl` 为 inactive，同时 raw/nohup `mihomo` 进程正在运行。
+
+已执行恢复：
+
+```bash
+clashctl stop
+sudo env CLASH_BASE_DIR=/home/yequdesu/.clashctl clashctl tun off
+clashctl start
+```
+
+恢复后状态：
+
+- `clashctl status` 显示 `Tun status: disabled`。
+- `ip rule show` 只剩默认规则。
+- `ip route get 39.156.66.10` 回到 `via 192.168.1.1 dev wlp5s0`。
+
+本轮代码修复：
+
+- `internal/config/env.go`：sudo/root 场景下优先解析 `SUDO_USER` 的真实安装目录；没有 marker 时回退到该用户已有的 `~/clashctl` 或 `~/.clashctl`，避免误判 `/root/clashctl`。
+- `internal/kernel/service.go`：systemd unit 存在但 inactive 时，如果发现 raw/nohup 受管进程，`IsRunning` 和 `Stop` 不再误判。
+- `cmd/clashctl/ssh_tun_guard.go`：`start`、`restart`、`tun on`、`sub use`、`upgrade-kernel` 在 SSH 会话中遇到 TUN 自动路由默认拒绝启动；必须显式传 `--allow-ssh-tun-risk` 或设置 `CLASH_ALLOW_SSH_TUN_RISK=1`。
+- `clashctl doctor` 新增 SSH+TUN 风险提示和 systemd inactive/raw running 状态提示。
+
+已用临时新二进制验证：
+
+- 将当前工作树交叉构建出的 Linux amd64 `clashctl` 临时上传到 `/tmp/clashctl-codex`，未替换正式 `/usr/local/bin/clashctl`。
+- 普通用户 `/tmp/clashctl-codex status` 可识别当前 raw/nohup 内核 pid `2965170` 和 `Tun status: disabled`。
+- `sudo /tmp/clashctl-codex status` 不再报 `clashctl not installed`，同样识别 `/home/yequdesu/.clashctl` 下的运行状态。
+- `sudo /tmp/clashctl-codex doctor` 显示 base dir 为 `/home/yequdesu/.clashctl`，并提示 `service state: kernel pid 2965170 running outside active systemd unit`。
+
+仍需真机复测：
+
+- 安装新构建后的 `sudo clashctl tun off` 是否能直接命中 `/home/yequdesu/.clashctl`。
+- SSH 环境下 `clashctl start` 遇到 `tun.auto-route=true` 是否在 stop/start 前拒绝，并保留当前连接。
+- `--allow-ssh-tun-risk` 显式覆盖路径是否可用。
+- root/systemd 与普通用户 raw 模式混用时，`stop/restart/tun off` 是否一致收敛到单一受管进程。
+
 ## P0 状态矩阵
 
 | 项目 | 状态 | 本地证据 | 仍需验证 |
 | --- | --- | --- | --- |
-| P0-1 统一 systemd 服务名和服务管理 | PARTIAL_LOCAL | `internal/config/env.go`、`internal/kernel/service.go`、`cmd/clashctl/log.go` 使用 `ServiceName`；`go test ./...` 通过 | 真实 systemd 上验证 `install.sh`、`clashctl start/status/log/stop` 与 `systemctl status clashctl` 一致 |
+| P0-1 统一 systemd 服务名和服务管理 | PARTIAL_LOCAL | `internal/config/env.go`、`internal/kernel/service.go`、`cmd/clashctl/log.go` 使用 `ServiceName`；systemd inactive/raw running 误判已有本地修复；`go test ./...` 通过 | 真实 systemd 上验证 `install.sh`、`clashctl start/status/log/stop` 与 `systemctl status clashctl` 一致 |
 | P0-2 安全默认 API 暴露 | DONE_LOCAL | `resources/mixin.yaml` 默认 loopback；secret 隐藏和 `secret show` 路径有测试；`doctor` 会报告空 secret | 安装脚本真实生成 secret 后，在 Linux 上验证 runtime 与 API auth |
 | P0-3 内核 API 客户端 | DONE_LOCAL | API path escaping、JSON body、error body 截断均有 Go/Rust 测试；`go test ./...`、`cargo test` 通过 | 真实 Mihomo API 兼容性 |
 | P0-4 订阅更新与 profile 一致性 | DONE_LOCAL | add/import/update/use/remove 核心流程可返回错误；文件锁、原子写、快照回滚测试通过；`sub update` 和 `sub use` 失败退出码已修；`TestCLIProcessExitCodes` 覆盖进程级失败退出码 | 真实订阅 URL、subconverter、active profile 切换后内核启动 |
@@ -95,7 +144,7 @@ WSL 只读探测结果：
 | --- | --- | --- | --- |
 | P1-1 结构化 RuntimeInfo | DONE_LOCAL | CLI/TUI 共享结构化解析语义；IPv4/IPv6/unspecified listener 测试通过 | 真实配置迁移场景 |
 | P1-2 `clashctl doctor` | PARTIAL_LOCAL | 安装状态、权限、secret、API、DNS、TUN、geodata 等检查已有测试 | 真实 Linux、systemd、API auth、TUN 设备 |
-| P1-3 TUN 模式可靠化 | PARTIAL_LOCAL | YAML 写入、快照回滚、启动失败回滚测试通过 | root/capability、`/dev/net/tun`、`ip link`、真实路由行为 |
+| P1-3 TUN 模式可靠化 | PARTIAL_LOCAL | YAML 写入、快照回滚、启动失败回滚测试通过；sudo base-dir 解析、SSH/TUN 启动 guard、doctor 风险提示已有本地测试 | root/capability、`/dev/net/tun`、`ip link`、真实路由行为、SSH 下风险阻断 |
 | P1-4 订阅转换器管理 | PARTIAL_LOCAL | subconverter 端口选择、pref 写入/恢复有测试 | 真实 subconverter 二进制和订阅转换结果 |
 | P1-5 日志统一 | PARTIAL_LOCAL | CLI 统一读取 `cfg.LogFile()`、legacy log 和 `journalctl -u cfg.ServiceName`；tail 失败 fatal | 真实 systemd journal 和 nohup 日志路径 |
 | P1-6 安装脚本幂等和可审计 | PARTIAL_LOCAL | shell 语法、static smoke、release smoke 脚本存在 | root 权限真实安装、重复安装、卸载后残留检查 |
@@ -123,6 +172,7 @@ WSL 只读探测结果：
 
 - 当前 Ratatui 可以作为基础监控和少量操作面板，但还不是完整终端 GUI。
 - `PROJECT_HARDENING_SPEC.md` 的 P2-1 已将目标提升为 `clashctl` 全功能覆盖、清晰分页、action registry、统一 mouse hitbox 和所有元素点击/滚轮支持。
+- `docs/RATATUI_REDESIGN_PLAN.md` 已给出基于当前 Go CLI 命令面的详细整改设计，包括左侧导航、紧凑导航降级、各页面 ASCII 布局、命令映射、鼠标/键盘交互、异步任务、确认弹窗和分阶段实施计划。
 
 ## 退出码审计结论
 

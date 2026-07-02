@@ -78,14 +78,20 @@ func (s *ServiceManager) Start() error {
 
 func (s *ServiceManager) Stop() error {
 	if s.initType == "systemd" && unitExists(s.cfg.ServiceName+".service") {
-		return runCmd("systemctl", "stop", s.cfg.ServiceName)
+		if err := runCmd("systemctl", "stop", s.cfg.ServiceName); err != nil {
+			return err
+		}
+		if s.isRunningNohup() {
+			return s.stopNohup()
+		}
+		return nil
 	}
 	return s.stopNohup()
 }
 
 func (s *ServiceManager) IsRunning() bool {
 	if s.initType == "systemd" && unitExists(s.cfg.ServiceName+".service") {
-		return runCmd("systemctl", "is-active", "--quiet", s.cfg.ServiceName) == nil
+		return runCmd("systemctl", "is-active", "--quiet", s.cfg.ServiceName) == nil || s.isRunningNohup()
 	}
 	return s.isRunningNohup()
 }
@@ -207,7 +213,7 @@ func (s *ServiceManager) waitReady(timeout time.Duration) error {
 
 func (s *ServiceManager) isRunningForWait() bool {
 	if s.initType == "systemd" && unitExists(s.cfg.ServiceName+".service") {
-		return runCmd("systemctl", "is-active", "--quiet", s.cfg.ServiceName) == nil
+		return runCmd("systemctl", "is-active", "--quiet", s.cfg.ServiceName) == nil || s.isRunningNohup()
 	}
 	return s.isRunningNohup()
 }

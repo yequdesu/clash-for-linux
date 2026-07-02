@@ -109,6 +109,7 @@ P0 是阻止项目成为可靠 Linux 工具的直接缺陷，必须优先完成�
 - `internal/kernel/service.go` 所有 systemd 操作使用 `cfg.ServiceName`。
 - `cmd/clashctl/log.go` 使用 `journalctl -u cfg.ServiceName`。
 - 安装脚本、卸载脚本、Go 逻辑全部使用同一个服务名。
+- 如果 systemd unit 存在但 inactive，而同一安装目录下 raw/nohup 内核进程仍在运行，`ServiceManager.IsRunning/Stop` 必须识别并处理该 raw 进程，避免 root/systemd 视角和普通用户 raw 视角分裂。
 
 验收：
 
@@ -117,6 +118,7 @@ P0 是阻止项目成为可靠 Linux 工具的直接缺陷，必须优先完成�
 - `clashctl stop` 停止同一个 unit。
 - `clashctl status` 与 `systemctl is-active clashctl` 一致。
 - `clashctl log` 能读取安装脚本写入的日志。
+- `clashctl doctor` 能提示 systemd inactive 但 raw/nohup 内核仍在运行的异常状态。
 
 ### P0-2 安全默认 API 暴露
 
@@ -416,6 +418,9 @@ type RuntimeInfo struct {
 必须改动：
 
 - 开启 TUN 前先检查 root/capability、`/dev/net/tun`、`ip` 命令、内核支持。
+- sudo/root 执行 `clashctl tun on/off` 时必须解析 `SUDO_USER` 的真实安装目录；缺少安装 marker 时也必须优先查找该用户已有的 `~/clashctl` 或 `~/.clashctl`，不得误判为 `/root/clashctl`。
+- SSH 会话中启动或重启 TUN 自动路由必须默认阻断；覆盖必须显式传 `--allow-ssh-tun-risk` 或等价环境变量，并在错误中显示 SSH 客户端和当前路由。
+- `start`、`restart`、`tun on`、`sub use`、`upgrade-kernel` 等所有可能启动内核的入口都必须复用 SSH/TUN 风险判断。
 - 修改 mixin 前备份。
 - TUN 开关必须使用结构化 YAML 写入，不得通过外部 `yq -i` 或字符串替换直接改 `mixin.yaml`。
 - 新 runtime 校验通过后才重启。
@@ -426,6 +431,8 @@ type RuntimeInfo struct {
 
 - 无 `/dev/net/tun` 时命令失败且旧代理继续运行。
 - capability 缺失时给出精确修复命令。
+- 在 SSH 环境、runtime 启用 `tun.auto-route` 或 `tun.strict-route` 时，未传显式覆盖参数的 `clashctl start/restart/tun on/sub use/upgrade-kernel` 必须在 stop/start 前失败，避免切断当前 SSH。
+- `sudo clashctl tun off` 能在没有 `/etc/clashctl/install.env` 的情况下命中当前 `SUDO_USER` 的已有安装目录。
 
 ### P1-4 订阅转换器管理
 
@@ -507,6 +514,8 @@ type RuntimeInfo struct {
 P2 是产品成熟度提升项，不应早于 P0/P1。
 
 ### P2-1 TUI 变成真实控制面
+
+详细整改设计见 `docs/RATATUI_REDESIGN_PLAN.md`。该文档基于当前 `cmd/clashctl` 命令面定义页面、导航、鼠标交互、异步任务、确认弹窗和命令覆盖矩阵。
 
 目标：
 

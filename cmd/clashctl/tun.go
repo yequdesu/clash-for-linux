@@ -14,6 +14,8 @@ import (
 	ilog "github.com/yequdesu/linux-cli-tui-clash/internal/log"
 )
 
+var tunAllowSSHTunRisk bool
+
 var tunCmd = &cobra.Command{
 	Use:   "tun [on|off]",
 	Short: "Toggle Tun mode",
@@ -27,6 +29,9 @@ var tunCmd = &cobra.Command{
 		case "on":
 			if os.Getuid() != 0 {
 				ilog.Fatal("Tun mode requires root. Run with sudo.")
+			}
+			if err := ensureSafeKernelStartFromSSH(cfg, tunAllowSSHTunRisk, true); err != nil {
+				ilog.Fatal("%v", err)
 			}
 			if err := changeTunMode(cfg, true); err != nil {
 				ilog.Fatal("Tun mode not enabled: %v", err)
@@ -51,6 +56,10 @@ var tunCmd = &cobra.Command{
 			ilog.Fatal("usage: clashctl tun [on|off]")
 		}
 	},
+}
+
+func init() {
+	tunCmd.Flags().BoolVar(&tunAllowSSHTunRisk, "allow-ssh-tun-risk", false, "allow enabling TUN auto-route from an SSH session")
 }
 
 type tunService interface {
