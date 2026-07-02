@@ -526,7 +526,7 @@ P2 是产品成熟度提升项，不应早于 P0/P1。
 目标：
 
 - `clash-tui` 必须成为 `clashctl` 的完整终端控制面，而不是只读仪表盘。
-- TUI 必须覆盖 Go CLI 提供的日常管理命令，并能完成接近 Windows 桌面客户端的核心体验：状态观察、节点选择、订阅管理、配置管理、TUN、日志、诊断、升级和维护。
+- TUI 必须覆盖 Go CLI 提供的日常管理命令，并能完成接近 Windows 桌面客户端的核心体验：订阅管理、节点选择、连接观察、网络开关、日志、统一设置、诊断、升级和维护。
 - TUI 中显示的交互必须真实作用于 Mihomo 内核、配置文件或 `clashctl` 工作流，不允许只有本地状态。
 - 所有可见交互元素必须同时支持键盘和鼠标；页签、按钮、表格行、列表项、输入框、弹窗操作、滚动区域都必须有点击或滚轮语义。
 
@@ -539,16 +539,15 @@ P2 是产品成熟度提升项，不应早于 P0/P1。
 - 建立统一错误模型：错误必须包含失败命令/API、退出码或 HTTP status、关键 stderr/body、影响范围、是否已回滚和下一步建议。
 - 建立统一鼠标命中模型：渲染阶段记录 hitbox registry，事件阶段根据坐标分派到页签、按钮、表格行、滚动区域、弹窗按钮和输入框，禁止靠散落的坐标 if 判断长期维护。
 - 建立统一滚动模型：表格、日志、帮助、诊断结果、配置预览、节点列表和订阅列表均支持滚轮、PageUp/PageDown、Home/End，并保留可见滚动位置。
-- 建立统一分页模型：页面清晰分为 Overview、Service、Proxies、Subscriptions、Config、TUN/DNS、Maintenance、Logs、Doctor、Help；窄终端下必须降级为同样可操作的单列布局。
-- Overview 页面必须显示内核运行状态、API 连接状态、当前模式、当前订阅、TUN 状态、端口、安全状态、上下行速率、连接数和最近错误；所有摘要项可点击跳转到对应页面。
-- Service 页面必须覆盖 `start`、`stop`、`restart`、`status`、`doctor`、`version`、`test`，并显示 systemd/nohup 模式、服务名、内核名、pid、日志路径和最近启动错误。
-- Proxies 页面必须覆盖 `node list`、`node switch`、`node delay` 和模式切换；支持搜索、排序、分组展开、节点选择、当前节点标记、延迟测速、批量测速和连接关闭。
+- 建立统一分页模型：一级页面清晰分为 Subscriptions、Proxies、Connections、Network、Logs、Settings、Help；窄终端下必须降级为同样可操作的单列布局。
 - Subscriptions 页面必须覆盖 `sub add`、`sub import`、`sub list`、`sub use`、`sub update`、`sub remove`、`sub log`；支持 URL/path 输入表单、文件路径输入、active 标记、更新时间、失败历史、cron/auto-update 状态和危险删除确认。
-- Config 页面必须覆盖 `config view`、`config raw`、`config merge --autofix`、`config set-port`、`config set-api`、`config set-dns-mode`、`config set-lan`、`config doctor`；支持只读预览、表单编辑、diff/结果摘要和失败回滚提示。
-- TUN/DNS 页面必须覆盖 `tun status/on/off`、DNS 模式、安全 LAN 暴露检查、`/dev/net/tun`、capability、路由和设备诊断；TUN 开关必须复用 Go CLI 的回滚语义。
-- Maintenance 页面必须覆盖 `upgrade`、`upgrade-kernel`、`geodata update`、`proxy on/off` shell env 输出、`proxy desktop status/on/off`、`secret` 状态/设置/显式 reveal；所有外部下载和敏感操作必须记录来源和结果。
+- Proxies 页面必须覆盖 `node list`、`node switch`、`node delay` 和模式切换；支持搜索、排序、分组展开、节点选择、当前节点标记、延迟测速、批量测速和连接关闭。
+- Connections 页面必须覆盖连接列表、连接详情、关闭单个连接和关闭全部连接；支持搜索、排序、滚轮和危险确认。
+- Network 页面必须覆盖 `start`、`stop`、`restart`、`status`、`tun status/on/off`、`proxy on/off` shell env 输出、`proxy desktop status/on/off`，并展示内核运行状态、API 连接、代理端口、TUN、桌面代理、shell proxy 指引和 DNS/LAN 摘要；TUN 开关必须复用 Go CLI 的回滚和 SSH 路由保护语义。
 - Logs 页面必须覆盖 `log`、`sub log`、本地 TUI 任务日志和最近错误；支持暂停、级别过滤、搜索、清空本地缓冲、滚轮滚动和跳转到最新。
-- Doctor 页面必须展示 `doctor` 和 `config doctor` 结果，按 P0/P1/P2 或 fatal/warn/info 分组，并允许点击某项跳转到对应修复页面。
+- Settings 页面必须提供统一设置入口，分为 General、Core、Ports/API、DNS/LAN、Security、Diagnostics、Updates；覆盖中英双语、主题、默认页、鼠标、刷新间隔、`config view/raw/merge/autofix/set-*`、`secret`、`doctor`、`config doctor`、`test`、`version`、`upgrade`、`upgrade-kernel`、`geodata update` 和 install-state。
+- Settings / General 必须支持 zh-CN/en-US 双语切换；所有页面标题、按钮、状态、错误摘要、Help 和 Command Palette 文案必须来自统一 i18n key。
+- Settings / Diagnostics 必须展示 `doctor` 和 `config doctor` 结果，按 fatal/warn/info 分组，并允许点击某项跳转到对应修复 section。
 - Help 页面必须从 action registry 生成，确保帮助文案和真实快捷键/鼠标行为一致。
 - 搜索过滤代理组/节点/订阅/日志/诊断项必须真实影响可见列表，并保持选中项有效。
 - 排序按名称、延迟、更新时间、状态真实生效，不得只改变本地展示后丢失当前选择。
