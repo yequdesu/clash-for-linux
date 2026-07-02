@@ -34,6 +34,7 @@ var tunCmd = &cobra.Command{
 				ilog.Fatal("%v", err)
 			}
 			if err := changeTunMode(cfg, true); err != nil {
+				_ = cleanupSSHTunBypass(cfg)
 				ilog.Fatal("Tun mode not enabled: %v", err)
 			}
 			if dev, err := verifyTunDevice(); err != nil {
@@ -50,6 +51,9 @@ var tunCmd = &cobra.Command{
 			}
 			if err := changeTunMode(cfg, false); err != nil {
 				ilog.Fatal("Tun mode not disabled: %v", err)
+			}
+			if err := cleanupSSHTunBypass(cfg); err != nil {
+				ilog.Warn("SSH TUN bypass cleanup failed: %v", err)
 			}
 			ilog.Ok("Tun mode disabled")
 		default:

@@ -316,7 +316,7 @@ func checkSSHTunRisk(add func(doctorLevel, string, string), info config.RuntimeI
 	if client == "" {
 		client = "unknown"
 	}
-	add(doctorWarn, "ssh tun", "SSH session detected from "+client+" while TUN auto-route is enabled")
+	add(doctorWarn, "ssh tun", "SSH session detected from "+client+" while TUN auto-route is enabled; start/tun on will protect this route when possible")
 }
 
 func validateInstallState(path string, cfg *config.EnvConfig) (string, error) {

@@ -14,12 +14,18 @@ var stopCmd = &cobra.Command{
 		requireInstall()
 		svc := kernel.NewServiceManager(cfg)
 		if !svc.IsRunning() {
+			if err := cleanupSSHTunBypass(cfg); err != nil {
+				ilog.Warn("SSH TUN bypass cleanup failed: %v", err)
+			}
 			ilog.Info("kernel not running")
 			ilog.Info("clear proxy env: eval $(clashctl proxy off)")
 			return
 		}
 		if err := svc.Stop(); err != nil {
 			ilog.Fatal("stop failed: %v", err)
+		}
+		if err := cleanupSSHTunBypass(cfg); err != nil {
+			ilog.Warn("SSH TUN bypass cleanup failed: %v", err)
 		}
 		ilog.Ok("kernel stopped")
 		ilog.Info("clear proxy env: eval $(clashctl proxy off)")

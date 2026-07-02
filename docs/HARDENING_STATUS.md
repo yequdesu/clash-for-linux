@@ -108,7 +108,7 @@ clashctl start
 
 - `internal/config/env.go`：sudo/root 场景下优先解析 `SUDO_USER` 的真实安装目录；没有 marker 时回退到该用户已有的 `~/clashctl` 或 `~/.clashctl`，避免误判 `/root/clashctl`。
 - `internal/kernel/service.go`：systemd unit 存在但 inactive 时，如果发现 raw/nohup 受管进程，`IsRunning` 和 `Stop` 不再误判。
-- `cmd/clashctl/ssh_tun_guard.go`：`start`、`restart`、`tun on`、`sub use`、`upgrade-kernel` 在 SSH 会话中遇到 TUN 自动路由默认拒绝启动；必须显式传 `--allow-ssh-tun-risk` 或设置 `CLASH_ALLOW_SSH_TUN_RISK=1`。
+- `cmd/clashctl/ssh_tun_guard.go`：`start`、`restart`、`tun on`、`sub use`、`upgrade-kernel` 在 SSH 会话中遇到 TUN 自动路由时优先保护当前 SSH 客户端路由；同网段直连路由放行，root/sudo 场景下自动写入 priority 8000、table 2021 的 bypass 规则，无法保护时才失败；`--allow-ssh-tun-risk` 或 `CLASH_ALLOW_SSH_TUN_RISK=1` 作为显式风险覆盖。
 - `clashctl doctor` 新增 SSH+TUN 风险提示和 systemd inactive/raw running 状态提示。
 
 已用临时新二进制验证：
@@ -121,7 +121,7 @@ clashctl start
 仍需真机复测：
 
 - 安装新构建后的 `sudo clashctl tun off` 是否能直接命中 `/home/yequdesu/.clashctl`。
-- SSH 环境下 `clashctl start` 遇到 `tun.auto-route=true` 是否在 stop/start 前拒绝，并保留当前连接。
+- SSH 环境下 `clashctl start` 遇到 `tun.auto-route=true` 是否在 stop/start 前保护当前 SSH 客户端路由，并保留当前连接。
 - `--allow-ssh-tun-risk` 显式覆盖路径是否可用。
 - root/systemd 与普通用户 raw 模式混用时，`stop/restart/tun off` 是否一致收敛到单一受管进程。
 
@@ -144,7 +144,7 @@ clashctl start
 | --- | --- | --- | --- |
 | P1-1 结构化 RuntimeInfo | DONE_LOCAL | CLI/TUI 共享结构化解析语义；IPv4/IPv6/unspecified listener 测试通过 | 真实配置迁移场景 |
 | P1-2 `clashctl doctor` | PARTIAL_LOCAL | 安装状态、权限、secret、API、DNS、TUN、geodata 等检查已有测试 | 真实 Linux、systemd、API auth、TUN 设备 |
-| P1-3 TUN 模式可靠化 | PARTIAL_LOCAL | YAML 写入、快照回滚、启动失败回滚测试通过；sudo base-dir 解析、SSH/TUN 启动 guard、doctor 风险提示已有本地测试 | root/capability、`/dev/net/tun`、`ip link`、真实路由行为、SSH 下风险阻断 |
+| P1-3 TUN 模式可靠化 | PARTIAL_LOCAL | YAML 写入、快照回滚、启动失败回滚测试通过；sudo base-dir 解析、SSH/TUN 路由保护、doctor 风险提示已有本地测试 | root/capability、`/dev/net/tun`、`ip link`、真实路由行为、SSH 下 route bypass |
 | P1-4 订阅转换器管理 | PARTIAL_LOCAL | subconverter 端口选择、pref 写入/恢复有测试 | 真实 subconverter 二进制和订阅转换结果 |
 | P1-5 日志统一 | PARTIAL_LOCAL | CLI 统一读取 `cfg.LogFile()`、legacy log 和 `journalctl -u cfg.ServiceName`；tail 失败 fatal | 真实 systemd journal 和 nohup 日志路径 |
 | P1-6 安装脚本幂等和可审计 | PARTIAL_LOCAL | shell 语法、static smoke、release smoke 脚本存在 | root 权限真实安装、重复安装、卸载后残留检查 |

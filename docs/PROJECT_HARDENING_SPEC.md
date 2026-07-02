@@ -419,8 +419,9 @@ type RuntimeInfo struct {
 
 - 开启 TUN 前先检查 root/capability、`/dev/net/tun`、`ip` 命令、内核支持。
 - sudo/root 执行 `clashctl tun on/off` 时必须解析 `SUDO_USER` 的真实安装目录；缺少安装 marker 时也必须优先查找该用户已有的 `~/clashctl` 或 `~/.clashctl`，不得误判为 `/root/clashctl`。
-- SSH 会话中启动或重启 TUN 自动路由必须默认阻断；覆盖必须显式传 `--allow-ssh-tun-risk` 或等价环境变量，并在错误中显示 SSH 客户端和当前路由。
-- `start`、`restart`、`tun on`、`sub use`、`upgrade-kernel` 等所有可能启动内核的入口都必须复用 SSH/TUN 风险判断。
+- SSH 会话中启动或重启 TUN 自动路由必须优先保护当前 SSH 客户端路由：同网段直连路由可直接放行；需要经默认网关的路由必须在 root/sudo 场景下自动写入高优先级 `ip rule` 和专用路由表，使 SSH 客户端绕过 TUN。
+- 只有无法识别 SSH 客户端、当前非 root 且无法安装保护路由、或当前主路由已经落到 tunnel 设备时，才允许在 stop/start 前失败；覆盖必须显式传 `--allow-ssh-tun-risk` 或等价环境变量，并在错误中显示 SSH 客户端和当前路由。
+- `start`、`restart`、`tun on`、`sub use`、`upgrade-kernel` 等所有可能启动内核的入口都必须复用 SSH/TUN 路由保护逻辑。
 - 修改 mixin 前备份。
 - TUN 开关必须使用结构化 YAML 写入，不得通过外部 `yq -i` 或字符串替换直接改 `mixin.yaml`。
 - 新 runtime 校验通过后才重启。
@@ -431,7 +432,7 @@ type RuntimeInfo struct {
 
 - 无 `/dev/net/tun` 时命令失败且旧代理继续运行。
 - capability 缺失时给出精确修复命令。
-- 在 SSH 环境、runtime 启用 `tun.auto-route` 或 `tun.strict-route` 时，未传显式覆盖参数的 `clashctl start/restart/tun on/sub use/upgrade-kernel` 必须在 stop/start 前失败，避免切断当前 SSH。
+- 在 SSH 环境、runtime 启用 `tun.auto-route` 或 `tun.strict-route` 时，`clashctl start/restart/tun on/sub use/upgrade-kernel` 必须在 stop/start 前完成 SSH 客户端路由保护；无法保护时才失败，避免切断当前 SSH。
 - `sudo clashctl tun off` 能在没有 `/etc/clashctl/install.env` 的情况下命中当前 `SUDO_USER` 的已有安装目录。
 
 ### P1-4 订阅转换器管理

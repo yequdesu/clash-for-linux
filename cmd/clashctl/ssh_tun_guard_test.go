@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,47 +25,166 @@ func TestTunStartCanCaptureRoutes(t *testing.T) {
 	}
 }
 
-func TestEnsureSafeKernelStartFromSSHBlocksRiskyTun(t *testing.T) {
-	base := t.TempDir()
-	resources := filepath.Join(base, "resources")
-	if err := os.MkdirAll(resources, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(resources, "runtime.yaml"), []byte(`
+func TestEnsureSafeKernelStartFromSSHAllowsDirectMainRouteWithoutRoot(t *testing.T) {
+	cfg := testSSHTunGuardConfig(t, `
 mixed-port: 7897
 tun:
   enable: true
   auto-route: true
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+`)
+	t.Setenv("SSH_CONNECTION", "192.168.1.20 50000 192.168.1.23 22")
+	restore := stubSSHGuard(t, 1000, func(args ...string) ([]byte, error) {
+		if strings.Join(args, " ") == "-4 route get 192.168.1.20" {
+			return []byte("192.168.1.20 dev wlp5s0 src 192.168.1.23 uid 1000\n"), nil
+		}
+		t.Fatalf("unexpected ip command: %v", args)
+		return nil, nil
+	})
+	defer restore()
 
-	t.Setenv("SSH_TTY", "/dev/pts/1")
-	err := ensureSafeKernelStartFromSSH(&config.EnvConfig{ClashBaseDir: base}, false, false)
-	if err == nil {
-		t.Fatal("expected SSH TUN guard error")
+	if err := ensureSafeKernelStartFromSSH(cfg, false, false); err != nil {
+		t.Fatalf("direct SSH route should be allowed without root: %v", err)
 	}
-	if !strings.Contains(err.Error(), "refusing to start TUN auto-route") {
+}
+
+func TestEnsureSafeKernelStartFromSSHRequiresRootForGatewayRoute(t *testing.T) {
+	cfg := testSSHTunGuardConfig(t, `
+tun:
+  enable: true
+  strict-route: true
+`)
+	t.Setenv("SSH_CONNECTION", "203.0.113.7 50000 192.168.1.23 22")
+	restore := stubSSHGuard(t, 1000, func(args ...string) ([]byte, error) {
+		if strings.Join(args, " ") == "-4 route get 203.0.113.7" {
+			return []byte("203.0.113.7 via 192.168.1.1 dev wlp5s0 src 192.168.1.23 uid 1000\n"), nil
+		}
+		t.Fatalf("unexpected ip command: %v", args)
+		return nil, nil
+	})
+	defer restore()
+
+	err := ensureSafeKernelStartFromSSH(cfg, false, false)
+	if err == nil {
+		t.Fatal("expected gateway SSH route to require root")
+	}
+	if !strings.Contains(err.Error(), "run this command with sudo") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestEnsureSafeKernelStartFromSSHAllowsExplicitOverride(t *testing.T) {
-	base := t.TempDir()
-	resources := filepath.Join(base, "resources")
-	if err := os.MkdirAll(resources, 0o755); err != nil {
-		t.Fatal(err)
+func TestEnsureSafeKernelStartFromSSHInstallsBypassRouteAsRoot(t *testing.T) {
+	cfg := testSSHTunGuardConfig(t, `
+tun:
+  enable: true
+  auto-route: true
+`)
+	t.Setenv("SSH_CONNECTION", "203.0.113.7 50000 192.168.1.23 22")
+	var commands []string
+	restore := stubSSHGuard(t, 0, func(args ...string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		commands = append(commands, joined)
+		switch joined {
+		case "-4 route get 203.0.113.7":
+			return []byte("203.0.113.7 via 192.168.1.1 dev wlp5s0 src 192.168.1.23 uid 0\n"), nil
+		case "-4 rule del priority 8000 to 203.0.113.7/32 lookup 2021":
+			return []byte("not found\n"), errors.New("not found")
+		case "-4 route del 203.0.113.7/32 table 2021":
+			return []byte("not found\n"), errors.New("not found")
+		case "-4 route replace 203.0.113.7/32 table 2021 via 192.168.1.1 dev wlp5s0 src 192.168.1.23":
+			return nil, nil
+		case "-4 rule add priority 8000 to 203.0.113.7/32 lookup 2021":
+			return nil, nil
+		default:
+			t.Fatalf("unexpected ip command: %s", joined)
+			return nil, nil
+		}
+	})
+	defer restore()
+
+	if err := ensureSafeKernelStartFromSSH(cfg, false, false); err != nil {
+		t.Fatalf("root should install bypass route: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(resources, "runtime.yaml"), []byte(`
+	statePath := sshTunBypassStatePath(cfg)
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf("state file not written: %v", err)
+	}
+	wantRoute := "-4 route replace 203.0.113.7/32 table 2021 via 192.168.1.1 dev wlp5s0 src 192.168.1.23"
+	if !containsString(commands, wantRoute) {
+		t.Fatalf("missing route install command, got %#v", commands)
+	}
+}
+
+func TestBuildSSHTunBypassEntryFallsBackToMainTableWhenPolicyRouteUsesTunnel(t *testing.T) {
+	restore := stubSSHGuard(t, 0, func(args ...string) ([]byte, error) {
+		switch strings.Join(args, " ") {
+		case "-4 route get 203.0.113.7":
+			return []byte("203.0.113.7 via 198.18.0.2 dev SakuraiTunnel table 2022 src 198.18.0.1 uid 0\n"), nil
+		case "-4 route show table main match 203.0.113.7":
+			return []byte("default via 192.168.1.1 dev wlp5s0 proto dhcp src 192.168.1.23 metric 600\n"), nil
+		default:
+			t.Fatalf("unexpected ip command: %v", args)
+			return nil, nil
+		}
+	})
+	defer restore()
+
+	entry, err := buildSSHTunBypassEntry("203.0.113.7")
+	if err != nil {
+		t.Fatalf("buildSSHTunBypassEntry: %v", err)
+	}
+	if entry.Route.Dev != "wlp5s0" || entry.Route.Via != "192.168.1.1" {
+		t.Fatalf("route = %#v, want physical gateway route", entry.Route)
+	}
+}
+
+func TestEnsureSafeKernelStartFromSSHAllowsExplicitOverride(t *testing.T) {
+	cfg := testSSHTunGuardConfig(t, `
 tun:
   enable: true
   strict-route: true
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
+`)
 	t.Setenv("SSH_TTY", "/dev/pts/1")
-	if err := ensureSafeKernelStartFromSSH(&config.EnvConfig{ClashBaseDir: base}, true, false); err != nil {
+	restore := stubSSHGuard(t, 1000, func(args ...string) ([]byte, error) {
+		t.Fatalf("override should not inspect routes: %v", args)
+		return nil, nil
+	})
+	defer restore()
+
+	if err := ensureSafeKernelStartFromSSH(cfg, true, false); err != nil {
 		t.Fatalf("override should allow risky start: %v", err)
 	}
+}
+
+func testSSHTunGuardConfig(t *testing.T, runtimeYAML string) *config.EnvConfig {
+	t.Helper()
+	base := t.TempDir()
+	resources := filepath.Join(base, "resources")
+	if err := os.MkdirAll(resources, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resources, "runtime.yaml"), []byte(runtimeYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return &config.EnvConfig{ClashBaseDir: base, KernelName: "mihomo"}
+}
+
+func stubSSHGuard(t *testing.T, uid int, run func(args ...string) ([]byte, error)) func() {
+	t.Helper()
+	oldRun := runSSHGuardIPCommand
+	oldUID := sshGuardGetuid
+	runSSHGuardIPCommand = run
+	sshGuardGetuid = func() int { return uid }
+	return func() {
+		runSSHGuardIPCommand = oldRun
+		sshGuardGetuid = oldUID
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
