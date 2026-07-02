@@ -1,8 +1,8 @@
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::Tabs;
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use crate::i18n::{tr, Msg};
 use crate::settings::LanguageSetting;
@@ -92,25 +92,46 @@ impl Tab {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TabHitbox {
+    pub tab: Tab,
+    pub area: Rect,
+}
+
+pub fn tab_hitboxes(area: Rect, language: LanguageSetting) -> Vec<TabHitbox> {
+    let mut hitboxes = Vec::new();
+    let mut x = area.x;
+    let max_x = area.x.saturating_add(area.width);
+
+    for tab in Tab::all() {
+        if x >= max_x {
+            break;
+        }
+
+        let label = format!(" {} ", tr(language, tab.msg()));
+        let width = UnicodeWidthStr::width(label.as_str()).min(u16::MAX as usize) as u16;
+        let available = max_x.saturating_sub(x);
+
+        hitboxes.push(TabHitbox {
+            tab: *tab,
+            area: Rect::new(x, area.y, width.min(available), area.height.max(1)),
+        });
+        x = x.saturating_add(width);
+    }
+
+    hitboxes
+}
+
 pub fn render_tab_bar(frame: &mut Frame, area: Rect, active: Tab, language: LanguageSetting) {
-    let tabs: Vec<Line> = Tab::all()
-        .iter()
-        .map(|tab| {
-            let label = format!(" {} ", tr(language, tab.msg()));
-            let style = if *tab == active {
-                Style::default()
-                    .fg(CLASH_THEME.primary)
-                    .bg(CLASH_THEME.surface)
-            } else {
-                Style::default().fg(CLASH_THEME.muted).bg(CLASH_THEME.bg)
-            };
-            Line::from(Span::styled(label, style))
-        })
-        .collect();
-
-    let tabs_widget = Tabs::new(tabs)
-        .style(Style::default().bg(CLASH_THEME.bg))
-        .divider("");
-
-    frame.render_widget(tabs_widget, area);
+    for hitbox in tab_hitboxes(area, language) {
+        let label = format!(" {} ", tr(language, hitbox.tab.msg()));
+        let style = if hitbox.tab == active {
+            Style::default()
+                .fg(CLASH_THEME.primary)
+                .bg(CLASH_THEME.surface)
+        } else {
+            Style::default().fg(CLASH_THEME.muted).bg(CLASH_THEME.bg)
+        };
+        frame.render_widget(Paragraph::new(label).style(style), hitbox.area);
+    }
 }

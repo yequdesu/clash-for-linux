@@ -3643,17 +3643,19 @@ fn render_network(frame: &mut Frame, area: Rect, app: &mut App) {
 fn render_network_actions(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLASH_THEME.border))
+        .border_style(
+            Style::default()
+                .fg(CLASH_THEME.border)
+                .bg(CLASH_THEME.surface),
+        )
+        .style(Style::default().bg(CLASH_THEME.surface))
         .title(Span::styled(
             format!(" {} ", app.t(Msg::NetworkActions)),
             Style::default().fg(CLASH_THEME.primary).bold(),
-        ))
-        .title_bottom(Span::styled(
-            format!(" {} ", app.t(Msg::NetworkActionsHint)),
-            Style::default().fg(CLASH_THEME.muted),
         ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    fill_area(frame, inner, CLASH_THEME.surface);
 
     let mut x = inner.x;
     let mut y = inner.y;
@@ -3725,18 +3727,9 @@ where
 }
 
 fn register_tab_hitboxes(area: Rect, app: &mut App) {
-    let mut x = area.x;
-    for tab in Tab::all() {
-        let width = display_width(app.t(tab.msg())).saturating_add(2);
-        if x >= area.x.saturating_add(area.width) {
-            break;
-        }
-        let available = area.x.saturating_add(area.width).saturating_sub(x);
-        app.hitboxes.register(
-            Rect::new(x, area.y, width.min(available), area.height.max(1)),
-            HitboxAction::SwitchTab(*tab),
-        );
-        x = x.saturating_add(width);
+    for hitbox in crate::widgets::tab_bar::tab_hitboxes(area, app.ui_settings.language) {
+        app.hitboxes
+            .register(hitbox.area, HitboxAction::SwitchTab(hitbox.tab));
     }
 }
 
@@ -3833,7 +3826,12 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLASH_THEME.border))
+        .border_style(
+            Style::default()
+                .fg(CLASH_THEME.border)
+                .bg(CLASH_THEME.surface),
+        )
+        .style(Style::default().bg(CLASH_THEME.surface))
         .title(Span::styled(
             format!(" {} ", app.t(Msg::PageProxies)),
             Style::default().fg(CLASH_THEME.primary).bold(),
@@ -3844,6 +3842,7 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
         ));
     let inner = block.inner(table_area);
     frame.render_widget(block, table_area);
+    fill_area(frame, inner, CLASH_THEME.surface);
     register_table_row_hitboxes(app, inner, rows.len(), HitboxAction::SelectProxy);
     frame.render_stateful_widget(table, inner, &mut app.proxy_table_state.clone());
 
@@ -3855,17 +3854,19 @@ fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
 fn render_proxy_actions(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLASH_THEME.border))
+        .border_style(
+            Style::default()
+                .fg(CLASH_THEME.border)
+                .bg(CLASH_THEME.surface),
+        )
+        .style(Style::default().bg(CLASH_THEME.surface))
         .title(Span::styled(
             format!(" {} ", app.t(Msg::ProxyActions)),
             Style::default().fg(CLASH_THEME.primary).bold(),
-        ))
-        .title_bottom(Span::styled(
-            format!(" {} ", app.t(Msg::ProxyActionsHint)),
-            Style::default().fg(CLASH_THEME.muted),
         ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    fill_area(frame, inner, CLASH_THEME.surface);
     frame.render_widget(
         Paragraph::new(action_specs_line(
             app,
@@ -4090,7 +4091,12 @@ fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLASH_THEME.border))
+        .border_style(
+            Style::default()
+                .fg(CLASH_THEME.border)
+                .bg(CLASH_THEME.surface),
+        )
+        .style(Style::default().bg(CLASH_THEME.surface))
         .title(Span::styled(
             format!(" {} ", app.t(Msg::PageSubscriptions)),
             Style::default().fg(CLASH_THEME.primary).bold(),
@@ -4101,6 +4107,7 @@ fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
         ));
     let inner = block.inner(table_area);
     frame.render_widget(block, table_area);
+    fill_area(frame, inner, CLASH_THEME.surface);
     register_table_row_hitboxes(app, inner, row_count, HitboxAction::SelectSubscription);
     register_subscription_action_hitboxes(app, table_area);
     if app.profiles.is_empty() {
@@ -4890,7 +4897,12 @@ fn render_traffic_chart(frame: &mut Frame, area: Rect, app: &mut App) {
         .unwrap_or_else(|| app.t(Msg::TrafficAllTraffic).into());
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLASH_THEME.border))
+        .border_style(
+            Style::default()
+                .fg(CLASH_THEME.border)
+                .bg(CLASH_THEME.surface),
+        )
+        .style(Style::default().bg(CLASH_THEME.surface))
         .title(Span::styled(
             format!(
                 " {} · {} · {} · {} · {} ",
@@ -4901,13 +4913,10 @@ fn render_traffic_chart(frame: &mut Frame, area: Rect, app: &mut App) {
                 filter
             ),
             Style::default().fg(CLASH_THEME.primary).bold(),
-        ))
-        .title_bottom(Span::styled(
-            format!(" {} ", app.t(Msg::TrafficHistoryHint)),
-            Style::default().fg(CLASH_THEME.muted),
         ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    fill_area(frame, inner, CLASH_THEME.surface);
     app.hitboxes
         .register(inner, HitboxAction::ScrollTrafficChart);
 
@@ -5335,19 +5344,13 @@ fn render_traffic_detail(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn traffic_action_line(app: &App) -> Line<'static> {
     let mut spans = vec![Span::styled("  ", CLASH_THEME.text)];
-    let mut shortcuts = Vec::new();
     for spec in action_registry::traffic_action_specs() {
         let label = app.action_button(spec);
         spans.push(Span::styled(
             format!("[{}] ", label),
             Style::default().fg(action_fg(spec.danger)),
         ));
-        shortcuts.push(spec.shortcut);
     }
-    spans.push(Span::styled(
-        format!("  {}", shortcuts.join("/")),
-        CLASH_THEME.muted,
-    ));
     Line::from(spans)
 }
 
@@ -5575,7 +5578,12 @@ fn render_connections(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLASH_THEME.border))
+        .border_style(
+            Style::default()
+                .fg(CLASH_THEME.border)
+                .bg(CLASH_THEME.surface),
+        )
+        .style(Style::default().bg(CLASH_THEME.surface))
         .title(Span::styled(
             format!(" {} ", app.t(Msg::PageConnections)),
             Style::default().fg(CLASH_THEME.primary).bold(),
@@ -5586,6 +5594,7 @@ fn render_connections(frame: &mut Frame, area: Rect, app: &mut App) {
         ));
     let inner = block.inner(table_area);
     frame.render_widget(block, table_area);
+    fill_area(frame, inner, CLASH_THEME.surface);
     register_table_row_hitboxes(app, inner, rows.len(), HitboxAction::SelectConnection);
     frame.render_stateful_widget(table, inner, &mut app.connections_table_state.clone());
 
@@ -5597,17 +5606,19 @@ fn render_connections(frame: &mut Frame, area: Rect, app: &mut App) {
 fn render_connection_actions(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLASH_THEME.border))
+        .border_style(
+            Style::default()
+                .fg(CLASH_THEME.border)
+                .bg(CLASH_THEME.surface),
+        )
+        .style(Style::default().bg(CLASH_THEME.surface))
         .title(Span::styled(
             format!(" {} ", app.t(Msg::ConnectionsActions)),
             Style::default().fg(CLASH_THEME.primary).bold(),
-        ))
-        .title_bottom(Span::styled(
-            format!(" {} ", app.t(Msg::ConnectionsActionsHint)),
-            Style::default().fg(CLASH_THEME.muted),
         ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    fill_area(frame, inner, CLASH_THEME.surface);
     frame.render_widget(
         Paragraph::new(action_specs_line(
             app,
@@ -5664,7 +5675,12 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &mut App) {
     let pause_str = if app.log_paused { "⏸" } else { "▶" };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLASH_THEME.border))
+        .border_style(
+            Style::default()
+                .fg(CLASH_THEME.border)
+                .bg(CLASH_THEME.surface),
+        )
+        .style(Style::default().bg(CLASH_THEME.surface))
         .title(Span::styled(
             format!(" {} ", app.t(Msg::PageLogs)),
             Style::default().fg(CLASH_THEME.primary).bold(),
@@ -5679,6 +5695,7 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &mut App) {
         ));
     let inner = block.inner(log_area);
     frame.render_widget(block, log_area);
+    fill_area(frame, inner, CLASH_THEME.surface);
     app.hitboxes.register(inner, HitboxAction::ScrollLogs);
     frame.render_widget(
         Paragraph::new(lines).style(Style::default().bg(CLASH_THEME.surface)),
@@ -5692,17 +5709,19 @@ fn render_logs(frame: &mut Frame, area: Rect, app: &mut App) {
 fn render_log_actions(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLASH_THEME.border))
+        .border_style(
+            Style::default()
+                .fg(CLASH_THEME.border)
+                .bg(CLASH_THEME.surface),
+        )
+        .style(Style::default().bg(CLASH_THEME.surface))
         .title(Span::styled(
             format!(" {} ", app.t(Msg::LogsActions)),
             Style::default().fg(CLASH_THEME.primary).bold(),
-        ))
-        .title_bottom(Span::styled(
-            format!(" {} ", app.t(Msg::LogsActionsHint)),
-            Style::default().fg(CLASH_THEME.muted),
         ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    fill_area(frame, inner, CLASH_THEME.surface);
     frame.render_widget(
         Paragraph::new(action_specs_line(app, action_registry::log_action_specs()))
             .style(Style::default().bg(CLASH_THEME.surface)),
@@ -6292,10 +6311,10 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 fn scaled_bar(value: u64, max: u64, width: usize) -> String {
-    if width == 0 {
+    if width == 0 || value == 0 || max == 0 {
         return String::new();
     }
-    let filled = ((value as f64 / max.max(1) as f64) * width as f64).round() as usize;
+    let filled = ((value as f64 / max as f64) * width as f64).round() as usize;
     let filled = filled.clamp(1, width);
     "█".repeat(filled)
 }
@@ -6457,7 +6476,7 @@ mod tests {
         parse_config_set_api_args, parse_config_set_ports_args, parse_geodata_update_version_args,
         parse_traffic_prune_retention_args, profile_interval_label, redact_sensitive_output,
         register_subscription_action_hitboxes, register_subscription_form_hitboxes,
-        register_tab_hitboxes, subscription_action_buttons, traffic_line_chart_lines,
+        register_tab_hitboxes, scaled_bar, subscription_action_buttons, traffic_line_chart_lines,
         traffic_locked_bucket_lines, traffic_status_lines, traffic_summary, traffic_window_bounds,
         App, LogLevelFilter, SettingsPromptKind, SubscriptionAddForm, SubscriptionEditField,
         SubscriptionEditForm, SubscriptionPrompt, TrafficChartKind, TrafficDimension, TrafficRange,
@@ -6538,6 +6557,11 @@ mod tests {
             app.hitboxes.action_at(6, 0),
             Some(HitboxAction::SwitchTab(Tab::Proxies))
         );
+
+        let hitboxes =
+            crate::widgets::tab_bar::tab_hitboxes(Rect::new(0, 0, 80, 1), LanguageSetting::ZhCn);
+        assert_eq!(hitboxes[0].area, Rect::new(0, 0, 6, 1));
+        assert_eq!(hitboxes[1].area.x, 6);
     }
 
     #[test]
@@ -6595,6 +6619,14 @@ mod tests {
             },
         ];
         assert_eq!(traffic_summary(&points), (30, 5, 100, 30));
+    }
+
+    #[test]
+    fn scaled_bar_does_not_render_zero_value_bars() {
+        assert_eq!(scaled_bar(0, 100, 12), "");
+        assert_eq!(scaled_bar(100, 0, 12), "");
+        assert_eq!(scaled_bar(1, 100, 12), "█");
+        assert_eq!(scaled_bar(100, 100, 12), "████████████");
     }
 
     #[test]

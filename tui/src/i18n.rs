@@ -75,7 +75,6 @@ pub enum Msg {
     HelpCliBackedEnumActions,
     NetworkCurrentProxy,
     NetworkActions,
-    NetworkActionsHint,
     NetworkSystemInfo,
     NetworkCommandOutput,
     NetworkNoProxySelected,
@@ -88,7 +87,6 @@ pub enum Msg {
     ProxyNodes,
     ProxyNodesUnit,
     ProxyActions,
-    ProxyActionsHint,
     ProxyTableHint,
     ProxyUnknownGroup,
     ProxyNode,
@@ -100,7 +98,6 @@ pub enum Msg {
     ConnectionsChain,
     ConnectionsNoActive,
     ConnectionsActions,
-    ConnectionsActionsHint,
     TrafficRange,
     TrafficChart,
     TrafficBy,
@@ -111,7 +108,6 @@ pub enum Msg {
     TrafficPeak,
     TrafficHistory,
     TrafficAllTraffic,
-    TrafficHistoryHint,
     TrafficNoHistory,
     TrafficDownload,
     TrafficUpload,
@@ -135,7 +131,6 @@ pub enum Msg {
     TrafficLast,
     TrafficStatusError,
     LogsActions,
-    LogsActionsHint,
     LogsEmpty,
     SubscriptionsId,
     SubscriptionsName,
@@ -500,9 +495,6 @@ fn en(msg: Msg) -> &'static str {
         Msg::HelpCliBackedEnumActions => "CLI-backed enum actions",
         Msg::NetworkCurrentProxy => "Current Proxy",
         Msg::NetworkActions => "Actions",
-        Msg::NetworkActionsHint => {
-            "click action  Enter:start  x:stop  n:restart  v:status  V:doctor  c:config  t:TUN  e:env  p/P:proxy  d/D/O:desktop"
-        }
         Msg::NetworkSystemInfo => "System Info",
         Msg::NetworkCommandOutput => "Command Output",
         Msg::NetworkNoProxySelected => "No proxy selected",
@@ -515,9 +507,6 @@ fn en(msg: Msg) -> &'static str {
         Msg::ProxyNodes => "Nodes",
         Msg::ProxyNodesUnit => "nodes",
         Msg::ProxyActions => "Actions",
-        Msg::ProxyActionsHint => {
-            "registry driven  p:mode  s:sort  o:nodes  Enter/d:test  D:all"
-        }
         Msg::ProxyTableHint => "Enter:test  Alt+Enter:next  o:nodes  d:current  D:all  /:search",
         Msg::ProxyUnknownGroup => "Unknown",
         Msg::ProxyNode => "Node",
@@ -529,7 +518,6 @@ fn en(msg: Msg) -> &'static str {
         Msg::ConnectionsChain => "Chain",
         Msg::ConnectionsNoActive => "No active connections",
         Msg::ConnectionsActions => "Actions",
-        Msg::ConnectionsActionsHint => "registry driven  c:close selected  C:close all",
         Msg::TrafficRange => "Range",
         Msg::TrafficChart => "Chart",
         Msg::TrafficBy => "By",
@@ -540,7 +528,6 @@ fn en(msg: Msg) -> &'static str {
         Msg::TrafficPeak => "Peak",
         Msg::TrafficHistory => "History",
         Msg::TrafficAllTraffic => "all traffic",
-        Msg::TrafficHistoryHint => "[/]:range  m:chart  y:dimension  click:bucket  wheel:pan  e:export",
         Msg::TrafficNoHistory => {
             "No traffic history yet. Run `clashctl traffic sample` or `clashctl traffic collect --daemon`."
         }
@@ -566,7 +553,6 @@ fn en(msg: Msg) -> &'static str {
         Msg::TrafficLast => "last",
         Msg::TrafficStatusError => "status error",
         Msg::LogsActions => "Actions",
-        Msg::LogsActionsHint => "registry driven  p:pause  f:filter  c:clear",
         Msg::LogsEmpty => "No logs yet.",
         Msg::SubscriptionsId => "ID",
         Msg::SubscriptionsName => "Name",
@@ -1168,9 +1154,6 @@ fn zh(msg: Msg) -> &'static str {
         Msg::HelpCliBackedEnumActions => "个 CLI-backed enum 动作",
         Msg::NetworkCurrentProxy => "当前代理",
         Msg::NetworkActions => "操作",
-        Msg::NetworkActionsHint => {
-            "点击操作  Enter:启动  x:停止  n:重启  v:状态  V:诊断  c:配置  t:TUN  e:环境变量  p/P:代理  d/D/O:桌面"
-        }
         Msg::NetworkSystemInfo => "系统信息",
         Msg::NetworkCommandOutput => "命令输出",
         Msg::NetworkNoProxySelected => "未选择代理",
@@ -1183,9 +1166,6 @@ fn zh(msg: Msg) -> &'static str {
         Msg::ProxyNodes => "节点",
         Msg::ProxyNodesUnit => "个节点",
         Msg::ProxyActions => "操作",
-        Msg::ProxyActionsHint => {
-            "registry 驱动  p:模式  s:排序  o:节点  Enter/d:测速  D:全测"
-        }
         Msg::ProxyTableHint => "Enter:测速  Alt+Enter:下一个  o:节点  d:当前  D:全测  /:搜索",
         Msg::ProxyUnknownGroup => "未知",
         Msg::ProxyNode => "节点",
@@ -1197,7 +1177,6 @@ fn zh(msg: Msg) -> &'static str {
         Msg::ConnectionsChain => "链路",
         Msg::ConnectionsNoActive => "没有活动连接",
         Msg::ConnectionsActions => "操作",
-        Msg::ConnectionsActionsHint => "registry 驱动  c:关闭选中  C:关闭全部",
         Msg::TrafficRange => "范围",
         Msg::TrafficChart => "图表",
         Msg::TrafficBy => "维度",
@@ -1208,7 +1187,6 @@ fn zh(msg: Msg) -> &'static str {
         Msg::TrafficPeak => "峰值",
         Msg::TrafficHistory => "历史",
         Msg::TrafficAllTraffic => "全部流量",
-        Msg::TrafficHistoryHint => "[/]:范围  m:图表  y:维度  点击:桶  滚轮:平移  e:导出",
         Msg::TrafficNoHistory => "还没有流量历史。运行 `clashctl traffic sample` 或 `clashctl traffic collect --daemon`。",
         Msg::TrafficDownload => "下载",
         Msg::TrafficUpload => "上传",
@@ -1232,7 +1210,6 @@ fn zh(msg: Msg) -> &'static str {
         Msg::TrafficLast => "最近",
         Msg::TrafficStatusError => "状态错误",
         Msg::LogsActions => "操作",
-        Msg::LogsActionsHint => "registry 驱动  p:暂停  f:过滤  c:清空",
         Msg::LogsEmpty => "还没有日志。",
         Msg::SubscriptionsId => "ID",
         Msg::SubscriptionsName => "名称",
@@ -1301,7 +1278,6 @@ mod tests {
             tr(LanguageSetting::ZhCn, Msg::NetworkNoProxySelected),
             "未选择代理"
         );
-        assert!(tr(LanguageSetting::ZhCn, Msg::NetworkActionsHint).contains("环境变量"));
     }
 
     #[test]
@@ -1312,7 +1288,6 @@ mod tests {
             tr(LanguageSetting::ZhCn, Msg::ConnectionsNoActive),
             "没有活动连接"
         );
-        assert!(tr(LanguageSetting::ZhCn, Msg::ConnectionsActionsHint).contains("关闭全部"));
     }
 
     #[test]
@@ -1320,7 +1295,6 @@ mod tests {
         assert_eq!(tr(LanguageSetting::EnUs, Msg::ProxyGroup), "Group");
         assert_eq!(tr(LanguageSetting::ZhCn, Msg::ProxyGroup), "代理组");
         assert_eq!(tr(LanguageSetting::ZhCn, Msg::ProxyNoGroups), "没有代理组");
-        assert!(tr(LanguageSetting::ZhCn, Msg::ProxyActionsHint).contains("模式"));
         assert!(tr(LanguageSetting::ZhCn, Msg::ProxyNodePickerHint).contains("滚轮"));
     }
 
