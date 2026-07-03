@@ -91,6 +91,19 @@ fn handle_modal_key(app: &mut App, key: KeyEvent, ctrl: bool) -> bool {
         return true;
     }
 
+    if app.ui_state.proxies.node_picker_open {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('o') | KeyCode::Char('O') => app.close_node_picker(),
+            KeyCode::Enter => app.confirm_selected_node(),
+            KeyCode::Down | KeyCode::Char('j') => app.select_node_down(),
+            KeyCode::Up | KeyCode::Char('k') => app.select_node_up(),
+            KeyCode::Char('d') => app.test_selected_delay(),
+            KeyCode::Char('D') => app.test_all_delays(),
+            _ => {}
+        }
+        return true;
+    }
+
     if app.command_output_visible() && matches!(key.code, KeyCode::Esc) {
         app.close_command_output();
         return true;
@@ -219,7 +232,7 @@ fn handle_page_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('8') => {
             app.ui_state.active_page = Tab::Help;
         }
-        KeyCode::Enter => handle_enter_key(app, key),
+        KeyCode::Enter => handle_enter_key(app),
         KeyCode::Char('[') if app.ui_state.active_page == Tab::Traffic => {
             app.prev_traffic_range();
         }
@@ -462,13 +475,11 @@ fn handle_page_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-fn handle_enter_key(app: &mut App, key: KeyEvent) {
+fn handle_enter_key(app: &mut App) {
     match app.ui_state.active_page {
         Tab::Proxies => {
             if app.ui_state.proxies.node_picker_open {
-                app.switch_selected_node();
-            } else if key.modifiers.contains(KeyModifiers::ALT) {
-                app.switch_selected();
+                app.confirm_selected_node();
             } else {
                 app.test_selected_delay();
             }

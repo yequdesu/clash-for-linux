@@ -5,7 +5,7 @@ impl App {
         let api = self.api.clone();
         let tx = self.data_tx.clone();
         if self.ui_state.active_page == Tab::Proxies {
-            let Some((name, _)) = self.selected_proxy_group() else {
+            let Some(name) = self.selected_delay_target() else {
                 return;
             };
             self.rt.spawn(async move {
@@ -13,33 +13,6 @@ impl App {
                     let _ = tx.send(DataEvent::Delay(name, delay));
                 }
             });
-        }
-    }
-
-    pub fn switch_selected(&mut self) {
-        let api = self.api.clone();
-        let tx = self.data_tx.clone();
-        if self.ui_state.active_page == Tab::Proxies {
-            let Some((group_name, _)) = self.selected_proxy_group() else {
-                return;
-            };
-            if let Some(info) = self.proxies.get(&group_name) {
-                if let Some(ref all) = info.all {
-                    if all.is_empty() {
-                        return;
-                    }
-                    let all = all.clone();
-                    let current = info.now.clone().unwrap_or_default();
-                    let api2 = api.clone();
-                    let tx2 = tx.clone();
-                    self.rt.spawn(async move {
-                        let current_idx = all.iter().position(|node| node == &current).unwrap_or(0);
-                        let target = &all[(current_idx + 1) % all.len()];
-                        let result = api2.switch_proxy(&group_name, target).await;
-                        let _ = tx2.send(DataEvent::SwitchResult(result));
-                    });
-                }
-            }
         }
     }
 
@@ -89,7 +62,7 @@ impl App {
         };
     }
 
-    pub fn switch_selected_node(&mut self) {
+    pub fn confirm_selected_node(&mut self) {
         let Some(group_name) = self.selected_proxy_group_name() else {
             return;
         };
@@ -102,7 +75,13 @@ impl App {
         let tx = self.data_tx.clone();
         self.rt.spawn(async move {
             let result = api.switch_proxy(&group_name, &target).await;
+            let switched = result.is_ok();
             let _ = tx.send(DataEvent::SwitchResult(result));
+            if switched {
+                if let Ok(delay) = api.test_delay(&target).await {
+                    let _ = tx.send(DataEvent::Delay(target, delay));
+                }
+            }
         });
         self.ui_state.proxies.node_picker_open = false;
     }
@@ -126,7 +105,15 @@ impl App {
     pub fn test_all_delays(&mut self) {
         let api = self.api.clone();
         let tx = self.data_tx.clone();
-        for (name, _) in self.visible_proxy_groups() {
+        let targets = if self.ui_state.proxies.node_picker_open {
+            self.selected_proxy_nodes()
+        } else {
+            self.visible_proxy_groups()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        };
+        for name in targets {
             let api = api.clone();
             let tx = tx.clone();
             self.rt.spawn(async move {
@@ -134,6 +121,22 @@ impl App {
                     let _ = tx.send(DataEvent::Delay(name, delay));
                 }
             });
+        }
+    }
+
+    fn selected_delay_target(&self) -> Option<String> {
+        if self.ui_state.proxies.node_picker_open {
+            let nodes = self.selected_proxy_nodes();
+            nodes
+                .get(
+                    self.ui_state
+                        .proxies
+                        .selected_node_idx
+                        .min(nodes.len().saturating_sub(1)),
+                )
+                .cloned()
+        } else {
+            self.selected_proxy_group_name()
         }
     }
 }

@@ -55,10 +55,20 @@ pub(crate) fn render_action_buttons(
     area: Rect,
     buttons: &[ActionButtonItem],
 ) {
+    render_action_buttons_on(frame, app, area, buttons, CLASH_THEME.surface);
+}
+
+pub(crate) fn render_action_buttons_on(
+    frame: &mut Frame,
+    app: &mut App,
+    area: Rect,
+    buttons: &[ActionButtonItem],
+    bg: ratatui::style::Color,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    fill_area(frame, area, CLASH_THEME.surface);
+    fill_area(frame, area, bg);
     for (rect, idx) in action_button_rects(area, buttons) {
         let button = &buttons[idx];
         app.ui_state.hitboxes.register(rect, button.action.clone());

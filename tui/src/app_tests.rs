@@ -1784,6 +1784,92 @@ fn mouse_click_selects_proxy_node_when_picker_is_open() {
 }
 
 #[test]
+fn proxy_group_second_click_opens_node_picker() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Proxies;
+    app.proxy_groups = vec![("One".into(), "A".into()), ("Two".into(), "B".into())];
+    app.proxies
+        .insert("One".into(), selector_proxy("A", vec!["A"]));
+    app.proxies
+        .insert("Two".into(), selector_proxy("B", vec!["B"]));
+    app.ui_state
+        .hitboxes
+        .register(Rect::new(1, 1, 20, 1), HitboxAction::SelectProxy(1));
+
+    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+    assert_eq!(app.ui_state.proxies.selected_idx, 1);
+    assert!(!app.ui_state.proxies.node_picker_open);
+
+    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+    assert!(app.ui_state.proxies.node_picker_open);
+}
+
+#[test]
+fn proxy_node_second_click_confirms_selection() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Proxies;
+    app.proxies
+        .insert("Proxy".into(), selector_proxy("B", vec!["A", "B", "C"]));
+    app.proxy_groups = vec![("Proxy".into(), "B".into())];
+    app.open_node_picker();
+    app.ui_state
+        .hitboxes
+        .register(Rect::new(1, 1, 20, 1), HitboxAction::SelectProxyNode(1));
+
+    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+
+    assert!(!app.ui_state.proxies.node_picker_open);
+}
+
+#[test]
+fn node_picker_consumes_navigation_keys() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Proxies;
+    app.proxies
+        .insert("Proxy".into(), selector_proxy("A", vec!["A", "B"]));
+    app.proxy_groups = vec![("Proxy".into(), "A".into())];
+    app.open_node_picker();
+
+    crate::ui::controllers::key_router::handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+    );
+    assert_eq!(app.ui_state.active_page, Tab::Proxies);
+    assert!(app.ui_state.proxies.node_picker_open);
+
+    crate::ui::controllers::key_router::handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+    );
+    assert_eq!(app.ui_state.active_page, Tab::Proxies);
+    assert!(!app.should_quit);
+    assert!(!app.ui_state.proxies.node_picker_open);
+}
+
+#[test]
+fn proxy_actions_do_not_expose_sequential_switch() {
+    let proxy_ids = action_registry::proxy_action_specs()
+        .map(|spec| spec.id)
+        .collect::<Vec<_>>();
+    assert!(!proxy_ids.contains(&"proxy.node.switch"));
+
+    let picker_ids = action_registry::node_picker_action_specs()
+        .map(|spec| spec.id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        picker_ids,
+        vec![
+            "proxy.delay.selected",
+            "proxy.delay.all",
+            "proxy.node.close"
+        ]
+    );
+}
+
+#[test]
 fn node_picker_blocks_underlying_mouse_actions() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let mut app = test_app(&rt);

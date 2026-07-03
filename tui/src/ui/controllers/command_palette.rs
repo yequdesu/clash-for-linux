@@ -135,7 +135,13 @@ impl App {
             "sub.edit" => self.begin_subscription_profile_edit(),
             "sub.remove" => self.remove_selected_subscription(),
             "proxy.mode.cycle" => self.cycle_proxy_mode(),
-            "proxy.node.switch" => self.switch_selected(),
+            "proxy.node.switch" => {
+                if self.ui_state.proxies.node_picker_open {
+                    self.confirm_selected_node();
+                } else {
+                    self.open_node_picker();
+                }
+            }
             "proxy.delay.selected" => self.test_selected_delay(),
             "conn.close.selected" => self.close_selected_connection(),
             "conn.close.all" => self.close_all_connections(),

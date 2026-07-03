@@ -107,14 +107,22 @@ impl App {
             HitboxAction::RunTraffic(action) => self.run_traffic_action(action),
             HitboxAction::SelectProxy(idx) => {
                 self.ui_state.active_page = Tab::Proxies;
-                self.ui_state.proxies.selected_idx =
-                    idx.min(self.visible_proxy_groups().len().saturating_sub(1));
+                let idx = idx.min(self.visible_proxy_groups().len().saturating_sub(1));
+                let was_selected = idx == self.ui_state.proxies.selected_idx;
+                self.ui_state.proxies.selected_idx = idx;
                 self.clamp_proxy_selection();
+                if was_selected {
+                    self.open_node_picker();
+                }
             }
             HitboxAction::SelectProxyNode(idx) => {
-                self.ui_state.proxies.selected_node_idx =
-                    idx.min(self.selected_proxy_nodes().len().saturating_sub(1));
+                let idx = idx.min(self.selected_proxy_nodes().len().saturating_sub(1));
+                let was_selected = idx == self.ui_state.proxies.selected_node_idx;
+                self.ui_state.proxies.selected_node_idx = idx;
                 self.clamp_node_selection();
+                if was_selected {
+                    self.confirm_selected_node();
+                }
             }
             HitboxAction::SelectSubscription(idx) => {
                 self.ui_state.subscriptions.selected_idx =
@@ -202,9 +210,9 @@ impl App {
             HitboxAction::CloseNodePicker => self.close_node_picker(),
             HitboxAction::SwitchSelectedProxyNode => {
                 if self.ui_state.proxies.node_picker_open {
-                    self.switch_selected_node();
+                    self.confirm_selected_node();
                 } else {
-                    self.switch_selected();
+                    self.open_node_picker();
                 }
             }
             HitboxAction::TestSelectedProxyDelay => self.test_selected_delay(),

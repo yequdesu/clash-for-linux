@@ -34,7 +34,7 @@ pub(crate) fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
         ))
         .title_bottom(Span::styled(
             format!(" {} ", app.t(Msg::ProxyNodePickerHint)),
-            Style::default().fg(CLASH_THEME.muted),
+            Style::default().fg(CLASH_THEME.muted).bg(CLASH_THEME.bg),
         ));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
@@ -119,6 +119,6 @@ pub(crate) fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
     }
     if let Some(action_area) = action_area {
         let buttons = action_buttons_from_specs(app, action_registry::node_picker_action_specs());
-        render_action_buttons(frame, app, action_area, &buttons);
+        render_action_buttons_on(frame, app, action_area, &buttons, CLASH_THEME.bg);
     }
 }

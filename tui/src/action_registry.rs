@@ -200,7 +200,9 @@ pub fn traffic_action_specs() -> impl Iterator<Item = &'static ActionSpec> {
 
 pub fn proxy_action_specs() -> impl Iterator<Item = &'static ActionSpec> {
     ACTIONS.iter().filter(|spec| {
-        spec.page == Tab::Proxies && spec.id.starts_with("proxy.") && spec.id != "proxy.node.close"
+        spec.page == Tab::Proxies
+            && spec.id.starts_with("proxy.")
+            && !matches!(spec.id, "proxy.node.switch" | "proxy.node.close")
     })
 }
 
@@ -217,12 +219,13 @@ pub fn log_action_specs() -> impl Iterator<Item = &'static ActionSpec> {
 }
 
 pub fn node_picker_action_specs() -> impl Iterator<Item = &'static ActionSpec> {
-    ACTIONS.iter().filter(|spec| {
-        matches!(
-            spec.id,
-            "proxy.node.switch" | "proxy.delay.selected" | "proxy.node.close"
-        )
-    })
+    [
+        "proxy.delay.selected",
+        "proxy.delay.all",
+        "proxy.node.close",
+    ]
+    .into_iter()
+    .filter_map(action_by_id)
 }
 
 pub fn cli_backed_enum_count() -> usize {
@@ -481,10 +484,10 @@ const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         id: "proxy.node.switch",
         page: Tab::Proxies,
-        label: "Switch node",
-        shortcut: "Alt+Enter",
-        mouse: "Switch button",
-        description: "Switch the selected group to the selected node.",
+        label: "Confirm node",
+        shortcut: "Enter",
+        mouse: "Selected node row",
+        description: "Confirm the selected node in the node list.",
         danger: ActionDanger::Safe,
         executor: ActionExecutor::Api(ApiAction::SwitchProxyNode),
     },
