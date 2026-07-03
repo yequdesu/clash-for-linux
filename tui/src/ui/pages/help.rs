@@ -147,7 +147,7 @@ pub(crate) fn action_help_line(app: &App, spec: &action_registry::ActionSpec) ->
             CLASH_THEME.primary,
         ),
         Span::styled(help_cell(page, HELP_PAGE_WIDTH), CLASH_THEME.muted),
-        Span::styled(help_cell(&label, HELP_ACTION_WIDTH), CLASH_THEME.text),
+        Span::styled(help_cell(label, HELP_ACTION_WIDTH), CLASH_THEME.text),
         Span::styled(
             help_cell(app.action_danger_label(spec.danger), HELP_RISK_WIDTH),
             danger_style,

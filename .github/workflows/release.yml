@@ -40,7 +40,7 @@ jobs:
         if: matrix.rust_linker != ''
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
       - name: Build clashctl
         run: |
@@ -51,6 +51,8 @@ jobs:
         working-directory: tui
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.rust_linker }}
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
         run: |
           cargo build --release --locked --target ${{ matrix.rust_target }}
           cp target/${{ matrix.rust_target }}/release/clash-tui ../dist/clash-tui-linux-${{ matrix.arch }}

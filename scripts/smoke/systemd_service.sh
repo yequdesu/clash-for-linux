@@ -233,7 +233,7 @@ systemctl cat "$SERVICE_NAME" >/tmp/clashctl-systemd-smoke-unit.txt
 grep -q "$CLASH_BASE_DIR/bin/${KERNEL_NAME}" /tmp/clashctl-systemd-smoke-unit.txt || fail "unit does not use seeded kernel"
 
 log "starting service through clashctl"
-/usr/local/bin/clashctl start
+sudo_cmd /usr/local/bin/clashctl start
 systemctl is-active --quiet "$SERVICE_NAME" || fail "systemd service is not active"
 systemctl status "$SERVICE_NAME" --no-pager >/tmp/clashctl-systemd-smoke-status.txt
 /usr/local/bin/clashctl status >/tmp/clashctl-systemd-smoke-clashctl-status.txt
@@ -255,7 +255,7 @@ log "checking logs"
 journalctl -u "$SERVICE_NAME" --no-pager -n 20 >/tmp/clashctl-systemd-smoke-journal.txt
 
 log "stopping service"
-/usr/local/bin/clashctl stop
+sudo_cmd /usr/local/bin/clashctl stop
 if systemctl is-active --quiet "$SERVICE_NAME"; then
     fail "systemd service still active after stop"
 fi

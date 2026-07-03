@@ -202,10 +202,8 @@ fn output_window_area(area: Rect) -> Rect {
     } else {
         area.width.saturating_sub(2)
     };
-    let height = (area.height / 3)
-        .max(7)
-        .min(14)
-        .min(area.height.saturating_sub(2));
+    let desired_height = (area.height / 3).clamp(7, 14);
+    let height = desired_height.min(area.height.saturating_sub(2));
     Rect::new(
         area.x
             .saturating_add(area.width)
