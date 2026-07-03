@@ -91,6 +91,11 @@ fn handle_modal_key(app: &mut App, key: KeyEvent, ctrl: bool) -> bool {
         return true;
     }
 
+    if app.command_output_visible() && matches!(key.code, KeyCode::Esc) {
+        app.close_command_output();
+        return true;
+    }
+
     false
 }
 
@@ -152,9 +157,7 @@ fn handle_page_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Esc => {
-            if command_output_visible(app) {
-                app.ui_state.command_output.hidden = true;
-            } else if app.ui_state.proxies.node_picker_open {
+            if app.ui_state.proxies.node_picker_open {
                 app.close_node_picker();
             } else {
                 app.should_quit = true;
@@ -487,18 +490,5 @@ fn handle_enter_key(app: &mut App, key: KeyEvent) {
             app.run_network_action(NetworkAction::Start);
         }
         _ => {}
-    }
-}
-
-fn command_output_visible(app: &App) -> bool {
-    if app.ui_state.command_output.hidden {
-        return false;
-    }
-    match app.ui_state.active_page {
-        Tab::Subscriptions => !app.ui_state.subscriptions.output.is_empty(),
-        Tab::Traffic => !app.ui_state.traffic.output.is_empty(),
-        Tab::Network => !app.network_output.is_empty(),
-        Tab::Settings => !app.ui_state.settings.output.is_empty(),
-        _ => false,
     }
 }

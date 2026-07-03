@@ -220,7 +220,7 @@ impl App {
             | HitboxAction::ScrollHelp
             | HitboxAction::ScrollCommandOutput => {}
             HitboxAction::CloseCommandOutput => {
-                self.ui_state.command_output.hidden = true;
+                self.close_command_output();
             }
         }
     }

@@ -10,6 +10,7 @@ use crate::config::Config;
 use crate::event::DataEvent;
 use crate::settings::UiSettings;
 use crate::theme::{apply_theme_key, normalize_theme_key};
+use crate::ui::components::nav::Tab;
 use crate::window::WindowState;
 
 pub(crate) use crate::ui::model::*;
@@ -146,6 +147,24 @@ impl App {
     pub(crate) fn reveal_command_output(&mut self) {
         self.ui_state.command_output.scroll = 0;
         self.ui_state.command_output.hidden = false;
+    }
+
+    pub(crate) fn close_command_output(&mut self) {
+        self.ui_state.command_output.hidden = true;
+        self.request_terminal_clear();
+    }
+
+    pub(crate) fn command_output_visible(&self) -> bool {
+        if self.ui_state.command_output.hidden {
+            return false;
+        }
+        match self.ui_state.active_page {
+            Tab::Subscriptions => !self.ui_state.subscriptions.output.is_empty(),
+            Tab::Traffic => !self.ui_state.traffic.output.is_empty(),
+            Tab::Network => !self.network_output.is_empty(),
+            Tab::Settings => !self.ui_state.settings.output.is_empty(),
+            _ => false,
+        }
     }
 }
 
