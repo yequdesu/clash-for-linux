@@ -100,7 +100,7 @@ for arg in "$@"; do
     esac
 done
 
-REAL_USER="${SUDO_USER:-$USER}"
+REAL_USER="${SUDO_USER:-${USER:-$(id -un 2>/dev/null || printf root)}}"
 REAL_HOME="$(eval echo ~"$REAL_USER")"
 
 echo ""

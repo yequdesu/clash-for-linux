@@ -93,7 +93,7 @@ _stop_pid_file() {
     _sudo rm -f "$pid_file" 2>/dev/null || rm -f "$pid_file" 2>/dev/null || true
 }
 
-REAL_USER="${SUDO_USER:-$USER}"
+REAL_USER="${SUDO_USER:-${USER:-$(id -un 2>/dev/null || printf root)}}"
 REAL_HOME="$(eval echo ~"$REAL_USER")"
 _load_install_env /etc/clashctl/install.env
 _load_install_env "$REAL_HOME/.config/clashctl/install.env"
