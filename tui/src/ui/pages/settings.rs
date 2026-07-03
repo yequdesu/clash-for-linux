@@ -328,40 +328,4 @@ pub(crate) fn render_settings_action_panel(
             y = y.saturating_add(1);
         }
     }
-
-    if y >= max_y {
-        return;
-    }
-    let result_area = Rect::new(inner.x, y, inner.width, max_y.saturating_sub(y));
-    render_settings_result(frame, result_area, app);
-}
-
-pub(crate) fn render_settings_result(frame: &mut Frame, area: Rect, app: &App) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-    fill_area(frame, area, CLASH_THEME.surface);
-    let mut lines = vec![Line::from(Span::styled(
-        format!("  {}", app.t(Msg::SettingsLastResult)),
-        CLASH_THEME.primary,
-    ))];
-    if app.ui_state.settings.output.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!("  {}", app.t(Msg::SettingsResultsPlaceholder)),
-            CLASH_THEME.muted,
-        )));
-    } else {
-        lines.extend(
-            app.ui_state
-                .settings
-                .output
-                .iter()
-                .take(area.height.saturating_sub(1) as usize)
-                .map(|line| Line::from(Span::styled(format!("  {}", line), CLASH_THEME.text))),
-        );
-    }
-    frame.render_widget(
-        Paragraph::new(lines).style(Style::default().bg(CLASH_THEME.surface)),
-        area,
-    );
 }

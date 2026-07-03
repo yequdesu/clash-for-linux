@@ -1,6 +1,7 @@
 use crate::ui::prelude::*;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
+use ratatui::widgets::Clear;
 use ratatui::Frame;
 
 pub(crate) fn fill_area(frame: &mut Frame, area: Rect, bg: Color) {
@@ -13,6 +14,11 @@ pub(crate) fn fill_area(frame: &mut Frame, area: Rect, bg: Color) {
             .buffer_mut()
             .set_string(area.x, area.y + y, &line_str, Style::default().bg(bg));
     }
+}
+
+pub(crate) fn clear_floating_area(frame: &mut Frame, area: Rect, bg: Color) {
+    frame.render_widget(Clear, area);
+    fill_area(frame, area, bg);
 }
 
 pub(crate) fn format_bytes(bytes: u64) -> String {

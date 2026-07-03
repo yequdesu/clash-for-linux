@@ -2,7 +2,7 @@ use crate::ui::prelude::*;
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Style, Stylize};
-use ratatui::text::{Line, Span};
+use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Paragraph, Row, Table};
 use ratatui::Frame;
 
@@ -17,19 +17,11 @@ use crate::ui::hitbox::register_table_row_hitboxes;
 pub(crate) fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App) {
     fill_area(frame, area, CLASH_THEME.surface);
 
-    let (table_area, actions_area, output_area) = if area.height >= 18 {
-        let rows = Layout::vertical([
-            Constraint::Min(8),
-            Constraint::Length(4),
-            Constraint::Length(5),
-        ])
-        .split(area);
-        (rows[0], Some(rows[1]), Some(rows[2]))
-    } else if area.height >= 12 {
+    let (table_area, actions_area) = if area.height >= 12 {
         let rows = Layout::vertical([Constraint::Min(8), Constraint::Length(4)]).split(area);
-        (rows[0], Some(rows[1]), None)
+        (rows[0], Some(rows[1]))
     } else {
-        (area, None, None)
+        (area, None)
     };
 
     let header = Row::new(vec![
@@ -131,9 +123,6 @@ pub(crate) fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App)
     } else {
         frame.render_widget(table, inner);
     }
-    if let Some(output_area) = output_area {
-        render_subscription_output(frame, output_area, app);
-    }
     if let Some(actions_area) = actions_area {
         render_subscription_actions(frame, actions_area, app);
     }
@@ -193,21 +182,4 @@ pub(crate) fn subscription_action_buttons(app: &App) -> Vec<(String, HitboxActio
             HitboxAction::EditSubscriptionRemoveTag,
         ),
     ]
-}
-
-pub(crate) fn render_subscription_output(frame: &mut Frame, area: Rect, app: &App) {
-    let lines = if app.ui_state.subscriptions.output.is_empty() {
-        vec![Line::from(Span::styled(
-            format!("  {}", app.t(Msg::SubscriptionsOutputPlaceholder)),
-            CLASH_THEME.muted,
-        ))]
-    } else {
-        app.ui_state
-            .subscriptions
-            .output
-            .iter()
-            .map(|line| Line::from(Span::styled(format!("  {}", line), CLASH_THEME.text)))
-            .collect()
-    };
-    Panel::new(app.t(Msg::NetworkCommandOutput)).render(frame, area, lines);
 }

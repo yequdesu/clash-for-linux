@@ -168,34 +168,37 @@ impl App {
             DataEvent::SubscriptionResult(Err(e)) => {
                 self.error_msg = Some(format!("Subscription action failed: {}", e));
                 self.ui_state.subscriptions.output = command_output_lines(&e);
+                self.ui_state.command_output.scroll = 0;
             }
             DataEvent::SubscriptionOutputResult(label, Ok(output)) => {
                 self.error_msg = None;
                 self.status_msg = Some(format!("subscription action completed: {}", label));
                 self.ui_state.subscriptions.output = command_output_lines(&output);
+                self.ui_state.command_output.scroll = 0;
             }
             DataEvent::SubscriptionOutputResult(label, Err(e)) => {
                 self.error_msg = Some(format!("Subscription action failed: {}: {}", label, e));
                 self.ui_state.subscriptions.output = command_output_lines(&e);
+                self.ui_state.command_output.scroll = 0;
             }
             DataEvent::NetworkResult(label, Ok(output)) => {
                 self.clear_sudo_candidate(&label);
                 self.error_msg = None;
                 self.status_msg = Some(format!("network action completed: {}", label));
                 self.network_output = command_output_lines(&output);
-                self.ui_state.network.output_scroll = 0;
+                self.ui_state.command_output.scroll = 0;
                 self.tun_enabled = crate::api::read_tun_status();
                 self.refresh_data();
             }
             DataEvent::NetworkResult(label, Err(e)) => {
                 if self.maybe_open_sudo_prompt(&label, &e) {
                     self.network_output = command_output_lines(self.t(Msg::SudoPasswordRequired));
-                    self.ui_state.network.output_scroll = 0;
+                    self.ui_state.command_output.scroll = 0;
                     return;
                 }
                 self.error_msg = Some(format!("Network action failed: {}: {}", label, e));
                 self.network_output = command_output_lines(&e);
-                self.ui_state.network.output_scroll = 0;
+                self.ui_state.command_output.scroll = 0;
                 self.tun_enabled = crate::api::read_tun_status();
             }
             DataEvent::SettingsResult(action, Ok(output)) => {
@@ -209,6 +212,7 @@ impl App {
                     output
                 };
                 self.ui_state.settings.output = command_output_lines(&output);
+                self.ui_state.command_output.scroll = 0;
                 self.refresh_data();
             }
             DataEvent::SettingsResult(action, Err(e)) => {
@@ -216,10 +220,12 @@ impl App {
                 if self.maybe_open_sudo_prompt(label, &e) {
                     self.ui_state.settings.output =
                         command_output_lines(self.t(Msg::SudoPasswordRequired));
+                    self.ui_state.command_output.scroll = 0;
                     return;
                 }
                 self.error_msg = Some(format!("Settings action failed: {}: {}", label, e));
                 self.ui_state.settings.output = command_output_lines(&redact_sensitive_output(&e));
+                self.ui_state.command_output.scroll = 0;
             }
             DataEvent::SettingsCommandResult(label, redact_output, Ok(output)) => {
                 self.clear_sudo_candidate(&label);
@@ -231,16 +237,19 @@ impl App {
                     output
                 };
                 self.ui_state.settings.output = command_output_lines(&output);
+                self.ui_state.command_output.scroll = 0;
                 self.refresh_data();
             }
             DataEvent::SettingsCommandResult(label, _redact_output, Err(e)) => {
                 if self.maybe_open_sudo_prompt(&label, &e) {
                     self.ui_state.settings.output =
                         command_output_lines(self.t(Msg::SudoPasswordRequired));
+                    self.ui_state.command_output.scroll = 0;
                     return;
                 }
                 self.error_msg = Some(format!("Settings action failed: {}: {}", label, e));
                 self.ui_state.settings.output = command_output_lines(&redact_sensitive_output(&e));
+                self.ui_state.command_output.scroll = 0;
             }
             DataEvent::Traffic(Ok(snapshot)) => {
                 self.traffic_points = snapshot.history;
@@ -257,26 +266,31 @@ impl App {
                 self.error_msg = None;
                 self.status_msg = Some(format!("traffic exported: {}", path));
                 self.ui_state.traffic.output = vec![format!("exported: {}", path)];
+                self.ui_state.command_output.scroll = 0;
             }
             DataEvent::TrafficExport(Err(e)) => {
                 self.error_msg = Some(format!("Traffic export failed: {}", e));
                 self.ui_state.traffic.output = command_output_lines(&e);
+                self.ui_state.command_output.scroll = 0;
             }
             DataEvent::TrafficActionResult(label, Ok(output)) => {
                 self.clear_sudo_candidate(&label);
                 self.error_msg = None;
                 self.status_msg = Some(format!("traffic action completed: {}", label));
                 self.ui_state.traffic.output = command_output_lines(&output);
+                self.ui_state.command_output.scroll = 0;
                 self.refresh_traffic();
             }
             DataEvent::TrafficActionResult(label, Err(e)) => {
                 if self.maybe_open_sudo_prompt(&label, &e) {
                     self.ui_state.traffic.output =
                         command_output_lines(self.t(Msg::SudoPasswordRequired));
+                    self.ui_state.command_output.scroll = 0;
                     return;
                 }
                 self.error_msg = Some(format!("Traffic action failed: {}: {}", label, e));
                 self.ui_state.traffic.output = command_output_lines(&e);
+                self.ui_state.command_output.scroll = 0;
             }
         }
     }

@@ -18,7 +18,7 @@ pub(crate) fn render_confirmation_prompt(frame: &mut Frame, area: Rect, app: &mu
         return;
     };
     let popup = centered_rect(area, 64, 28);
-    fill_area(frame, popup, CLASH_THEME.bg);
+    clear_floating_area(frame, popup, CLASH_THEME.bg);
 
     let block = Block::default()
         .borders(Borders::ALL)

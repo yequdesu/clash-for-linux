@@ -14,11 +14,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     app.ui_state.hitboxes.clear();
     let term = frame.area();
 
-    fill_area(frame, term, CLASH_THEME.bg_outer);
     let win = app.window.compute(term);
     app.background.update(term, win, app.tick_count);
     app.background.render(term, frame.buffer_mut());
 
+    fill_area(frame, term, CLASH_THEME.bg_outer);
     fill_area(frame, win, CLASH_THEME.bg);
     let win_border = Block::default()
         .borders(Borders::ALL)
@@ -96,10 +96,11 @@ fn render_active_page(frame: &mut Frame, content_area: Rect, app: &mut App) {
             Tab::Help => super::pages::help::render_help(frame, content_area, app),
         }
     }
+    super::modals::command_output::render_command_output_window(frame, content_area, app);
     if app.ui_state.proxies.node_picker_open {
         super::modals::node_picker::render_node_picker(frame, content_area, app);
     }
-    if app.ui_state.subscriptions.prompt.is_some() {
+    if app.subscription_input_active() {
         super::modals::subscription::render_subscription_prompt(frame, content_area, app);
     }
     if app.ui_state.settings.prompt.is_some() {

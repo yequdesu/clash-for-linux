@@ -218,7 +218,7 @@ impl App {
             | HitboxAction::ScrollProxyNodes
             | HitboxAction::ScrollTrafficRows
             | HitboxAction::ScrollHelp
-            | HitboxAction::ScrollNetworkOutput => {}
+            | HitboxAction::ScrollCommandOutput => {}
         }
     }
 
@@ -257,18 +257,18 @@ impl App {
                         .saturating_sub(amount.unsigned_abs() as usize);
                 }
             }
-            Some(HitboxAction::ScrollNetworkOutput) => {
+            Some(HitboxAction::ScrollCommandOutput) => {
                 if amount > 0 {
-                    self.ui_state.network.output_scroll = self
+                    self.ui_state.command_output.scroll = self
                         .ui_state
-                        .network
-                        .output_scroll
+                        .command_output
+                        .scroll
                         .saturating_add(amount as usize);
                 } else {
-                    self.ui_state.network.output_scroll = self
+                    self.ui_state.command_output.scroll = self
                         .ui_state
-                        .network
-                        .output_scroll
+                        .command_output
+                        .scroll
                         .saturating_sub(amount.unsigned_abs() as usize);
                 }
             }

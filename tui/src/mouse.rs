@@ -308,7 +308,7 @@ pub enum HitboxAction {
     ScrollTrafficChart,
     ScrollTrafficRows,
     ScrollHelp,
-    ScrollNetworkOutput,
+    ScrollCommandOutput,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

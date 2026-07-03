@@ -552,7 +552,6 @@ pub(crate) fn render_traffic_detail(frame: &mut Frame, area: Rect, app: &mut App
         ];
         lines.extend(traffic_status_lines(app));
         lines.extend(traffic_locked_bucket_lines(app));
-        lines.extend(traffic_output_lines(app));
         lines
     } else {
         let mut lines = vec![Line::from(Span::styled(
@@ -561,7 +560,6 @@ pub(crate) fn render_traffic_detail(frame: &mut Frame, area: Rect, app: &mut App
         ))];
         lines.extend(traffic_status_lines(app));
         lines.extend(traffic_locked_bucket_lines(app));
-        lines.extend(traffic_output_lines(app));
         lines
     };
     let inner = Panel::new(app.t(Msg::TrafficDetail)).render_block(frame, area);
@@ -618,21 +616,6 @@ pub(crate) fn traffic_locked_bucket_lines(app: &App) -> Vec<Line<'static>> {
             CLASH_THEME.text,
         ),
     ])]
-}
-
-pub(crate) fn traffic_output_lines(app: &App) -> Vec<Line<'static>> {
-    app.ui_state
-        .traffic
-        .output
-        .iter()
-        .take(2)
-        .map(|line| {
-            Line::from(Span::styled(
-                format!("  {}", trunc_str(line, 92)),
-                CLASH_THEME.muted,
-            ))
-        })
-        .collect()
 }
 
 pub(crate) fn traffic_status_lines(app: &App) -> Vec<Line<'static>> {

@@ -12,7 +12,7 @@ use crate::ui::layout::centered_rect;
 
 pub(crate) fn render_command_palette(frame: &mut Frame, area: Rect, app: &App) {
     let popup = centered_rect(area, 74, 58);
-    fill_area(frame, popup, CLASH_THEME.bg);
+    clear_floating_area(frame, popup, CLASH_THEME.bg);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLASH_THEME.primary))

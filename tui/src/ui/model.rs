@@ -12,10 +12,10 @@ pub(crate) struct UiState {
     pub logs: LogsPageState,
     pub help: HelpPageState,
     pub subscriptions: SubscriptionsPageState,
-    pub network: NetworkPageState,
     pub settings: SettingsPageState,
     pub traffic: TrafficPageState,
     pub command_palette: CommandPaletteState,
+    pub command_output: CommandOutputWindowState,
     pub modals: ModalState,
 }
 
@@ -34,10 +34,10 @@ impl UiState {
             logs: LogsPageState::default(),
             help: HelpPageState::default(),
             subscriptions: SubscriptionsPageState::default(),
-            network: NetworkPageState::default(),
             settings: SettingsPageState::default(),
             traffic: TrafficPageState::new(traffic_range, traffic_chart, traffic_dimension),
             command_palette: CommandPaletteState::default(),
+            command_output: CommandOutputWindowState::default(),
             modals: ModalState::default(),
         }
     }
@@ -90,8 +90,8 @@ pub(crate) struct SubscriptionsPageState {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct NetworkPageState {
-    pub output_scroll: usize,
+pub(crate) struct CommandOutputWindowState {
+    pub scroll: usize,
 }
 
 #[derive(Debug)]

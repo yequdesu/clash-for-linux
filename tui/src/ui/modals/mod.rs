@@ -1,3 +1,4 @@
+pub(crate) mod command_output;
 pub(crate) mod command_palette;
 pub(crate) mod confirm;
 pub(crate) mod node_picker;

@@ -8,7 +8,6 @@ use ratatui::Frame;
 
 use crate::action_registry::{self};
 use crate::i18n::Msg;
-use crate::mouse::HitboxAction;
 
 use crate::ui::components::action_bar::*;
 use crate::ui::components::panel::Panel;
@@ -128,11 +127,9 @@ pub(crate) fn render_network(frame: &mut Frame, area: Rect, app: &mut App) {
     // Row 2: Network actions
     render_network_actions(frame, rows[2], app);
 
-    // Row 3: Connections, system info, and last command output
+    // Row 3: Connections and system info
     let mid_bot =
         Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).split(rows[3]);
-
-    let left_rows = Layout::vertical([Constraint::Length(3), Constraint::Min(3)]).split(mid_bot[0]);
     let conn_lines = vec![Line::from(vec![Span::styled(
         format!(
             "  Active: {}   Total: {}",
@@ -140,39 +137,13 @@ pub(crate) fn render_network(frame: &mut Frame, area: Rect, app: &mut App) {
         ),
         CLASH_THEME.text,
     )])];
-    Panel::new(app.t(Msg::PageConnections)).render(frame, left_rows[0], conn_lines);
+    Panel::new(app.t(Msg::PageConnections)).render(frame, mid_bot[0], conn_lines);
 
     let sys_lines = vec![Line::from(vec![
         Span::styled(format!("  OS: {}  ", app.os_info), CLASH_THEME.text),
         Span::styled(format!("Arch: {}", app.arch_info), CLASH_THEME.text),
     ])];
-    Panel::new(app.t(Msg::NetworkSystemInfo)).render(frame, left_rows[1], sys_lines);
-
-    let mut output_lines = if app.network_output.is_empty() {
-        vec![
-            Line::from(format!("  {}", app.t(Msg::NetworkLastCommandOutput))),
-            Line::from(format!("  {}", app.t(Msg::NetworkShellProxyPrinted))),
-        ]
-    } else {
-        app.network_output
-            .iter()
-            .map(|line| Line::from(Span::styled(format!("  {}", line), CLASH_THEME.text)))
-            .collect()
-    };
-    let output_visible_height = mid_bot[1].height.saturating_sub(2) as usize;
-    if !app.network_output.is_empty() && output_visible_height > 0 {
-        let max_scroll = output_lines.len().saturating_sub(output_visible_height);
-        app.ui_state.network.output_scroll = app.ui_state.network.output_scroll.min(max_scroll);
-        output_lines = output_lines
-            .into_iter()
-            .skip(app.ui_state.network.output_scroll)
-            .take(output_visible_height)
-            .collect();
-    }
-    app.ui_state
-        .hitboxes
-        .register(mid_bot[1], HitboxAction::ScrollNetworkOutput);
-    Panel::new(app.t(Msg::NetworkCommandOutput)).render(frame, mid_bot[1], output_lines);
+    Panel::new(app.t(Msg::NetworkSystemInfo)).render(frame, mid_bot[1], sys_lines);
 }
 
 pub(crate) fn render_network_actions(frame: &mut Frame, area: Rect, app: &mut App) {

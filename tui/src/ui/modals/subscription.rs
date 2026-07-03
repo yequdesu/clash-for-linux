@@ -26,7 +26,7 @@ pub(crate) fn render_subscription_prompt(frame: &mut Frame, area: Rect, app: &mu
         return;
     };
     let popup = centered_rect(area, 72, 32);
-    fill_area(frame, popup, CLASH_THEME.bg);
+    clear_floating_area(frame, popup, CLASH_THEME.bg);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -117,7 +117,7 @@ pub(crate) fn render_subscription_edit_form(frame: &mut Frame, area: Rect, app: 
         return;
     };
     let popup = centered_rect(area, 82, 56);
-    fill_area(frame, popup, CLASH_THEME.bg);
+    clear_floating_area(frame, popup, CLASH_THEME.bg);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -196,7 +196,7 @@ pub(crate) fn render_subscription_add_form(frame: &mut Frame, area: Rect, app: &
         return;
     };
     let popup = centered_rect(area, 82, 56);
-    fill_area(frame, popup, CLASH_THEME.bg);
+    clear_floating_area(frame, popup, CLASH_THEME.bg);
 
     let block = Block::default()
         .borders(Borders::ALL)

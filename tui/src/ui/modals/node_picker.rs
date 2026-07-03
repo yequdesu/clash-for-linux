@@ -15,7 +15,7 @@ use crate::ui::layout::centered_rect;
 
 pub(crate) fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
     let popup = centered_rect(area, 72, 76);
-    fill_area(frame, popup, CLASH_THEME.bg);
+    clear_floating_area(frame, popup, CLASH_THEME.bg);
 
     let group = app
         .selected_proxy_group_name()
@@ -26,7 +26,8 @@ pub(crate) fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLASH_THEME.primary))
+        .border_style(Style::default().fg(CLASH_THEME.primary).bg(CLASH_THEME.bg))
+        .style(Style::default().bg(CLASH_THEME.bg))
         .title(Span::styled(
             format!(" {} · {} ", app.t(Msg::ProxyNodes), group),
             Style::default().fg(CLASH_THEME.primary).bold(),
@@ -37,6 +38,7 @@ pub(crate) fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
         ));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
+    fill_area(frame, inner, CLASH_THEME.bg);
 
     let (table_area, action_area) = if has_actions {
         let chunks = Layout::vertical([Constraint::Min(3), Constraint::Length(3)]).split(inner);
@@ -97,6 +99,7 @@ pub(crate) fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
             table_area,
         );
     } else {
+        fill_area(frame, table_area, CLASH_THEME.bg);
         app.ui_state
             .hitboxes
             .register(table_area, HitboxAction::ScrollProxyNodes);

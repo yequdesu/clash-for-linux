@@ -18,7 +18,7 @@ pub(crate) fn render_sudo_prompt(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     };
     let popup = centered_rect(area, 62, 28);
-    fill_area(frame, popup, CLASH_THEME.bg);
+    clear_floating_area(frame, popup, CLASH_THEME.bg);
 
     let block = Block::default()
         .borders(Borders::ALL)
