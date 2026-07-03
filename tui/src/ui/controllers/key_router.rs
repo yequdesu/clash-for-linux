@@ -111,19 +111,15 @@ fn handle_control_key(app: &mut App, code: KeyCode) {
         }
         KeyCode::Up => {
             app.window.move_by(0, -1);
-            app.request_terminal_clear();
         }
         KeyCode::Down => {
             app.window.move_by(0, 1);
-            app.request_terminal_clear();
         }
         KeyCode::Left => {
             app.window.move_by(-2, 0);
-            app.request_terminal_clear();
         }
         KeyCode::Right => {
             app.window.move_by(2, 0);
-            app.request_terminal_clear();
         }
         _ => {}
     }
@@ -183,15 +179,12 @@ fn handle_page_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('=') | KeyCode::Char('+') => {
             app.window.zoom_in();
-            app.request_terminal_clear();
         }
         KeyCode::Char('-') => {
             app.window.zoom_out();
-            app.request_terminal_clear();
         }
         KeyCode::Char('0') => {
             app.window.reset();
-            app.request_terminal_clear();
         }
         KeyCode::Char('/') => {
             app.ui_state.proxies.search_active = !app.ui_state.proxies.search_active

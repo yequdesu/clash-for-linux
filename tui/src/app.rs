@@ -140,10 +140,6 @@ impl App {
         }
     }
 
-    pub(crate) fn request_terminal_clear(&mut self) {
-        self.force_terminal_clear = true;
-    }
-
     pub(crate) fn reveal_command_output(&mut self) {
         self.ui_state.command_output.scroll = 0;
         self.ui_state.command_output.hidden = false;
@@ -151,7 +147,6 @@ impl App {
 
     pub(crate) fn close_command_output(&mut self) {
         self.ui_state.command_output.hidden = true;
-        self.request_terminal_clear();
     }
 
     pub(crate) fn command_output_visible(&self) -> bool {

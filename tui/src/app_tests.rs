@@ -29,7 +29,7 @@ use crate::ui::pages::traffic::{
     traffic_line_chart_lines, traffic_locked_bucket_lines, traffic_status_lines,
     traffic_window_bounds,
 };
-use crossterm::event::{MouseButton, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use std::sync::mpsc;
 
@@ -113,6 +113,28 @@ fn startup_default_page_prefers_subscriptions_until_profiles_exist() {
     assert_eq!(initial_tab_for_profiles(0, "traffic"), Tab::Traffic);
     assert_eq!(initial_tab_for_profiles(3, "network"), Tab::Network);
     assert_eq!(initial_tab_for_profiles(3, "bogus"), Tab::Proxies);
+}
+
+#[test]
+fn window_move_and_zoom_keep_terminal_diff_cache() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.force_terminal_clear = false;
+
+    crate::ui::controllers::key_router::handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL),
+    );
+    crate::ui::controllers::key_router::handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('+'), KeyModifiers::NONE),
+    );
+    crate::ui::controllers::key_router::handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('-'), KeyModifiers::NONE),
+    );
+
+    assert!(!app.force_terminal_clear);
 }
 
 #[test]

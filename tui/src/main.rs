@@ -87,7 +87,7 @@ fn run(
         match handler.next() {
             Ok(Event::Key(key)) => ui::controllers::key_router::handle_key_event(app, key),
             Ok(Event::Mouse(mouse)) => app.handle_mouse_event(mouse.kind, mouse.column, mouse.row),
-            Ok(Event::Init) => app.request_terminal_clear(),
+            Ok(Event::Init) => {}
             Ok(Event::Tick) => update::on_tick(app),
             Err(e) => app.error_msg = Some(e.to_string()),
         }
