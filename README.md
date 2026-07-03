@@ -76,10 +76,16 @@ bash install.sh --with-tui
 For a release candidate, install from the explicit tag instead of `latest`:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/yequdesu/clash-for-linux/v0.2.0-rc.4/install.sh
+TAG=v0.2.0-rc.5
+curl -fL --connect-timeout 10 --max-time 120 \
+  -o install.sh \
+  "https://gh-proxy.org/https://raw.githubusercontent.com/yequdesu/clash-for-linux/${TAG}/install.sh"
 chmod +x install.sh
-CLASHCTL_RELEASE_BASE_URL="https://github.com/yequdesu/clash-for-linux/releases/download/v0.2.0-rc.4" bash install.sh --with-tui
+CLASHCTL_RELEASE_TAG="$TAG" bash install.sh --with-tui
 ```
+
+`install.sh` tries GitHub directly first, then mirrors. Override mirrors with
+`CLASHCTL_GITHUB_MIRRORS="https://gh-proxy.org/ https://mirror.example/{url}"`.
 
 Common flow:
 

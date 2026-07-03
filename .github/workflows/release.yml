@@ -103,9 +103,12 @@ jobs:
             Release candidates are validation builds. Install them with an explicit release URL:
 
             ```bash
-            curl -fsSLO https://raw.githubusercontent.com/yequdesu/clash-for-linux/${{ github.ref_name }}/install.sh
+            TAG=${{ github.ref_name }}
+            curl -fL --connect-timeout 10 --max-time 120 \
+              -o install.sh \
+              "https://gh-proxy.org/https://raw.githubusercontent.com/yequdesu/clash-for-linux/${TAG}/install.sh"
             chmod +x install.sh
-            CLASHCTL_RELEASE_BASE_URL="https://github.com/yequdesu/clash-for-linux/releases/download/${{ github.ref_name }}" bash install.sh --with-tui
+            CLASHCTL_RELEASE_TAG="$TAG" bash install.sh --with-tui
             ```
 
             Uploaded assets include linux amd64/arm64 tarballs and SHA256SUMS.

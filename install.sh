@@ -203,22 +203,67 @@ done
 rm -f "$REAL_HOME/.config/fish/conf.d/clashctl.fish" 2>/dev/null || true
 
 # ═══════════════════════════════════════════════
-#  Mirror fallback — try direct GitHub first, then gh-proxy.org
+#  GitHub download fallback
 # ═══════════════════════════════════════════════
+_curl_download() {
+    local url="$1"
+    local output="$2"
+    curl -fL \
+        --connect-timeout "${CLASHCTL_DOWNLOAD_CONNECT_TIMEOUT:-10}" \
+        --max-time "${CLASHCTL_DOWNLOAD_MAX_TIME:-300}" \
+        --progress-bar \
+        "$url" -o "$output"
+}
+
+_mirror_url() {
+    local mirror="$1"
+    local raw_url="$2"
+    case "$mirror" in
+        *"{url}"*) printf '%s\n' "${mirror//\{url\}/$raw_url}" ;;
+        */) printf '%s%s\n' "$mirror" "$raw_url" ;;
+        *) printf '%s/%s\n' "$mirror" "$raw_url" ;;
+    esac
+}
+
 _gh_download() {
     local raw_url="$1"
     local output="$2"
     local desc="$3"
+    local mirror mirror_url mirrors
     _log_info "downloading ${desc}..."
-    if curl -fSL --progress-bar "$raw_url" -o "$output" 2>/dev/null; then
-        return 0
+
+    if [ "${CLASHCTL_GITHUB_DIRECT:-true}" != "false" ]; then
+        if _curl_download "$raw_url" "$output"; then
+            return 0
+        fi
+        _log_info "direct GitHub download failed, trying mirrors..."
     fi
-    _log_info "direct GitHub failed, trying gh-proxy.org..."
-    if curl -fSL --progress-bar "https://gh-proxy.org/${raw_url}" -o "$output"; then
-        return 0
-    fi
+
+    mirrors="${CLASHCTL_GITHUB_MIRRORS:-${CLASHCTL_GITHUB_MIRROR:-https://gh-proxy.org/}}"
+    mirrors="${mirrors//,/ }"
+    for mirror in $mirrors; do
+        [ -n "$mirror" ] || continue
+        mirror_url="$(_mirror_url "$mirror" "$raw_url")"
+        _log_info "trying mirror: ${mirror}"
+        if _curl_download "$mirror_url" "$output"; then
+            return 0
+        fi
+    done
+
     _log_warn "${desc} download failed"
     return 1
+}
+
+_release_base_url() {
+    if [ -n "${CLASHCTL_RELEASE_BASE_URL:-}" ]; then
+        printf '%s\n' "$CLASHCTL_RELEASE_BASE_URL"
+        return 0
+    fi
+    if [ -n "${CLASHCTL_RELEASE_TAG:-}" ]; then
+        printf 'https://github.com/yequdesu/clash-for-linux/releases/download/%s\n' "$CLASHCTL_RELEASE_TAG"
+        return 0
+    fi
+    printf '%s\n' 'https://github.com/yequdesu/clash-for-linux/releases/latest/download'
 }
 
 # ═══════════════════════════════════════════════
@@ -396,7 +441,8 @@ _install_release_artifacts() {
         return 1
     fi
 
-    local base="${CLASHCTL_RELEASE_BASE_URL:-https://github.com/yequdesu/clash-for-linux/releases/latest/download}"
+    local base
+    base="$(_release_base_url)"
     local artifact="clash-for-linux-${arch}.tar.gz"
     local tmpdir
     tmpdir="$(mktemp -d)"
