@@ -331,17 +331,27 @@ _download_yq() {
 #  Function: download geodata databases
 # ═══════════════════════════════════════════════
 _download_geodata() {
-    local geover="${VERSION_GEODATA:-20250101}"
-    local raw_base="https://github.com/MetaCubeX/meta-rules-dat/releases/download/${geover}"
+    local geover="${VERSION_GEODATA:-latest}"
+    local raw_base="${CLASHCTL_GEODATA_BASE_URL:-https://github.com/MetaCubeX/meta-rules-dat/releases/download/${geover}}"
     local dest="${CLASH_BASE_DIR}/resources"
+    local tmpdir
+    tmpdir="$(mktemp -d)"
 
     for f in Country.mmdb geosite.dat geoip.dat; do
         if [ -f "${dest}/${f}" ]; then
             _log_info "geodata ${f} already exists, skipping"
             continue
         fi
-        _gh_download "${raw_base}/${f}" "${dest}/${f}" "${f}" || true
+        if ! _gh_download "${raw_base}/${f}" "${tmpdir}/${f}" "${f}"; then
+            rm -rf "$tmpdir"
+            _log_fatal "geodata download failed: ${f}. Set CLASHCTL_GITHUB_MIRRORS to a reachable GitHub mirror, then rerun with --force."
+        fi
     done
+    for f in Country.mmdb geosite.dat geoip.dat; do
+        [ -f "${tmpdir}/${f}" ] || continue
+        _sudo install -D -m 0644 "${tmpdir}/${f}" "${dest}/${f}"
+    done
+    rm -rf "$tmpdir"
 }
 
 _json_escape() {
@@ -373,7 +383,7 @@ _write_install_state() {
     local mihomo_url="https://github.com/MetaCubeX/mihomo/releases/download/${mihomo_ver}/${mihomo_asset}"
     local yq_ver="${VERSION_YQ:-v4.49.2}"
     local yq_url="https://github.com/mikefarah/yq/releases/download/${yq_ver}/yq_linux_$(_yq_arch)"
-    local geodata_ver="${VERSION_GEODATA:-20250101}"
+    local geodata_ver="${VERSION_GEODATA:-latest}"
     local geodata_url="https://github.com/MetaCubeX/meta-rules-dat/releases/download/${geodata_ver}"
 
     cat > "$tmp" << STATE
@@ -721,6 +731,7 @@ INIT_TYPE=$INIT_TYPE
 URL_GH_PROXY=${URL_GH_PROXY:-https://gh-proxy.org}
 VERSION_MIHOMO=${VERSION_MIHOMO:-v1.19.17}
 VERSION_YQ=${VERSION_YQ:-v4.49.2}
+VERSION_GEODATA=${VERSION_GEODATA:-latest}
 VERSION_SUBCONVERTER=${VERSION_SUBCONVERTER:-v0.9.0}
 EOF
             ;;

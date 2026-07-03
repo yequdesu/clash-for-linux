@@ -144,6 +144,9 @@ chmod 755 "$DIST_DIR/clashctl-linux-${ARCH}" "$DIST_DIR/clash-tui-linux-${ARCH}"
 tar -C "$DIST_DIR" -czf "$RELEASE_DIR/clash-for-linux-${ARCH}.tar.gz" \
     "clashctl-linux-${ARCH}" "clash-tui-linux-${ARCH}"
 ( cd "$RELEASE_DIR" && sha256sum "clash-for-linux-${ARCH}.tar.gz" > SHA256SUMS )
+printf 'smoke\n' > "$RELEASE_DIR/Country.mmdb"
+printf 'smoke\n' > "$RELEASE_DIR/geosite.dat"
+printf 'smoke\n' > "$RELEASE_DIR/geoip.dat"
 
 PORT="$(free_port)"
 python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$RELEASE_DIR" > "$WORK_DIR/http.log" 2>&1 &
@@ -156,9 +159,9 @@ rm -rf "$CLASH_BASE_DIR"
 sudo_cmd rm -f /usr/local/bin/clashctl /usr/local/bin/clash-tui /usr/local/bin/"$KERNEL_NAME" /usr/local/bin/yq
 seed_fake_kernel
 seed_fake_yq
-seed_fake_resources
 
 export CLASHCTL_RELEASE_BASE_URL="http://127.0.0.1:${PORT}"
+export CLASHCTL_GEODATA_BASE_URL="http://127.0.0.1:${PORT}"
 unset CLASHCTL_SKIP_RELEASE
 
 log "running standalone install.sh through release artifact path"
@@ -186,6 +189,10 @@ for name in ("clashctl", "clash_tui"):
     if component.get("installed") is not True:
         raise SystemExit(f"{name} installed flag not true")
 PY
+
+for f in Country.mmdb geosite.dat geoip.dat; do
+    test -f "$CLASH_BASE_DIR/resources/$f" || fail "geodata file missing after standalone install: $f"
+done
 
 log "running uninstall cleanup"
 printf 'n\nn\n' | bash "$ROOT_DIR/uninstall.sh"
