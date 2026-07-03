@@ -134,7 +134,7 @@ DIST_DIR="$WORK_DIR/dist"
 mkdir -p "$RELEASE_DIR" "$DIST_DIR"
 
 log "building release artifact for ${ARCH}"
-GOOS=linux GOARCH="$ARCH" go build -trimpath -o "$DIST_DIR/clashctl-linux-${ARCH}" ./cmd/clashctl
+GOOS=linux GOARCH="$ARCH" go build -trimpath -buildvcs=false -o "$DIST_DIR/clashctl-linux-${ARCH}" ./cmd/clashctl
 cat > "$DIST_DIR/clash-tui-linux-${ARCH}" <<'TUI'
 #!/usr/bin/env bash
 echo "clash-tui smoke artifact"

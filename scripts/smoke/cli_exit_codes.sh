@@ -55,7 +55,7 @@ export SERVICE_NAME="${SERVICE_NAME:-clashctl}"
 export INIT_TYPE="${INIT_TYPE:-nohup}"
 
 log "building clashctl"
-go build -trimpath -o "$BIN" ./cmd/clashctl
+go build -trimpath -buildvcs=false -o "$BIN" ./cmd/clashctl
 
 log "checking parent commands"
 seed_base

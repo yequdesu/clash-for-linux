@@ -100,7 +100,7 @@ require_cmd bash
 require_cmd install
 
 log "building local clashctl"
-go build -trimpath -o /usr/local/bin/clashctl ./cmd/clashctl
+go build -trimpath -buildvcs=false -o /usr/local/bin/clashctl ./cmd/clashctl
 
 log "seeding fake kernel/yq/geodata"
 rm -rf "$CLASH_BASE_DIR"

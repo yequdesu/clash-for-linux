@@ -26,7 +26,15 @@ sudo_cmd() {
     if [ "$(id -u)" -eq 0 ]; then
         "$@"
     else
-        sudo "$@"
+        sudo env \
+            CLASH_BASE_DIR="$CLASH_BASE_DIR" \
+            KERNEL_NAME="$KERNEL_NAME" \
+            SERVICE_NAME="$SERVICE_NAME" \
+            INIT_TYPE="$INIT_TYPE" \
+            CLASH_INIT_TYPE="$CLASH_INIT_TYPE" \
+            CLASHCTL_SKIP_RELEASE="$CLASHCTL_SKIP_RELEASE" \
+            VERSION_GEODATA="$VERSION_GEODATA" \
+            "$@"
     fi
 }
 
@@ -217,7 +225,7 @@ fi
 
 cleanup
 log "building local clashctl"
-go build -trimpath -o /tmp/clashctl-systemd-smoke ./cmd/clashctl
+go build -trimpath -buildvcs=false -o /tmp/clashctl-systemd-smoke ./cmd/clashctl
 sudo_cmd install -D /tmp/clashctl-systemd-smoke /usr/local/bin/clashctl
 rm -f /tmp/clashctl-systemd-smoke
 
