@@ -92,6 +92,7 @@ pub(crate) struct SubscriptionsPageState {
 #[derive(Debug, Default)]
 pub(crate) struct CommandOutputWindowState {
     pub scroll: usize,
+    pub hidden: bool,
 }
 
 #[derive(Debug)]

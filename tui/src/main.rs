@@ -78,13 +78,17 @@ fn run(
             update::apply_data_event(app, data_event);
         }
 
+        if app.force_terminal_clear {
+            terminal.clear()?;
+            app.force_terminal_clear = false;
+        }
         terminal.draw(|frame| ui::app_shell::render(frame, app))?;
 
         match handler.next() {
             Ok(Event::Key(key)) => ui::controllers::key_router::handle_key_event(app, key),
             Ok(Event::Mouse(mouse)) => app.handle_mouse_event(mouse.kind, mouse.column, mouse.row),
+            Ok(Event::Init) => app.request_terminal_clear(),
             Ok(Event::Tick) => update::on_tick(app),
-            Ok(_) => {}
             Err(e) => app.error_msg = Some(e.to_string()),
         }
 

@@ -17,6 +17,7 @@ pub(crate) use crate::ui::utils::*;
 
 pub struct App {
     pub should_quit: bool,
+    pub force_terminal_clear: bool,
     pub show_help: bool,
     pub error_msg: Option<String>,
     pub status_msg: Option<String>,
@@ -88,6 +89,7 @@ impl App {
             TrafficDimension::from_setting_key(&ui_settings.traffic_default_dimension);
         Self {
             should_quit: false,
+            force_terminal_clear: true,
             show_help: false,
             error_msg: None,
             status_msg: None,
@@ -135,6 +137,15 @@ impl App {
             rt,
             data_tx,
         }
+    }
+
+    pub(crate) fn request_terminal_clear(&mut self) {
+        self.force_terminal_clear = true;
+    }
+
+    pub(crate) fn reveal_command_output(&mut self) {
+        self.ui_state.command_output.scroll = 0;
+        self.ui_state.command_output.hidden = false;
     }
 }
 

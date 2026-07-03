@@ -8,8 +8,12 @@ use ratatui::Frame;
 
 use crate::i18n::Msg;
 use crate::mouse::HitboxAction;
+use crate::ui::components::action_bar::action_button_width;
 
 pub(crate) fn render_command_output_window(frame: &mut Frame, area: Rect, app: &mut App) {
+    if app.ui_state.command_output.hidden {
+        return;
+    }
     let Some((page, output)) = active_output(app) else {
         return;
     };
@@ -40,6 +44,7 @@ pub(crate) fn render_command_output_window(frame: &mut Frame, area: Rect, app: &
         horizontal: 2,
     });
     frame.render_widget(block, popup);
+    render_close_button(frame, popup, app);
     fill_area(frame, inner, CLASH_THEME.bg);
 
     let visible_height = inner.height as usize;
@@ -63,6 +68,36 @@ pub(crate) fn render_command_output_window(frame: &mut Frame, area: Rect, app: &
     frame.render_widget(
         Paragraph::new(lines).style(Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.bg)),
         inner,
+    );
+}
+
+fn render_close_button(frame: &mut Frame, popup: Rect, app: &mut App) {
+    let label = app.t(Msg::CommonClose);
+    let width = action_button_width(label);
+    if popup.width <= width.saturating_add(4) {
+        return;
+    }
+    let rect = Rect::new(
+        popup
+            .x
+            .saturating_add(popup.width)
+            .saturating_sub(width)
+            .saturating_sub(2),
+        popup.y,
+        width,
+        1,
+    );
+    app.ui_state
+        .hitboxes
+        .register(rect, HitboxAction::CloseCommandOutput);
+    frame.render_widget(
+        Paragraph::new(format!(" {} ", label)).style(
+            Style::default()
+                .fg(CLASH_THEME.bg)
+                .bg(CLASH_THEME.warning)
+                .bold(),
+        ),
+        rect,
     );
 }
 

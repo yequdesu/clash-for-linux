@@ -104,10 +104,22 @@ fn handle_control_key(app: &mut App, code: KeyCode) {
                 app.open_command_palette();
             }
         }
-        KeyCode::Up => app.window.move_by(0, -1),
-        KeyCode::Down => app.window.move_by(0, 1),
-        KeyCode::Left => app.window.move_by(-2, 0),
-        KeyCode::Right => app.window.move_by(2, 0),
+        KeyCode::Up => {
+            app.window.move_by(0, -1);
+            app.request_terminal_clear();
+        }
+        KeyCode::Down => {
+            app.window.move_by(0, 1);
+            app.request_terminal_clear();
+        }
+        KeyCode::Left => {
+            app.window.move_by(-2, 0);
+            app.request_terminal_clear();
+        }
+        KeyCode::Right => {
+            app.window.move_by(2, 0);
+            app.request_terminal_clear();
+        }
         _ => {}
     }
 }
@@ -140,7 +152,9 @@ fn handle_page_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Esc => {
-            if app.ui_state.proxies.node_picker_open {
+            if command_output_visible(app) {
+                app.ui_state.command_output.hidden = true;
+            } else if app.ui_state.proxies.node_picker_open {
                 app.close_node_picker();
             } else {
                 app.should_quit = true;
@@ -164,9 +178,18 @@ fn handle_page_key(app: &mut App, key: KeyEvent) {
                 app.refresh_traffic();
             }
         }
-        KeyCode::Char('=') | KeyCode::Char('+') => app.window.zoom_in(),
-        KeyCode::Char('-') => app.window.zoom_out(),
-        KeyCode::Char('0') => app.window.reset(),
+        KeyCode::Char('=') | KeyCode::Char('+') => {
+            app.window.zoom_in();
+            app.request_terminal_clear();
+        }
+        KeyCode::Char('-') => {
+            app.window.zoom_out();
+            app.request_terminal_clear();
+        }
+        KeyCode::Char('0') => {
+            app.window.reset();
+            app.request_terminal_clear();
+        }
         KeyCode::Char('/') => {
             app.ui_state.proxies.search_active = !app.ui_state.proxies.search_active
         }
@@ -464,5 +487,18 @@ fn handle_enter_key(app: &mut App, key: KeyEvent) {
             app.run_network_action(NetworkAction::Start);
         }
         _ => {}
+    }
+}
+
+fn command_output_visible(app: &App) -> bool {
+    if app.ui_state.command_output.hidden {
+        return false;
+    }
+    match app.ui_state.active_page {
+        Tab::Subscriptions => !app.ui_state.subscriptions.output.is_empty(),
+        Tab::Traffic => !app.ui_state.traffic.output.is_empty(),
+        Tab::Network => !app.network_output.is_empty(),
+        Tab::Settings => !app.ui_state.settings.output.is_empty(),
+        _ => false,
     }
 }

@@ -219,6 +219,9 @@ impl App {
             | HitboxAction::ScrollTrafficRows
             | HitboxAction::ScrollHelp
             | HitboxAction::ScrollCommandOutput => {}
+            HitboxAction::CloseCommandOutput => {
+                self.ui_state.command_output.hidden = true;
+            }
         }
     }
 
