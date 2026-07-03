@@ -73,17 +73,20 @@ impl App {
         let target = nodes[self.ui_state.proxies.selected_node_idx.min(nodes.len() - 1)].clone();
         let api = self.api.clone();
         let tx = self.data_tx.clone();
+        let event_group = group_name.clone();
+        let event_target = target.clone();
+        let status_target = target.clone();
         self.rt.spawn(async move {
             let result = api.switch_proxy(&group_name, &target).await;
             let switched = result.is_ok();
-            let _ = tx.send(DataEvent::SwitchResult(result));
             if switched {
                 if let Ok(delay) = api.test_delay(&target).await {
                     let _ = tx.send(DataEvent::Delay(target, delay));
                 }
             }
+            let _ = tx.send(DataEvent::SwitchResult(event_group, event_target, result));
         });
-        self.ui_state.proxies.node_picker_open = false;
+        self.status_msg = Some(format!("switching node: {}", status_target));
     }
 
     pub fn toggle_sort(&mut self) {
@@ -121,6 +124,21 @@ impl App {
                     let _ = tx.send(DataEvent::Delay(name, delay));
                 }
             });
+        }
+    }
+
+    pub(crate) fn mark_proxy_group_current(&mut self, group: &str, target: &str) {
+        if let Some(info) = self.proxies.get_mut(group) {
+            info.now = Some(target.to_string());
+        }
+        for (name, current) in &mut self.proxy_groups {
+            if name == group {
+                *current = target.to_string();
+            }
+        }
+        let nodes = self.selected_proxy_nodes();
+        if let Some(idx) = nodes.iter().position(|node| node == target) {
+            self.ui_state.proxies.selected_node_idx = idx;
         }
     }
 

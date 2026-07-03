@@ -140,12 +140,13 @@ impl App {
             DataEvent::Delay(name, delay) => {
                 self.delays.insert(name, delay);
             }
-            DataEvent::SwitchResult(Ok(())) => {
+            DataEvent::SwitchResult(group, target, Ok(())) => {
                 self.error_msg = None;
                 self.status_msg = Some("proxy switched".into());
+                self.mark_proxy_group_current(&group, &target);
                 self.refresh_data();
             }
-            DataEvent::SwitchResult(Err(e)) => {
+            DataEvent::SwitchResult(_group, _target, Err(e)) => {
                 self.error_msg = Some(format!("Switch failed: {}", e));
             }
             DataEvent::ModeResult(Ok(mode)) => {

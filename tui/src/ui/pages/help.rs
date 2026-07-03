@@ -9,6 +9,12 @@ use ratatui::Frame;
 use crate::action_registry::{self, ActionDanger};
 use crate::i18n::Msg;
 use crate::mouse::HitboxAction;
+use crate::ui::components::action_bar::display_width;
+
+const HELP_KEY_WIDTH: u16 = 17;
+const HELP_PAGE_WIDTH: u16 = 16;
+const HELP_ACTION_WIDTH: u16 = 30;
+const HELP_RISK_WIDTH: u16 = 11;
 
 pub(crate) fn render_help(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
@@ -30,54 +36,69 @@ pub(crate) fn render_help(frame: &mut Frame, area: Rect, app: &mut App) {
         Line::from(""),
         Line::from(vec![
             Span::styled(
-                format!("  {:<16}", app.t(Msg::HelpKey)),
+                help_cell(app.t(Msg::HelpKey), HELP_KEY_WIDTH),
                 CLASH_THEME.primary,
             ),
-            Span::styled(format!("{:<15}", app.t(Msg::HelpPage)), CLASH_THEME.primary),
             Span::styled(
-                format!("{:<31}", app.t(Msg::HelpAction)),
+                help_cell(app.t(Msg::HelpPage), HELP_PAGE_WIDTH),
                 CLASH_THEME.primary,
             ),
-            Span::styled(format!("{:<11}", app.t(Msg::HelpRisk)), CLASH_THEME.primary),
+            Span::styled(
+                help_cell(app.t(Msg::HelpAction), HELP_ACTION_WIDTH),
+                CLASH_THEME.primary,
+            ),
+            Span::styled(
+                help_cell(app.t(Msg::HelpRisk), HELP_RISK_WIDTH),
+                CLASH_THEME.primary,
+            ),
             Span::styled(app.t(Msg::HelpDescription), CLASH_THEME.primary),
         ]),
         Line::from(vec![
-            Span::styled("  Tab/1-8        ", CLASH_THEME.primary),
+            Span::styled(help_cell("Tab/1-8", HELP_KEY_WIDTH), CLASH_THEME.primary),
             Span::styled(
-                format!("{:<15}", app.t(Msg::CommonGlobal)),
+                help_cell(app.t(Msg::CommonGlobal), HELP_PAGE_WIDTH),
                 CLASH_THEME.muted,
             ),
             Span::styled(
-                format!("{:<31}", app.t(Msg::HelpSwitchTabs)),
+                help_cell(app.t(Msg::HelpSwitchTabs), HELP_ACTION_WIDTH),
                 CLASH_THEME.text,
             ),
-            Span::styled(format!("{:<11}", app.t(Msg::CommonSafe)), CLASH_THEME.text),
+            Span::styled(
+                help_cell(app.t(Msg::CommonSafe), HELP_RISK_WIDTH),
+                CLASH_THEME.text,
+            ),
             Span::styled(app.t(Msg::HelpSwitchTabs), CLASH_THEME.text),
         ]),
         Line::from(vec![
-            Span::styled("  r/q/?           ", CLASH_THEME.primary),
+            Span::styled(help_cell("r/q/?", HELP_KEY_WIDTH), CLASH_THEME.primary),
             Span::styled(
-                format!("{:<15}", app.t(Msg::CommonGlobal)),
+                help_cell(app.t(Msg::CommonGlobal), HELP_PAGE_WIDTH),
                 CLASH_THEME.muted,
             ),
             Span::styled(
-                format!("{:<31}", app.t(Msg::HelpRefreshQuitHelp)),
+                help_cell(app.t(Msg::HelpRefreshQuitHelp), HELP_ACTION_WIDTH),
                 CLASH_THEME.text,
             ),
-            Span::styled(format!("{:<11}", app.t(Msg::CommonSafe)), CLASH_THEME.text),
+            Span::styled(
+                help_cell(app.t(Msg::CommonSafe), HELP_RISK_WIDTH),
+                CLASH_THEME.text,
+            ),
             Span::styled(app.t(Msg::HelpRefreshQuitHelp), CLASH_THEME.text),
         ]),
         Line::from(vec![
-            Span::styled("  j/k/↑↓         ", CLASH_THEME.primary),
+            Span::styled(help_cell("j/k/↑↓", HELP_KEY_WIDTH), CLASH_THEME.primary),
             Span::styled(
-                format!("{:<15}", app.t(Msg::CommonGlobal)),
+                help_cell(app.t(Msg::CommonGlobal), HELP_PAGE_WIDTH),
                 CLASH_THEME.muted,
             ),
             Span::styled(
-                format!("{:<31}", app.t(Msg::HelpNavigateLists)),
+                help_cell(app.t(Msg::HelpNavigateLists), HELP_ACTION_WIDTH),
                 CLASH_THEME.text,
             ),
-            Span::styled(format!("{:<11}", app.t(Msg::CommonSafe)), CLASH_THEME.text),
+            Span::styled(
+                help_cell(app.t(Msg::CommonSafe), HELP_RISK_WIDTH),
+                CLASH_THEME.text,
+            ),
             Span::styled(app.t(Msg::HelpNavigateLists), CLASH_THEME.text),
         ]),
     ];
@@ -122,21 +143,54 @@ pub(crate) fn action_help_line(app: &App, spec: &action_registry::ActionSpec) ->
     };
     Line::from(vec![
         Span::styled(
-            format!("  {:<14}", trunc_str(spec.shortcut, 14)),
+            help_cell(spec.shortcut, HELP_KEY_WIDTH),
             CLASH_THEME.primary,
         ),
-        Span::styled(format!("{:<15}", trunc_str(page, 14)), CLASH_THEME.muted),
-        Span::styled(format!("{:<31}", trunc_str(label, 30)), CLASH_THEME.text),
+        Span::styled(help_cell(page, HELP_PAGE_WIDTH), CLASH_THEME.muted),
+        Span::styled(help_cell(&label, HELP_ACTION_WIDTH), CLASH_THEME.text),
         Span::styled(
-            format!("{:<11}", app.action_danger_label(spec.danger)),
+            help_cell(app.action_danger_label(spec.danger), HELP_RISK_WIDTH),
             danger_style,
         ),
         Span::styled(
-            trunc_str(
+            fit_help_width(
                 &format!("{} · {}", description, spec.executor.command()),
                 72,
             ),
             CLASH_THEME.text,
         ),
     ])
+}
+
+fn help_cell(value: &str, width: u16) -> String {
+    let mut out = fit_help_width(value, width.saturating_sub(1));
+    let used = display_width(&out);
+    if used < width {
+        out.push_str(&" ".repeat((width - used) as usize));
+    }
+    out
+}
+
+fn fit_help_width(value: &str, width: u16) -> String {
+    if display_width(value) <= width {
+        return value.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    if width == 1 {
+        return "…".into();
+    }
+    let keep_width = width - 1;
+    let mut out = String::new();
+    for ch in value.chars() {
+        let mut next = out.clone();
+        next.push(ch);
+        if display_width(&next) > keep_width {
+            break;
+        }
+        out = next;
+    }
+    out.push('…');
+    out
 }

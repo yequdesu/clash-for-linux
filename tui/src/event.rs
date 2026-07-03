@@ -19,7 +19,7 @@ pub enum DataEvent {
     Logs(Result<Vec<api::LogEntry>, String>),
     Version(Result<api::KernelInfo, String>),
     Delay(String, u64),
-    SwitchResult(Result<(), String>),
+    SwitchResult(String, String, Result<(), String>),
     ModeResult(Result<String, String>),
     SubscriptionResult(Result<String, String>),
     SubscriptionOutputResult(String, Result<String, String>),

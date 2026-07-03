@@ -4,6 +4,7 @@ use std::fs;
 use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 
 use crate::config;
 
@@ -602,13 +603,30 @@ impl ApiClient {
     pub async fn get_logs(&self, level: &str) -> Result<Vec<LogEntry>, String> {
         let level = urlencoding::encode(level);
         let path = format!("/logs?level={}", level);
-        let resp = self.get(&path).send().await.map_err(|e| e.to_string())?;
-        let raw = Self::checked_text(resp).await?;
-        let result: serde_json::Value = serde_json::from_str(&raw).map_err(|e| format!("{}", e))?;
-        if let Some(logs) = result.get("logs") {
-            return serde_json::from_value(logs.clone()).map_err(|e| e.to_string());
+        let mut resp = self.get(&path).send().await.map_err(|e| e.to_string())?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.map_err(|e| e.to_string())?;
+            return Err(Self::response_error(status, &text));
         }
-        Ok(vec![])
+
+        let mut raw = String::new();
+        let mut logs = Vec::new();
+        for _ in 0..64 {
+            match timeout(Duration::from_millis(250), resp.chunk()).await {
+                Ok(Ok(Some(chunk))) => {
+                    raw.push_str(&String::from_utf8_lossy(&chunk));
+                    if raw.len() >= 65_536 {
+                        break;
+                    }
+                }
+                Ok(Ok(None)) => break,
+                Ok(Err(e)) => return Err(e.to_string()),
+                Err(_) => break,
+            }
+        }
+        collect_logs_from_text(&raw, &mut logs);
+        Ok(logs)
     }
 
     pub async fn close_connection(&self, id: &str) -> Result<(), String> {
@@ -627,9 +645,40 @@ impl ApiClient {
     }
 }
 
+fn collect_logs_from_text(raw: &str, logs: &mut Vec<LogEntry>) {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        append_log_value(value, logs);
+        return;
+    }
+    for line in raw.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+            append_log_value(value, logs);
+        }
+    }
+}
+
+fn append_log_value(value: serde_json::Value, logs: &mut Vec<LogEntry>) {
+    if let Some(batch) = value.get("logs") {
+        if let Ok(mut entries) = serde_json::from_value::<Vec<LogEntry>>(batch.clone()) {
+            logs.append(&mut entries);
+        }
+        return;
+    }
+    if let Ok(entry) = serde_json::from_value::<LogEntry>(value) {
+        logs.push(entry);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{clashctl_bin, sanitize_filename_token, tun_enabled_from_yaml, ApiClient};
+    use super::{
+        clashctl_bin, collect_logs_from_text, sanitize_filename_token, tun_enabled_from_yaml,
+        ApiClient,
+    };
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -672,6 +721,21 @@ tun:
         assert_eq!(sanitize_filename_token("24h"), "24h");
         assert_eq!(sanitize_filename_token("../../route"), "route");
         assert_eq!(sanitize_filename_token(""), "all");
+    }
+
+    #[test]
+    fn collect_logs_supports_batch_and_streaming_json() {
+        let mut logs = Vec::new();
+        collect_logs_from_text(r#"{"logs":[{"type":"info","payload":"batch"}]}"#, &mut logs);
+        collect_logs_from_text(
+            "{\"type\":\"warning\",\"payload\":\"stream one\"}\n{\"type\":\"error\",\"payload\":\"stream two\"}\n",
+            &mut logs,
+        );
+
+        assert_eq!(logs.len(), 3);
+        assert_eq!(logs[0].payload, "batch");
+        assert_eq!(logs[1].level, "warning");
+        assert_eq!(logs[2].payload, "stream two");
     }
 
     fn serve_once(status: &str, body: &str) -> String {

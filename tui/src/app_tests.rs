@@ -1820,7 +1820,25 @@ fn proxy_node_second_click_confirms_selection() {
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
 
-    assert!(!app.ui_state.proxies.node_picker_open);
+    assert!(app.ui_state.proxies.node_picker_open);
+    assert_eq!(app.status_msg.as_deref(), Some("switching node: B"));
+}
+
+#[test]
+fn proxy_switch_result_updates_current_node_locally() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Proxies;
+    app.proxies
+        .insert("Proxy".into(), selector_proxy("A", vec!["A", "B"]));
+    app.proxy_groups = vec![("Proxy".into(), "A".into())];
+    app.open_node_picker();
+
+    app.apply_data_event(DataEvent::SwitchResult("Proxy".into(), "B".into(), Ok(())));
+
+    assert_eq!(app.selected_proxy_current_node(), "B");
+    assert_eq!(app.proxy_groups[0].1, "B");
+    assert_eq!(app.ui_state.proxies.selected_node_idx, 1);
 }
 
 #[test]
