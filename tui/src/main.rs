@@ -5,6 +5,7 @@ mod background;
 mod config;
 mod event;
 mod i18n;
+mod input;
 mod mouse;
 mod settings;
 mod theme;
@@ -24,6 +25,7 @@ use std::sync::mpsc;
 
 use app::App;
 use event::{DataEvent, Event, EventHandler};
+use input::AppInput;
 
 fn main() -> io::Result<()> {
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
@@ -46,11 +48,11 @@ fn main() -> io::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let event_handler = EventHandler::new(50, data_rx);
+    let mut event_handler = EventHandler::new(50, data_rx);
 
     update::refresh_data(&mut app);
 
-    let result = run(&mut terminal, &mut app, &event_handler);
+    let result = run(&mut terminal, &mut app, &mut event_handler);
 
     app.on_shutdown();
     terminal::disable_raw_mode()?;
@@ -71,7 +73,7 @@ fn main() -> io::Result<()> {
 fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
-    handler: &EventHandler,
+    handler: &mut EventHandler,
 ) -> io::Result<()> {
     loop {
         while let Some(data_event) = handler.try_recv_data() {
@@ -85,8 +87,14 @@ fn run(
         terminal.draw(|frame| ui::app_shell::render(frame, app))?;
 
         match handler.next() {
-            Ok(Event::Key(key)) => ui::controllers::key_router::handle_key_event(app, key),
-            Ok(Event::Mouse(mouse)) => app.handle_mouse_event(mouse.kind, mouse.column, mouse.row),
+            Ok(Event::Input(AppInput::Key(key))) => {
+                ui::controllers::key_router::handle_key_event(app, key)
+            }
+            Ok(Event::Input(AppInput::Mouse(mouse))) => app.handle_mouse_event(mouse),
+            Ok(Event::Input(AppInput::Resize { .. })) => {}
+            Ok(Event::Input(AppInput::Paste(text))) => {
+                ui::controllers::key_router::handle_paste(app, &text)
+            }
             Ok(Event::Init) => {}
             Ok(Event::Tick) => update::on_tick(app),
             Err(e) => app.error_msg = Some(e.to_string()),

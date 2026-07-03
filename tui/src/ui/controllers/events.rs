@@ -1,14 +1,12 @@
 use crate::ui::prelude::*;
 
 impl App {
-    pub fn handle_mouse_event(&mut self, kind: crossterm::event::MouseEventKind, x: u16, y: u16) {
-        let action = self.ui_state.hitboxes.action_at(x, y);
-        match kind {
-            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                self.handle_mouse_click(action)
-            }
-            crossterm::event::MouseEventKind::ScrollDown => self.handle_mouse_scroll(action, 3),
-            crossterm::event::MouseEventKind::ScrollUp => self.handle_mouse_scroll(action, -3),
+    pub fn handle_mouse_event(&mut self, mouse: crate::input::AppMouse) {
+        let action = self.ui_state.hitboxes.action_at(mouse.x, mouse.y);
+        match mouse.kind {
+            crate::input::AppMouseKind::LeftDown => self.handle_mouse_click(action),
+            crate::input::AppMouseKind::ScrollDown => self.handle_mouse_scroll(action, 3),
+            crate::input::AppMouseKind::ScrollUp => self.handle_mouse_scroll(action, -3),
             _ => {}
         }
     }

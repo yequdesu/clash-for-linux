@@ -1,14 +1,14 @@
-use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
+use crossterm::event::{self, Event as CrosstermEvent};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::input::{AppInput, InputNormalizer, InputQueue};
 use crate::{api, mouse::SettingsAction};
 
 #[derive(Debug)]
 pub enum Event {
     Init,
-    Key(KeyEvent),
-    Mouse(MouseEvent),
+    Input(AppInput),
     Tick,
 }
 
@@ -34,6 +34,8 @@ pub enum DataEvent {
 pub struct EventHandler {
     tick_rate: Duration,
     data_rx: mpsc::Receiver<DataEvent>,
+    input: InputNormalizer,
+    input_queue: InputQueue,
 }
 
 impl EventHandler {
@@ -41,18 +43,32 @@ impl EventHandler {
         Self {
             tick_rate: Duration::from_millis(tick_rate_ms),
             data_rx,
+            input: InputNormalizer::default(),
+            input_queue: InputQueue::default(),
         }
     }
 
-    pub fn next(&self) -> Result<Event, Box<dyn std::error::Error>> {
+    pub fn next(&mut self) -> Result<Event, Box<dyn std::error::Error>> {
+        if let Some(input) = self.input_queue.pop() {
+            return Ok(Event::Input(input));
+        }
+
         if event::poll(self.tick_rate)? {
-            match event::read()? {
-                CrosstermEvent::Key(key) => Ok(Event::Key(key)),
-                CrosstermEvent::Mouse(mouse) => Ok(Event::Mouse(mouse)),
-                CrosstermEvent::Resize(_, _) => Ok(Event::Init),
-                _ => self.next(),
+            let event = event::read()?;
+            if matches!(
+                event,
+                CrosstermEvent::FocusGained | CrosstermEvent::FocusLost
+            ) {
+                return self.next();
             }
+            self.input.push_crossterm(event, &mut self.input_queue);
+            Ok(self
+                .input_queue
+                .pop()
+                .map(Event::Input)
+                .unwrap_or(Event::Init))
         } else {
+            self.input.on_idle();
             Ok(Event::Tick)
         }
     }

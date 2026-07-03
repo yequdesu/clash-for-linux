@@ -12,6 +12,7 @@ use crate::api::{LogEntry, ProfileEntry, ProxyInfo, TrafficPoint, TrafficStatus}
 use crate::config::Config;
 use crate::event::DataEvent;
 use crate::i18n::Msg;
+use crate::input::{AppKey, AppKeyCode as KeyCode, AppModifiers as KeyModifiers, AppMouse};
 use crate::mouse::{HitboxAction, NetworkAction, SettingsAction, TrafficAction};
 use crate::settings::LanguageSetting;
 use crate::ui::app_shell::register_tab_hitboxes;
@@ -31,7 +32,6 @@ use crate::ui::pages::traffic::{
     traffic_line_chart_lines, traffic_locked_bucket_lines, traffic_status_lines,
     traffic_window_bounds,
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use std::sync::mpsc;
 
@@ -129,15 +129,15 @@ fn window_move_and_zoom_keep_terminal_diff_cache() {
 
     crate::ui::controllers::key_router::handle_key_event(
         &mut app,
-        KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL),
+        AppKey::new(KeyCode::Right, KeyModifiers::CONTROL),
     );
     crate::ui::controllers::key_router::handle_key_event(
         &mut app,
-        KeyEvent::new(KeyCode::Char('+'), KeyModifiers::NONE),
+        AppKey::new(KeyCode::Char('+'), KeyModifiers::NONE),
     );
     crate::ui::controllers::key_router::handle_key_event(
         &mut app,
-        KeyEvent::new(KeyCode::Char('-'), KeyModifiers::NONE),
+        AppKey::new(KeyCode::Char('-'), KeyModifiers::NONE),
     );
 
     assert!(!app.force_terminal_clear);
@@ -292,12 +292,12 @@ fn traffic_chart_mouse_pans_and_locks_time_buckets() {
         HitboxAction::SelectTrafficBucket(12),
     );
 
-    app.handle_mouse_event(MouseEventKind::ScrollDown, 2, 2);
+    app.handle_mouse_event(AppMouse::scroll_down(2, 2));
     assert_eq!(app.ui_state.traffic.window_offset, 3);
-    app.handle_mouse_event(MouseEventKind::ScrollUp, 2, 2);
+    app.handle_mouse_event(AppMouse::scroll_up(2, 2));
     assert_eq!(app.ui_state.traffic.window_offset, 0);
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 20, 2);
+    app.handle_mouse_event(AppMouse::left_down(20, 2));
     assert_eq!(app.ui_state.traffic.locked_bucket, Some(12));
     let locked = traffic_locked_bucket_lines(&app)
         .iter()
@@ -312,7 +312,7 @@ fn traffic_chart_mouse_pans_and_locks_time_buckets() {
     assert!(locked.contains("12:12:00"));
     assert!(locked.contains("conn 12"));
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 2);
+    app.handle_mouse_event(AppMouse::left_down(2, 2));
     assert_eq!(app.ui_state.traffic.locked_bucket, None);
 }
 
@@ -1062,7 +1062,7 @@ fn mouse_selects_settings_prompt_field() {
         HitboxAction::SelectSettingsPromptField(1),
     );
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 1, 1);
+    app.handle_mouse_event(AppMouse::left_down(1, 1));
 
     assert_eq!(app.ui_state.settings.prompt.as_ref().unwrap().active, 1);
     assert_eq!(app.status_msg.as_deref(), Some("editing Set API · Secret"));
@@ -1098,7 +1098,7 @@ fn settings_mouse_config_form_actions_open_prompts() {
         .hitboxes
         .register(Rect::new(0, 1, 10, 1), HitboxAction::BeginConfigSetLan);
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 1, 1);
+    app.handle_mouse_event(AppMouse::left_down(1, 1));
 
     assert_eq!(
         app.ui_state
@@ -1126,7 +1126,7 @@ fn mouse_click_focuses_settings_prompt_value() {
         HitboxAction::RunSettings(SettingsAction::Doctor),
     );
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 1, 1);
+    app.handle_mouse_event(AppMouse::left_down(1, 1));
 
     assert!(app.ui_state.settings.prompt.is_some());
     assert!(app.error_msg.is_none());
@@ -1135,7 +1135,7 @@ fn mouse_click_focuses_settings_prompt_value() {
         Some("editing Update geodata version · Version")
     );
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 1, 2);
+    app.handle_mouse_event(AppMouse::left_down(1, 2));
     assert!(app.ui_state.modals.pending_confirmation.is_none());
     assert_eq!(
         app.ui_state
@@ -1550,7 +1550,7 @@ fn mouse_click_switches_tab_through_hitbox_registry() {
         HitboxAction::SwitchTab(Tab::Connections),
     );
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+    app.handle_mouse_event(AppMouse::left_down(2, 1));
 
     assert_eq!(app.ui_state.active_page, Tab::Connections);
 }
@@ -1599,7 +1599,7 @@ fn mouse_click_selects_subscription_row() {
         .hitboxes
         .register(Rect::new(0, 5, 40, 1), HitboxAction::SelectSubscription(1));
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 5);
+    app.handle_mouse_event(AppMouse::left_down(5, 5));
 
     assert_eq!(app.ui_state.subscriptions.selected_idx, 1);
 }
@@ -1631,7 +1631,7 @@ fn mouse_click_subscription_edit_action_opens_prompt() {
         HitboxAction::EditSubscriptionInterval,
     );
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 1, 5);
+    app.handle_mouse_event(AppMouse::left_down(1, 5));
 
     let prompt = app.ui_state.subscriptions.prompt.as_ref().unwrap();
     assert_eq!(prompt.profile_id, 7);
@@ -1688,7 +1688,7 @@ fn pending_confirmation_blocks_underlying_mouse_actions() {
         .hitboxes
         .register(Rect::new(0, 5, 40, 1), HitboxAction::SelectSubscription(1));
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 5);
+    app.handle_mouse_event(AppMouse::left_down(5, 5));
 
     assert_eq!(app.ui_state.subscriptions.selected_idx, 0);
     assert!(app.ui_state.modals.pending_confirmation.is_some());
@@ -1708,7 +1708,7 @@ fn mouse_prompt_submit_and_cancel_actions_are_dispatched() {
         HitboxAction::SubmitSubscriptionPrompt,
     );
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+    app.handle_mouse_event(AppMouse::left_down(2, 1));
     assert!(app
         .error_msg
         .as_deref()
@@ -1721,7 +1721,7 @@ fn mouse_prompt_submit_and_cancel_actions_are_dispatched() {
         Rect::new(1, 2, 10, 1),
         HitboxAction::CancelSubscriptionPrompt,
     );
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 2);
+    app.handle_mouse_event(AppMouse::left_down(2, 2));
     assert!(app.ui_state.subscriptions.prompt.is_none());
 }
 
@@ -1736,7 +1736,7 @@ fn mouse_selects_subscription_add_form_field() {
         HitboxAction::SelectSubscriptionAddField(3),
     );
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+    app.handle_mouse_event(AppMouse::left_down(2, 1));
 
     assert_eq!(
         app.ui_state.subscriptions.add_form.as_ref().unwrap().active,
@@ -1772,7 +1772,7 @@ fn mouse_selects_subscription_edit_form_field() {
         HitboxAction::SelectSubscriptionAddField(5),
     );
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+    app.handle_mouse_event(AppMouse::left_down(2, 1));
 
     assert_eq!(
         app.ui_state
@@ -1846,7 +1846,7 @@ fn mouse_click_selects_proxy_node_when_picker_is_open() {
         .hitboxes
         .register(Rect::new(1, 1, 20, 1), HitboxAction::SelectProxyNode(2));
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+    app.handle_mouse_event(AppMouse::left_down(2, 1));
 
     assert_eq!(app.ui_state.proxies.selected_node_idx, 2);
 }
@@ -1865,11 +1865,11 @@ fn proxy_group_second_click_opens_node_picker() {
         .hitboxes
         .register(Rect::new(1, 1, 20, 1), HitboxAction::SelectProxy(1));
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+    app.handle_mouse_event(AppMouse::left_down(2, 1));
     assert_eq!(app.ui_state.proxies.selected_idx, 1);
     assert!(!app.ui_state.proxies.node_picker_open);
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+    app.handle_mouse_event(AppMouse::left_down(2, 1));
     assert!(app.ui_state.proxies.node_picker_open);
 }
 
@@ -1886,7 +1886,7 @@ fn proxy_node_second_click_confirms_selection() {
         .hitboxes
         .register(Rect::new(1, 1, 20, 1), HitboxAction::SelectProxyNode(1));
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+    app.handle_mouse_event(AppMouse::left_down(2, 1));
 
     assert!(app.ui_state.proxies.node_picker_open);
     assert_eq!(app.status_msg.as_deref(), Some("switching node: B"));
@@ -1907,7 +1907,7 @@ fn automatic_proxy_node_second_click_tests_without_manual_switch() {
         .hitboxes
         .register(Rect::new(1, 1, 20, 1), HitboxAction::SelectProxyNode(1));
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+    app.handle_mouse_event(AppMouse::left_down(2, 1));
 
     assert_eq!(app.selected_proxy_current_node(), "B");
     assert!(app.delay_pending.contains("B"));
@@ -1967,14 +1967,14 @@ fn node_picker_consumes_navigation_keys() {
 
     crate::ui::controllers::key_router::handle_key_event(
         &mut app,
-        KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+        AppKey::new(KeyCode::Tab, KeyModifiers::NONE),
     );
     assert_eq!(app.ui_state.active_page, Tab::Proxies);
     assert!(app.ui_state.proxies.node_picker_open);
 
     crate::ui::controllers::key_router::handle_key_event(
         &mut app,
-        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        AppKey::new(KeyCode::Esc, KeyModifiers::NONE),
     );
     assert_eq!(app.ui_state.active_page, Tab::Proxies);
     assert!(!app.should_quit);
@@ -2016,7 +2016,7 @@ fn node_picker_blocks_underlying_mouse_actions() {
         .hitboxes
         .register(Rect::new(1, 1, 20, 1), HitboxAction::SelectProxy(1));
 
-    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+    app.handle_mouse_event(AppMouse::left_down(2, 1));
 
     assert_eq!(app.ui_state.proxies.selected_idx, 0);
     assert!(app.ui_state.proxies.node_picker_open);
@@ -2037,9 +2037,9 @@ fn mouse_wheel_scrolls_proxy_node_picker() {
         .hitboxes
         .register(Rect::new(0, 0, 40, 10), HitboxAction::ScrollProxyNodes);
 
-    app.handle_mouse_event(MouseEventKind::ScrollDown, 5, 5);
+    app.handle_mouse_event(AppMouse::scroll_down(5, 5));
     assert_eq!(app.ui_state.proxies.selected_node_idx, 3);
-    app.handle_mouse_event(MouseEventKind::ScrollUp, 5, 5);
+    app.handle_mouse_event(AppMouse::scroll_up(5, 5));
     assert_eq!(app.ui_state.proxies.selected_node_idx, 0);
 }
 
@@ -2053,9 +2053,9 @@ fn mouse_wheel_dispatches_to_registered_scroll_area() {
         .hitboxes
         .register(Rect::new(0, 0, 40, 10), HitboxAction::ScrollLogs);
 
-    app.handle_mouse_event(MouseEventKind::ScrollDown, 5, 5);
+    app.handle_mouse_event(AppMouse::scroll_down(5, 5));
     assert_eq!(app.ui_state.logs.scroll, 3);
-    app.handle_mouse_event(MouseEventKind::ScrollUp, 5, 5);
+    app.handle_mouse_event(AppMouse::scroll_up(5, 5));
     assert_eq!(app.ui_state.logs.scroll, 0);
 }
 
@@ -2099,23 +2099,29 @@ fn log_page_uses_dedicated_search_state() {
 }
 
 #[test]
-fn escape_and_alt_navigation_do_not_leak_to_page_switching() {
+fn escape_and_alt_navigation_do_not_switch_pages() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let mut app = test_app(&rt);
     app.ui_state.active_page = Tab::Logs;
 
     crate::ui::controllers::key_router::handle_key_event(
         &mut app,
-        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        AppKey::new(KeyCode::Esc, KeyModifiers::NONE),
     );
     assert_eq!(app.ui_state.active_page, Tab::Logs);
     assert!(!app.should_quit);
 
     crate::ui::controllers::key_router::handle_key_event(
         &mut app,
-        KeyEvent::new(KeyCode::Left, KeyModifiers::ALT),
+        AppKey::new(KeyCode::Left, KeyModifiers::ALT),
     );
     assert_eq!(app.ui_state.active_page, Tab::Logs);
+
+    crate::ui::controllers::key_router::handle_key_event(
+        &mut app,
+        AppKey::new(KeyCode::Char('2'), KeyModifiers::NONE),
+    );
+    assert_eq!(app.ui_state.active_page, Tab::Proxies);
 }
 
 #[test]

@@ -1,15 +1,10 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-
 use crate::app::{App, SettingsPromptKind, SubscriptionEditField};
+use crate::input::{AppKey, AppKeyCode as KeyCode, AppModifiers as KeyModifiers};
 use crate::mouse::{NetworkAction, SettingsAction, TrafficAction};
 use crate::ui::components::nav::Tab;
 use crate::update;
 
-pub(crate) fn handle_key_event(app: &mut App, key: KeyEvent) {
-    if key.kind != KeyEventKind::Press {
-        return;
-    }
-
+pub(crate) fn handle_key_event(app: &mut App, key: AppKey) {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     if handle_modal_key(app, key, ctrl) {
         return;
@@ -28,7 +23,26 @@ pub(crate) fn handle_key_event(app: &mut App, key: KeyEvent) {
     handle_page_key(app, key);
 }
 
-fn handle_modal_key(app: &mut App, key: KeyEvent, ctrl: bool) -> bool {
+pub(crate) fn handle_paste(app: &mut App, text: &str) {
+    if !text_input_active(app) {
+        return;
+    }
+
+    for c in text.chars().filter(|c| !c.is_control()).take(4096) {
+        handle_key_event(app, AppKey::new(KeyCode::Char(c), KeyModifiers::NONE));
+    }
+}
+
+fn text_input_active(app: &App) -> bool {
+    app.sudo_prompt_active()
+        || app.command_palette_active()
+        || app.ui_state.settings.prompt.is_some()
+        || app.subscription_input_active()
+        || (app.ui_state.active_page == Tab::Logs && app.ui_state.logs.search_active)
+        || (app.ui_state.active_page == Tab::Proxies && app.ui_state.proxies.search_active)
+}
+
+fn handle_modal_key(app: &mut App, key: AppKey, ctrl: bool) -> bool {
     if app.sudo_prompt_active() {
         if !ctrl {
             match key.code {
@@ -175,7 +189,7 @@ fn handle_search_key(app: &mut App, code: KeyCode) -> bool {
     false
 }
 
-fn handle_page_key(app: &mut App, key: KeyEvent) {
+fn handle_page_key(app: &mut App, key: AppKey) {
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Esc => {
