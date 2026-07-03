@@ -11,8 +11,14 @@ const ESC_SEQUENCE_FRAGMENT_LIMIT: u8 = 12;
 #[derive(Debug, Default)]
 pub(crate) struct InputNormalizer {
     esc_fragments_remaining: u8,
-    pending_left_click: Option<(u16, u16)>,
-    left_dragged: bool,
+    pending_left_click: Option<PendingClick>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PendingClick {
+    column: u16,
+    row: u16,
+    dragged: bool,
 }
 
 impl InputNormalizer {
@@ -31,7 +37,6 @@ impl InputNormalizer {
             CrosstermEvent::Resize(cols, rows) => {
                 self.esc_fragments_remaining = 0;
                 self.pending_left_click = None;
-                self.left_dragged = false;
                 queue.push(AppInput::Resize { cols, rows });
             }
             CrosstermEvent::Paste(text) => queue.push(AppInput::Paste(text)),
@@ -41,16 +46,9 @@ impl InputNormalizer {
 
     pub(crate) fn on_idle(&mut self, queue: &mut InputQueue) {
         self.esc_fragments_remaining = 0;
-        if let Some((column, row)) = self.pending_left_click.take() {
-            if !self.left_dragged {
-                queue.push(AppInput::Mouse(AppMouse::new(
-                    AppMouseKind::LeftClick,
-                    column,
-                    row,
-                )));
-            }
+        if let Some(click) = self.pending_left_click.take() {
+            push_pending_click(queue, click);
         }
-        self.left_dragged = false;
     }
 
     fn normalize_key(&mut self, key: KeyEvent) -> Option<AppKey> {
@@ -71,19 +69,23 @@ impl InputNormalizer {
     fn normalize_mouse(&mut self, kind: MouseEventKind, column: u16, row: u16) -> Option<AppMouse> {
         match kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                self.pending_left_click = Some((column, row));
-                self.left_dragged = false;
+                self.pending_left_click = Some(PendingClick {
+                    column,
+                    row,
+                    dragged: false,
+                });
                 None
             }
             MouseEventKind::Drag(MouseButton::Left) => {
-                self.left_dragged = true;
+                if let Some(click) = self.pending_left_click.as_mut() {
+                    click.dragged = true;
+                }
                 None
             }
             MouseEventKind::Up(MouseButton::Left) => {
-                let click = self.pending_left_click == Some((column, row)) && !self.left_dragged;
-                self.pending_left_click = None;
-                self.left_dragged = false;
-                click.then(|| AppMouse::new(AppMouseKind::LeftClick, column, row))
+                let click = self.pending_left_click.take()?;
+                (click.column == column && click.row == row && !click.dragged)
+                    .then(|| AppMouse::new(AppMouseKind::LeftClick, column, row))
             }
             MouseEventKind::ScrollDown => {
                 Some(AppMouse::new(AppMouseKind::ScrollDown, column, row))
@@ -91,7 +93,6 @@ impl InputNormalizer {
             MouseEventKind::ScrollUp => Some(AppMouse::new(AppMouseKind::ScrollUp, column, row)),
             _ => {
                 self.pending_left_click = None;
-                self.left_dragged = false;
                 None
             }
         }
@@ -114,6 +115,16 @@ impl InputNormalizer {
 
         self.esc_fragments_remaining = 0;
         false
+    }
+}
+
+fn push_pending_click(queue: &mut InputQueue, click: PendingClick) {
+    if !click.dragged {
+        queue.push(AppInput::Mouse(AppMouse::new(
+            AppMouseKind::LeftClick,
+            click.column,
+            click.row,
+        )));
     }
 }
 

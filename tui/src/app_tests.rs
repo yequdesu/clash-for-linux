@@ -2023,6 +2023,45 @@ fn node_picker_blocks_underlying_mouse_actions() {
 }
 
 #[test]
+fn node_picker_all_delay_button_is_allowed_through_modal_mouse_gate() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Proxies;
+    app.proxy_groups = vec![("Proxy".into(), "A".into())];
+    app.proxies
+        .insert("Proxy".into(), selector_proxy("A", vec!["A", "B"]));
+    app.open_node_picker();
+    app.ui_state
+        .hitboxes
+        .register(Rect::new(1, 1, 20, 1), HitboxAction::TestAllProxyDelays);
+
+    app.handle_mouse_event(AppMouse::left_down(2, 1));
+
+    assert!(app.delay_pending.contains("A"));
+    assert!(app.delay_pending.contains("B"));
+    assert_eq!(app.status_msg.as_deref(), Some("testing delay: 2 targets"));
+}
+
+#[test]
+fn node_picker_blocks_underlying_scroll_actions() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Proxies;
+    app.proxy_groups = vec![("One".into(), "A".into()), ("Two".into(), "B".into())];
+    app.proxies
+        .insert("One".into(), selector_proxy("A", vec!["A"]));
+    app.open_node_picker();
+    app.ui_state
+        .hitboxes
+        .register(Rect::new(0, 0, 40, 10), HitboxAction::ScrollTrafficRows);
+
+    app.handle_mouse_event(AppMouse::scroll_down(5, 5));
+
+    assert_eq!(app.ui_state.proxies.selected_idx, 0);
+    assert!(app.ui_state.proxies.node_picker_open);
+}
+
+#[test]
 fn mouse_wheel_scrolls_proxy_node_picker() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let mut app = test_app(&rt);

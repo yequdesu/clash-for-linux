@@ -11,54 +11,7 @@ impl App {
     }
 
     pub(crate) fn handle_mouse_click(&mut self, action: Option<HitboxAction>) {
-        if self.ui_state.modals.pending_confirmation.is_some()
-            && !matches!(
-                action,
-                Some(HitboxAction::ConfirmPendingAction) | Some(HitboxAction::CancelPendingAction)
-            )
-        {
-            return;
-        }
-        if self.ui_state.settings.prompt.is_some()
-            && !matches!(
-                action,
-                Some(HitboxAction::FocusSettingsPromptValue)
-                    | Some(HitboxAction::SelectSettingsPromptField(_))
-                    | Some(HitboxAction::SubmitSettingsPrompt)
-                    | Some(HitboxAction::CancelSettingsPrompt)
-            )
-        {
-            return;
-        }
-        if self.ui_state.modals.sudo_prompt.is_some()
-            && !matches!(
-                action,
-                Some(HitboxAction::FocusSudoPromptValue)
-                    | Some(HitboxAction::SubmitSudoPrompt)
-                    | Some(HitboxAction::CancelSudoPrompt)
-            )
-        {
-            return;
-        }
-        if self.subscription_input_active()
-            && !matches!(
-                action,
-                Some(HitboxAction::SubmitSubscriptionPrompt)
-                    | Some(HitboxAction::CancelSubscriptionPrompt)
-                    | Some(HitboxAction::SelectSubscriptionAddField(_))
-            )
-        {
-            return;
-        }
-        if self.ui_state.proxies.node_picker_open
-            && !matches!(
-                action,
-                Some(HitboxAction::SelectProxyNode(_))
-                    | Some(HitboxAction::SwitchSelectedProxyNode)
-                    | Some(HitboxAction::TestSelectedProxyDelay)
-                    | Some(HitboxAction::CloseNodePicker)
-            )
-        {
+        if !self.mouse_click_allowed_by_overlay(action.as_ref()) {
             return;
         }
         if let Some(action) = action {
@@ -232,6 +185,9 @@ impl App {
     }
 
     pub(crate) fn handle_mouse_scroll(&mut self, action: Option<HitboxAction>, amount: i32) {
+        if !self.mouse_scroll_allowed_by_overlay(action.as_ref()) {
+            return;
+        }
         match action {
             Some(HitboxAction::ScrollLogs) => {
                 if amount > 0 {
@@ -294,5 +250,80 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    fn mouse_click_allowed_by_overlay(&self, action: Option<&HitboxAction>) -> bool {
+        if self.command_palette_active() {
+            return false;
+        }
+        if self.ui_state.modals.pending_confirmation.is_some() {
+            return matches!(
+                action,
+                Some(HitboxAction::ConfirmPendingAction) | Some(HitboxAction::CancelPendingAction)
+            );
+        }
+        if self.ui_state.modals.sudo_prompt.is_some() {
+            return matches!(
+                action,
+                Some(
+                    HitboxAction::FocusSudoPromptValue
+                        | HitboxAction::SubmitSudoPrompt
+                        | HitboxAction::CancelSudoPrompt
+                )
+            );
+        }
+        if self.ui_state.settings.prompt.is_some() {
+            return matches!(
+                action,
+                Some(
+                    HitboxAction::FocusSettingsPromptValue
+                        | HitboxAction::SelectSettingsPromptField(_)
+                        | HitboxAction::SubmitSettingsPrompt
+                        | HitboxAction::CancelSettingsPrompt
+                )
+            );
+        }
+        if self.subscription_input_active() {
+            return matches!(
+                action,
+                Some(
+                    HitboxAction::FocusSettingsPromptValue
+                        | HitboxAction::SubmitSubscriptionPrompt
+                        | HitboxAction::CancelSubscriptionPrompt
+                        | HitboxAction::SelectSubscriptionAddField(_)
+                )
+            );
+        }
+        if self.ui_state.proxies.node_picker_open {
+            return matches!(
+                action,
+                Some(
+                    HitboxAction::SelectProxyNode(_)
+                        | HitboxAction::SwitchSelectedProxyNode
+                        | HitboxAction::TestSelectedProxyDelay
+                        | HitboxAction::TestAllProxyDelays
+                        | HitboxAction::CloseNodePicker
+                )
+            );
+        }
+        true
+    }
+
+    fn mouse_scroll_allowed_by_overlay(&self, action: Option<&HitboxAction>) -> bool {
+        if self.command_palette_active()
+            || self.ui_state.modals.pending_confirmation.is_some()
+            || self.ui_state.modals.sudo_prompt.is_some()
+            || self.ui_state.settings.prompt.is_some()
+            || self.subscription_input_active()
+        {
+            return false;
+        }
+        if self.ui_state.proxies.node_picker_open {
+            return matches!(
+                action,
+                Some(HitboxAction::ScrollProxyNodes | HitboxAction::SelectProxyNode(_))
+            );
+        }
+        true
     }
 }
