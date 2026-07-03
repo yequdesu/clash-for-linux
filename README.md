@@ -76,7 +76,7 @@ bash install.sh --with-tui
 For a release candidate, install from the explicit tag instead of `latest`:
 
 ```bash
-TAG=v0.2.0-rc.5
+TAG=v0.2.0-rc.6
 curl -fL --connect-timeout 10 --max-time 120 \
   -o install.sh \
   "https://gh-proxy.org/https://raw.githubusercontent.com/yequdesu/clash-for-linux/${TAG}/install.sh"

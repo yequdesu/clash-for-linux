@@ -131,7 +131,8 @@ ARCH="$(release_arch)"
 WORK_DIR="$(mktemp -d)"
 RELEASE_DIR="$WORK_DIR/release"
 DIST_DIR="$WORK_DIR/dist"
-mkdir -p "$RELEASE_DIR" "$DIST_DIR"
+INSTALL_DIR="$WORK_DIR/standalone-installer"
+mkdir -p "$RELEASE_DIR" "$DIST_DIR" "$INSTALL_DIR"
 
 log "building release artifact for ${ARCH}"
 GOOS=linux GOARCH="$ARCH" go build -trimpath -buildvcs=false -o "$DIST_DIR/clashctl-linux-${ARCH}" ./cmd/clashctl
@@ -160,8 +161,9 @@ seed_fake_resources
 export CLASHCTL_RELEASE_BASE_URL="http://127.0.0.1:${PORT}"
 unset CLASHCTL_SKIP_RELEASE
 
-log "running install.sh through release artifact path"
-bash "$ROOT_DIR/install.sh" --force --with-tui
+log "running standalone install.sh through release artifact path"
+cp "$ROOT_DIR/install.sh" "$INSTALL_DIR/install.sh"
+( cd "$INSTALL_DIR" && bash install.sh --force --with-tui )
 
 test -x /usr/local/bin/clashctl || fail "clashctl was not installed"
 test -x /usr/local/bin/clash-tui || fail "clash-tui was not installed"

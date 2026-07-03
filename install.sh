@@ -618,8 +618,127 @@ _copy_resource_if_missing() {
     local src="$1"
     local dst="$2"
     if $RESET_CONFIG || [ ! -e "$dst" ]; then
-        /bin/cp -f "$src" "$dst" || _log_fatal "copy resource failed: $src -> $dst"
+        if [ -f "$src" ]; then
+            /bin/cp -f "$src" "$dst" || _log_fatal "copy resource failed: $src -> $dst"
+        else
+            return 1
+        fi
     fi
+}
+
+_write_resource_if_missing() {
+    local dst="$1"
+    local kind="$2"
+    if ! $RESET_CONFIG && [ -e "$dst" ]; then
+        return 0
+    fi
+
+    case "$kind" in
+        mixin)
+            cat > "$dst" <<'EOF'
+# Linux CLI&TUI Clash — mixin.yaml
+# This file overrides/merges into the subscription config before kernel launch.
+# Edit with: clashctl config edit
+
+mixed-port: 7890
+socks-port: 7891
+port: 7892
+mode: rule
+log-level: info
+ipv6: false
+allow-lan: false
+
+external-controller: 127.0.0.1:9090
+secret: ""
+
+tun:
+  enable: false
+  stack: gvisor
+  auto-route: true
+  auto-detect-interface: true
+  dns-hijack:
+    - any:53
+
+dns:
+  enable: true
+  enhanced-mode: fake-ip
+  fake-ip-filter:
+    - localhost
+    - "*.local"
+    - "*.lan"
+    - "*.home.arpa"
+    - router.asus.com
+    - routerlogin.net
+    - "*.msftconnecttest.com"
+    - "*.msftncsi.com"
+    - time.*.com
+    - time.*.gov
+    - time.*.edu.cn
+    - time.*.apple.com
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  fallback:
+    - 8.8.8.8
+    - 1.1.1.1
+
+rules:
+  prefix:
+    - DOMAIN-SUFFIX,local,DIRECT
+    - IP-CIDR,10.0.0.0/8,DIRECT
+  suffix: []
+  # To add a catch-all rule, first confirm the proxy group name in your subscription,
+  # then uncomment and edit the line below. Run 'clashctl config merge' to validate.
+  # Example: if your subscription defines a group named "SSRDOG":
+  # suffix:
+  #   - MATCH,SSRDOG
+
+proxies:
+  prefix: []
+  suffix: []
+  override: []
+
+proxy-groups:
+  prefix: []
+  suffix: []
+  override: []
+  inject: {}
+EOF
+            ;;
+        profiles)
+            cat > "$dst" <<'EOF'
+use: 0
+profiles: []
+EOF
+            ;;
+        env)
+            cat > "$dst" <<EOF
+KERNEL_NAME=$KERNEL_NAME
+CLASH_BASE_DIR=$CLASH_BASE_DIR
+CLASH_CONFIG_URL=${CLASH_CONFIG_URL:-}
+CLASH_SUB_UA=${CLASH_SUB_UA:-clash-verge/v2.4.8}
+INIT_TYPE=$INIT_TYPE
+URL_GH_PROXY=${URL_GH_PROXY:-https://gh-proxy.org}
+VERSION_MIHOMO=${VERSION_MIHOMO:-v1.19.17}
+VERSION_YQ=${VERSION_YQ:-v4.49.2}
+VERSION_SUBCONVERTER=${VERSION_SUBCONVERTER:-v0.9.0}
+EOF
+            ;;
+        *)
+            _log_fatal "unknown embedded resource kind: $kind"
+            ;;
+    esac
+}
+
+_copy_or_write_resource() {
+    local src="$1"
+    local dst="$2"
+    local kind="$3"
+    if _copy_resource_if_missing "$src" "$dst"; then
+        return 0
+    fi
+    _log_info "source resource missing, writing default ${kind}: ${dst}"
+    _write_resource_if_missing "$dst" "$kind"
 }
 
 # ═══════════════════════════════════════════════
@@ -639,10 +758,10 @@ mkdir -p "${CLASH_BASE_DIR}/resources/configs"
 mkdir -p "${CLASH_BASE_DIR}/logs"
 mkdir -p "${CLASH_BASE_DIR}/runtime"
 
-# ── Copy resources ──
-_copy_resource_if_missing "$SCRIPT_DIR/resources/mixin.yaml" "$CLASH_BASE_DIR/resources/mixin.yaml"
-_copy_resource_if_missing "$SCRIPT_DIR/resources/profiles.yaml" "$CLASH_BASE_DIR/resources/profiles.yaml"
-_copy_resource_if_missing "$SCRIPT_DIR/.env" "$CLASH_BASE_DIR/.env"
+# ── Copy or create resources ──
+_copy_or_write_resource "$SCRIPT_DIR/resources/mixin.yaml" "$CLASH_BASE_DIR/resources/mixin.yaml" mixin
+_copy_or_write_resource "$SCRIPT_DIR/resources/profiles.yaml" "$CLASH_BASE_DIR/resources/profiles.yaml" profiles
+_copy_or_write_resource "$SCRIPT_DIR/.env" "$CLASH_BASE_DIR/.env" env
 if $RESET_CONFIG || [ ! -e "${CLASH_BASE_DIR}/resources/config.yaml" ]; then
     : > "${CLASH_BASE_DIR}/resources/config.yaml"
 fi
