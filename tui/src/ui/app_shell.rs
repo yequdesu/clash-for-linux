@@ -217,7 +217,16 @@ pub(crate) fn register_tab_hitboxes(area: Rect, app: &mut App) {
 
 fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     fill_area(frame, area, CLASH_THEME.bg);
-    let error_text = app.error_msg.as_deref().unwrap_or("");
+    let error_text = app
+        .error_msg
+        .as_deref()
+        .map(sanitize_terminal_line)
+        .unwrap_or_default();
+    let status_text = app
+        .status_msg
+        .as_deref()
+        .map(sanitize_terminal_line)
+        .unwrap_or_default();
     let search_info = if app.ui_state.proxies.search_active {
         format!(
             " [/] {}: {} | ",
@@ -252,9 +261,9 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         .bg(CLASH_THEME.secondary)
         .bold();
     let message = if app.error_msg.is_some() {
-        error_text
+        error_text.as_str()
     } else {
-        app.status_msg.as_deref().unwrap_or("")
+        status_text.as_str()
     };
     let line = Line::from(vec![
         Span::styled(

@@ -2,9 +2,9 @@ use super::{
     command_output_lines, initial_tab_for_profiles, log_line_rank, mode_display, next_default_page,
     next_mode, parse_config_set_api_args, parse_config_set_ports_args,
     parse_geodata_update_version_args, parse_traffic_prune_retention_args, profile_interval_label,
-    redact_sensitive_output, scaled_bar, traffic_summary, App, LogLevelFilter, SettingsPromptKind,
-    SubscriptionAddForm, SubscriptionEditField, SubscriptionEditForm, SubscriptionPrompt,
-    TrafficChartKind, TrafficDimension, TrafficRange,
+    redact_sensitive_output, sanitize_terminal_line, scaled_bar, traffic_summary, App,
+    LogLevelFilter, SettingsPromptKind, SubscriptionAddForm, SubscriptionEditField,
+    SubscriptionEditForm, SubscriptionPrompt, TrafficChartKind, TrafficDimension, TrafficRange,
 };
 use crate::action_registry::{self, ActionDanger};
 use crate::api::{ProfileEntry, ProxyInfo, TrafficPoint, TrafficStatus};
@@ -130,6 +130,35 @@ fn command_output_lines_trim_empty_and_keep_recent_lines() {
     assert_eq!(lines.len(), 9);
     assert_eq!(lines.first().unwrap(), "first");
     assert_eq!(lines.last().unwrap(), "ninth");
+}
+
+#[test]
+fn command_output_lines_strip_terminal_control_sequences() {
+    let input = concat!(
+        "\x1b[31m[+]\x1b[0m ok\x1b[K\n",
+        "\x1b]0;clashctl\x07[i] done\rprogress 10%\rprogress 20%\n",
+        "abc\x08d\n",
+        "\x1b]8;;https://example.com\x07link\x1b]8;;\x07\n",
+    );
+    let lines = command_output_lines(input);
+
+    assert_eq!(
+        lines,
+        vec![
+            "[+] ok",
+            "[i] done",
+            "progress 10%",
+            "progress 20%",
+            "abd",
+            "link"
+        ]
+    );
+}
+
+#[test]
+fn sanitize_terminal_line_collapses_control_sequences_to_plain_text() {
+    let line = sanitize_terminal_line("\x1b[31merror\x1b[0m\rretry\n\x1b]0;title\x07done");
+    assert_eq!(line, "error retry done");
 }
 
 #[test]

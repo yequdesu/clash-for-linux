@@ -129,7 +129,8 @@ pub(crate) fn next_mode(mode: &str) -> String {
 }
 
 pub(crate) fn command_output_lines(output: &str) -> Vec<String> {
-    let mut lines: Vec<String> = output
+    let sanitized = sanitize_terminal_text(output);
+    let mut lines: Vec<String> = sanitized
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
@@ -139,6 +140,90 @@ pub(crate) fn command_output_lines(output: &str) -> Vec<String> {
         lines = lines[lines.len() - 200..].to_vec();
     }
     lines
+}
+
+pub(crate) fn sanitize_terminal_line(output: &str) -> String {
+    sanitize_terminal_text(output)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[derive(Clone, Copy)]
+enum TerminalEscapeState {
+    Ground,
+    Esc,
+    Csi,
+    Osc,
+    OscEsc,
+    String,
+    StringEsc,
+}
+
+pub(crate) fn sanitize_terminal_text(output: &str) -> String {
+    let mut cleaned = String::with_capacity(output.len());
+    let mut state = TerminalEscapeState::Ground;
+
+    for ch in output.chars() {
+        match state {
+            TerminalEscapeState::Ground => match ch {
+                '\x1b' => state = TerminalEscapeState::Esc,
+                '\u{009b}' => state = TerminalEscapeState::Csi,
+                '\u{009d}' => state = TerminalEscapeState::Osc,
+                '\u{0090}' | '\u{0098}' | '\u{009e}' | '\u{009f}' => {
+                    state = TerminalEscapeState::String
+                }
+                '\r' | '\n' => cleaned.push('\n'),
+                '\t' => cleaned.push_str("    "),
+                '\x08' => {
+                    if !cleaned.ends_with('\n') {
+                        cleaned.pop();
+                    }
+                }
+                '\x00'..='\x1f' | '\x7f' | '\u{0080}'..='\u{009f}' => {}
+                _ => cleaned.push(ch),
+            },
+            TerminalEscapeState::Esc => match ch {
+                '[' => state = TerminalEscapeState::Csi,
+                ']' => state = TerminalEscapeState::Osc,
+                'P' | 'X' | '^' | '_' => state = TerminalEscapeState::String,
+                _ => state = TerminalEscapeState::Ground,
+            },
+            TerminalEscapeState::Csi => {
+                if is_csi_final_byte(ch) {
+                    state = TerminalEscapeState::Ground;
+                }
+            }
+            TerminalEscapeState::Osc => match ch {
+                '\x07' | '\u{009c}' => state = TerminalEscapeState::Ground,
+                '\x1b' => state = TerminalEscapeState::OscEsc,
+                _ => {}
+            },
+            TerminalEscapeState::OscEsc => match ch {
+                '\\' => state = TerminalEscapeState::Ground,
+                '\x1b' => state = TerminalEscapeState::OscEsc,
+                _ => state = TerminalEscapeState::Osc,
+            },
+            TerminalEscapeState::String => match ch {
+                '\u{009c}' => state = TerminalEscapeState::Ground,
+                '\x1b' => state = TerminalEscapeState::StringEsc,
+                _ => {}
+            },
+            TerminalEscapeState::StringEsc => match ch {
+                '\\' => state = TerminalEscapeState::Ground,
+                '\x1b' => state = TerminalEscapeState::StringEsc,
+                _ => state = TerminalEscapeState::String,
+            },
+        }
+    }
+
+    cleaned
+}
+
+fn is_csi_final_byte(ch: char) -> bool {
+    ('@'..='~').contains(&ch)
 }
 
 pub(crate) fn sudo_required_error(output: &str) -> bool {
