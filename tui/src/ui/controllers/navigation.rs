@@ -9,6 +9,7 @@ impl App {
         if self.ui_state.active_page == Tab::Traffic {
             self.fetch_traffic();
         }
+        self.refresh_logs_if_visible();
     }
 
     pub fn prev_tab(&mut self) {
@@ -19,6 +20,7 @@ impl App {
         if self.ui_state.active_page == Tab::Traffic {
             self.fetch_traffic();
         }
+        self.refresh_logs_if_visible();
     }
 
     pub(crate) fn reset_selection(&mut self) {

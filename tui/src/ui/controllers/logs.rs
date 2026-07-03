@@ -1,6 +1,12 @@
 use crate::ui::prelude::*;
 
 impl App {
+    pub(crate) fn refresh_logs_if_visible(&mut self) {
+        if self.ui_state.active_page == Tab::Logs && !self.ui_state.logs.paused {
+            self.fetch_logs();
+        }
+    }
+
     pub fn toggle_log_pause(&mut self) {
         self.ui_state.logs.paused = !self.ui_state.logs.paused;
         self.status_msg = Some(if self.ui_state.logs.paused {
@@ -8,18 +14,14 @@ impl App {
         } else {
             "logs resumed".into()
         });
-        if !self.ui_state.logs.paused && self.ui_state.active_page == Tab::Logs {
-            self.fetch_logs();
-        }
+        self.refresh_logs_if_visible();
     }
 
     pub fn cycle_log_level(&mut self) {
         self.ui_state.logs.level = self.ui_state.logs.level.next();
         self.clamp_log_scroll();
         self.status_msg = Some(format!("log level: {}", self.ui_state.logs.level.label()));
-        if self.ui_state.active_page == Tab::Logs && !self.ui_state.logs.paused {
-            self.fetch_logs();
-        }
+        self.refresh_logs_if_visible();
     }
 
     pub fn clear_logs(&mut self) {

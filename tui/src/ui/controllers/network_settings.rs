@@ -269,6 +269,21 @@ impl App {
         true
     }
 
+    pub(crate) fn maybe_open_pending_sudo_prompt(&mut self, error: &str) -> bool {
+        if !sudo_required_error(error) {
+            return false;
+        }
+        let Some(mut prompt) = self.ui_state.modals.sudo_candidate.take() else {
+            return false;
+        };
+        prompt.password.clear();
+        let label = prompt.label.clone();
+        self.error_msg = None;
+        self.status_msg = Some(self.sudo_required_status(&label));
+        self.ui_state.modals.sudo_prompt = Some(prompt);
+        true
+    }
+
     pub fn sudo_prompt_active(&self) -> bool {
         self.ui_state.modals.sudo_prompt.is_some()
     }
@@ -335,6 +350,12 @@ impl App {
                         redact_output,
                         result,
                     ));
+                }
+                SudoTarget::Subscription => {
+                    let _ = tx.send(DataEvent::SubscriptionResult(result));
+                }
+                SudoTarget::SubscriptionOutput { output_label } => {
+                    let _ = tx.send(DataEvent::SubscriptionOutputResult(output_label, result));
                 }
                 SudoTarget::Traffic => {
                     let _ = tx.send(DataEvent::TrafficActionResult(label, result));

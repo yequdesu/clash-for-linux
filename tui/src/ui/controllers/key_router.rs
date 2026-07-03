@@ -225,6 +225,7 @@ fn handle_page_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('6') => {
             app.ui_state.active_page = Tab::Logs;
+            app.refresh_logs_if_visible();
         }
         KeyCode::Char('7') => {
             app.ui_state.active_page = Tab::Settings;

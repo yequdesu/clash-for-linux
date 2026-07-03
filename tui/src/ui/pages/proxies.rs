@@ -21,11 +21,7 @@ pub(crate) fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
             continue;
         };
         let current = info.now.as_deref().unwrap_or("—");
-        let delay = app
-            .delays
-            .get(name)
-            .map(|d| format!("{}ms", d))
-            .unwrap_or_else(|| "—".into());
+        let delay = app.proxy_delay_text(name);
         let all_count = info.all.as_ref().map(|a| a.len()).unwrap_or(0);
         rows.push(vec![
             name.clone(),

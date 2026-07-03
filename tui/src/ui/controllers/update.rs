@@ -127,9 +127,11 @@ impl App {
                     let line = format!(
                         "{} {}",
                         e.level.to_uppercase(),
-                        &e.payload[..e.payload.len().min(120)]
+                        trim_log_payload(&e.payload)
                     );
-                    self.logs.push(line);
+                    if !self.logs.iter().rev().take(500).any(|old| old == &line) {
+                        self.logs.push(line);
+                    }
                 }
                 if self.logs.len() > 500 {
                     self.logs.drain(0..self.logs.len() - 500);
@@ -137,13 +139,28 @@ impl App {
                 self.ui_state.logs.scroll = self.visible_logs().len().saturating_sub(1);
             }
             DataEvent::Logs(Err(_)) => {}
-            DataEvent::Delay(name, delay) => {
-                self.delays.insert(name, delay);
+            DataEvent::DelayResult(name, Ok(delay)) => {
+                self.delays.insert(name.clone(), delay);
+                self.delay_pending.remove(&name);
+                self.delay_errors.remove(&name);
+                self.status_msg = Some(format!("delay updated: {} {}ms", name, delay));
+            }
+            DataEvent::DelayResult(name, Err(e)) => {
+                self.delay_pending.remove(&name);
+                self.delay_errors.insert(name.clone(), e.clone());
+                let label = if crate::ui::controllers::proxies::delay_error_is_timeout(&e) {
+                    self.t(Msg::ProxyDelayTimeout)
+                } else {
+                    self.t(Msg::ProxyDelayError)
+                }
+                .to_string();
+                self.status_msg = Some(format!("delay {}: {}", label, name));
             }
             DataEvent::SwitchResult(group, target, Ok(())) => {
                 self.error_msg = None;
                 self.status_msg = Some("proxy switched".into());
                 self.mark_proxy_group_current(&group, &target);
+                self.mark_delay_pending(&target);
                 self.refresh_data();
             }
             DataEvent::SwitchResult(_group, _target, Err(e)) => {
@@ -162,22 +179,38 @@ impl App {
             DataEvent::SubscriptionResult(Ok(msg)) => {
                 self.error_msg = None;
                 self.status_msg = Some(msg);
+                self.ui_state.modals.sudo_candidate = None;
                 self.ui_state.subscriptions.output.clear();
                 self.refresh_subscriptions();
                 self.refresh_data();
             }
             DataEvent::SubscriptionResult(Err(e)) => {
+                if self.maybe_open_pending_sudo_prompt(&e) {
+                    self.ui_state.subscriptions.output =
+                        command_output_lines(self.t(Msg::SudoPasswordRequired));
+                    self.reveal_command_output();
+                    return;
+                }
+                self.ui_state.modals.sudo_candidate = None;
                 self.error_msg = Some(format!("Subscription action failed: {}", e));
                 self.ui_state.subscriptions.output = command_output_lines(&e);
                 self.reveal_command_output();
             }
             DataEvent::SubscriptionOutputResult(label, Ok(output)) => {
                 self.error_msg = None;
+                self.ui_state.modals.sudo_candidate = None;
                 self.status_msg = Some(format!("subscription action completed: {}", label));
                 self.ui_state.subscriptions.output = command_output_lines(&output);
                 self.reveal_command_output();
             }
             DataEvent::SubscriptionOutputResult(label, Err(e)) => {
+                if self.maybe_open_pending_sudo_prompt(&e) {
+                    self.ui_state.subscriptions.output =
+                        command_output_lines(self.t(Msg::SudoPasswordRequired));
+                    self.reveal_command_output();
+                    return;
+                }
+                self.ui_state.modals.sudo_candidate = None;
                 self.error_msg = Some(format!("Subscription action failed: {}: {}", label, e));
                 self.ui_state.subscriptions.output = command_output_lines(&e);
                 self.reveal_command_output();
@@ -301,5 +334,16 @@ impl App {
         if let Err(e) = self.ui_settings.save() {
             self.error_msg = Some(self.settings_save_failed(&e));
         }
+    }
+}
+
+pub(crate) fn trim_log_payload(payload: &str) -> String {
+    let max_chars = 240;
+    let mut chars = payload.chars();
+    let trimmed: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{}...", trimmed)
+    } else {
+        trimmed
     }
 }

@@ -110,6 +110,7 @@ impl App {
             if self.ui_state.active_page == Tab::Traffic {
                 self.refresh_traffic();
             }
+            self.refresh_logs_if_visible();
             self.status_msg = Some(format!("page: {}", self.t(self.ui_state.active_page.msg())));
             return;
         }
@@ -124,6 +125,7 @@ impl App {
             if self.ui_state.active_page == Tab::Traffic {
                 self.refresh_traffic();
             }
+            self.refresh_logs_if_visible();
         }
         if let Some(action) = crate::ui::components::action_bar::hitbox_for_action_spec(spec) {
             self.dispatch_hitbox_action(action);

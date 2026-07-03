@@ -207,6 +207,13 @@ impl App {
     ) {
         let tx = self.data_tx.clone();
         self.status_msg = Some(format!("running {} for {}", field_label, target));
+        if let [args] = commands.as_slice() {
+            self.prepare_sudo_candidate(
+                format!("{} for {}", field_label, target),
+                args.clone(),
+                SudoTarget::Subscription,
+            );
+        }
         self.rt.spawn(async move {
             let mut outputs = Vec::new();
             let mut failed = None;
@@ -245,9 +252,21 @@ impl App {
         let Some(id) = self.selected_subscription_id() else {
             return;
         };
+        let args = vec!["sub".into(), "use".into(), id.to_string()];
+        self.prepare_sudo_candidate(
+            format!("use subscription {}", id),
+            args.clone(),
+            SudoTarget::Subscription,
+        );
         let tx = self.data_tx.clone();
         self.rt.spawn(async move {
-            let result = crate::api::run_clashctl_sub("use", id).await;
+            let result = crate::api::run_clashctl(&args).await.map(|stdout| {
+                if stdout.is_empty() {
+                    format!("subscription use [{}] completed", id)
+                } else {
+                    stdout.lines().last().unwrap_or("").to_string()
+                }
+            });
             let _ = tx.send(DataEvent::SubscriptionResult(result));
         });
     }
@@ -256,9 +275,21 @@ impl App {
         let Some(id) = self.selected_subscription_id() else {
             return;
         };
+        let args = vec!["sub".into(), "update".into(), id.to_string()];
+        self.prepare_sudo_candidate(
+            format!("update subscription {}", id),
+            args.clone(),
+            SudoTarget::Subscription,
+        );
         let tx = self.data_tx.clone();
         self.rt.spawn(async move {
-            let result = crate::api::run_clashctl_sub("update", id).await;
+            let result = crate::api::run_clashctl(&args).await.map(|stdout| {
+                if stdout.is_empty() {
+                    format!("subscription update [{}] completed", id)
+                } else {
+                    stdout.lines().last().unwrap_or("").to_string()
+                }
+            });
             let _ = tx.send(DataEvent::SubscriptionResult(result));
         });
     }
@@ -286,8 +317,13 @@ impl App {
     pub(crate) fn execute_subscription_remove(&mut self, id: i32) {
         let tx = self.data_tx.clone();
         self.status_msg = Some(format!("removing subscription {}", id));
+        let args = vec!["sub".into(), "remove".into(), id.to_string()];
+        self.prepare_sudo_candidate(
+            format!("remove subscription {}", id),
+            args.clone(),
+            SudoTarget::Subscription,
+        );
         self.rt.spawn(async move {
-            let args = vec!["sub".into(), "remove".into(), id.to_string()];
             let result = crate::api::run_clashctl(&args).await.map(|stdout| {
                 if stdout.is_empty() {
                     format!("subscription removed: [{}]", id)
@@ -305,8 +341,15 @@ impl App {
         }
         let tx = self.data_tx.clone();
         self.status_msg = Some("loading subscription log".into());
+        let args = vec!["sub".into(), "log".into()];
+        self.prepare_sudo_candidate(
+            "subscription log".into(),
+            args.clone(),
+            SudoTarget::SubscriptionOutput {
+                output_label: "log".into(),
+            },
+        );
         self.rt.spawn(async move {
-            let args = vec!["sub".into(), "log".into()];
             let result = crate::api::run_clashctl(&args).await;
             let _ = tx.send(DataEvent::SubscriptionOutputResult("log".into(), result));
         });

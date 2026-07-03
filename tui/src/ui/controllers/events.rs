@@ -82,6 +82,7 @@ impl App {
                 if self.ui_state.active_page == Tab::Traffic {
                     self.refresh_traffic();
                 }
+                self.refresh_logs_if_visible();
             }
             HitboxAction::RunNetwork(action) => self.run_network_action(action),
             HitboxAction::RunSettings(action) => self.run_settings_action(action),

@@ -1,5 +1,5 @@
 use ratatui::widgets::TableState;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc;
 
 use crate::api::{
@@ -41,6 +41,8 @@ pub struct App {
     pub proxy_groups: Vec<(String, String)>,
     pub proxy_table_state: TableState,
     pub delays: HashMap<String, u64>,
+    pub delay_pending: HashSet<String>,
+    pub delay_errors: HashMap<String, String>,
 
     pub connections: Vec<Connection>,
     pub connections_active: usize,
@@ -111,6 +113,8 @@ impl App {
             proxy_groups: Vec::new(),
             proxy_table_state: TableState::default(),
             delays: HashMap::new(),
+            delay_pending: HashSet::new(),
+            delay_errors: HashMap::new(),
             connections: Vec::new(),
             connections_active: 0,
             connections_total: 0,

@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -297,21 +299,6 @@ fn output_result(output: std::process::Output) -> Result<String, String> {
         Err(stderr)
     } else {
         Err(format!("{}\n{}", stderr, stdout))
-    }
-}
-
-pub async fn run_clashctl_sub(action: &str, id: i32) -> Result<String, String> {
-    let id_arg = id.to_string();
-    let args = vec!["sub".to_string(), action.to_string(), id_arg];
-    match run_clashctl(&args).await {
-        Ok(stdout) => {
-            if stdout.is_empty() {
-                Ok(format!("subscription {} [{}] completed", action, id))
-            } else {
-                Ok(stdout.lines().last().unwrap_or("").to_string())
-            }
-        }
-        Err(err) => Err(err),
     }
 }
 
@@ -626,6 +613,9 @@ impl ApiClient {
             }
         }
         collect_logs_from_text(&raw, &mut logs);
+        if logs.is_empty() {
+            logs.extend(read_local_log_entries(level.as_ref(), 256));
+        }
         Ok(logs)
     }
 
@@ -673,14 +663,133 @@ fn append_log_value(value: serde_json::Value, logs: &mut Vec<LogEntry>) {
     }
 }
 
+fn read_local_log_entries(level: &str, max_lines: usize) -> Vec<LogEntry> {
+    let mut entries = Vec::new();
+    for path in local_log_paths() {
+        let lines = tail_file_lines(&path, max_lines, 256 * 1024).unwrap_or_default();
+        for line in lines {
+            if let Some(entry) = parse_local_log_line(&path, &line) {
+                if log_level_allows(level, &entry.level) {
+                    entries.push(entry);
+                }
+            }
+        }
+    }
+    if entries.len() > max_lines {
+        entries.drain(0..entries.len() - max_lines);
+    }
+    entries
+}
+
+fn local_log_paths() -> Vec<PathBuf> {
+    let Some(install) = config::active_install_env() else {
+        return Vec::new();
+    };
+    [
+        install.base_dir.join("logs").join("mihomo.log"),
+        install.base_dir.join("resources").join("profiles.log"),
+        install.base_dir.join("traffic").join("collector.log"),
+    ]
+    .into_iter()
+    .filter(|path| path.exists())
+    .collect()
+}
+
+fn tail_file_lines(path: &Path, max_lines: usize, max_bytes: u64) -> std::io::Result<Vec<String>> {
+    let mut file = fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    let start = len.saturating_sub(max_bytes);
+    file.seek(SeekFrom::Start(start))?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf)?;
+    let mut lines: Vec<String> = buf.lines().map(str::to_string).collect();
+    if start > 0 && !lines.is_empty() {
+        lines.remove(0);
+    }
+    if lines.len() > max_lines {
+        lines.drain(0..lines.len() - max_lines);
+    }
+    Ok(lines)
+}
+
+fn parse_local_log_line(path: &Path, line: &str) -> Option<LogEntry> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    let name = path
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or_default();
+    if name == "mihomo.log" {
+        let level = extract_logfmt_value(line, "level").unwrap_or_else(|| "info".into());
+        let msg = extract_logfmt_value(line, "msg").unwrap_or_else(|| line.to_string());
+        let time = extract_logfmt_value(line, "time").unwrap_or_default();
+        let payload = if time.is_empty() {
+            msg
+        } else {
+            format!("{} {}", time, msg)
+        };
+        return Some(LogEntry { level, payload });
+    }
+    let level = if line.to_ascii_lowercase().contains("failed")
+        || line.to_ascii_lowercase().contains("error")
+    {
+        "error"
+    } else {
+        "info"
+    };
+    Some(LogEntry {
+        level: level.into(),
+        payload: format!("{} {}", name, line),
+    })
+}
+
+fn extract_logfmt_value(line: &str, key: &str) -> Option<String> {
+    let needle = format!("{}=", key);
+    let rest = line.get(line.find(&needle)? + needle.len()..)?;
+    if let Some(rest) = rest.strip_prefix('"') {
+        let mut value = String::new();
+        let mut escaped = false;
+        for ch in rest.chars() {
+            if escaped {
+                value.push(ch);
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                return Some(value);
+            } else {
+                value.push(ch);
+            }
+        }
+        return Some(value);
+    }
+    Some(rest.split_whitespace().next()?.to_string())
+}
+
+fn log_level_allows(requested: &str, actual: &str) -> bool {
+    log_level_rank(actual) >= log_level_rank(requested)
+}
+
+fn log_level_rank(level: &str) -> u8 {
+    match level.to_ascii_lowercase().as_str() {
+        "error" => 3,
+        "warn" | "warning" => 2,
+        "debug" => 0,
+        _ => 1,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        clashctl_bin, collect_logs_from_text, sanitize_filename_token, tun_enabled_from_yaml,
-        ApiClient,
+        clashctl_bin, collect_logs_from_text, log_level_allows, parse_local_log_line,
+        sanitize_filename_token, tun_enabled_from_yaml, ApiClient,
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::path::Path;
     use std::thread;
 
     #[test]
@@ -736,6 +845,21 @@ tun:
         assert_eq!(logs[0].payload, "batch");
         assert_eq!(logs[1].level, "warning");
         assert_eq!(logs[2].payload, "stream two");
+    }
+
+    #[test]
+    fn local_mihomo_log_lines_are_parsed_and_filtered() {
+        let entry = parse_local_log_line(
+            Path::new("/tmp/mihomo.log"),
+            r#"time="2026-07-03T16:21:15+08:00" level=info msg="[TCP] 127.0.0.1:1 --> example.com:80 using GLOBAL""#,
+        )
+        .unwrap();
+
+        assert_eq!(entry.level, "info");
+        assert!(entry.payload.contains("2026-07-03T16:21:15+08:00"));
+        assert!(entry.payload.contains("example.com"));
+        assert!(log_level_allows("debug", &entry.level));
+        assert!(!log_level_allows("warning", &entry.level));
     }
 
     fn serve_once(status: &str, body: &str) -> String {

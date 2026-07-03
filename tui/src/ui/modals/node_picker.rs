@@ -24,6 +24,12 @@ pub(crate) fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
     let nodes = app.selected_proxy_nodes();
     let has_actions = popup.height >= 8;
 
+    let hint = if app.selected_proxy_group_supports_manual_switch() {
+        app.t(Msg::ProxyNodePickerHint).to_string()
+    } else {
+        app.t(Msg::ProxyNodePickerAutoHint).to_string()
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLASH_THEME.primary).bg(CLASH_THEME.bg))
@@ -33,7 +39,7 @@ pub(crate) fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(CLASH_THEME.primary).bold(),
         ))
         .title_bottom(Span::styled(
-            format!(" {} ", app.t(Msg::ProxyNodePickerHint)),
+            format!(" {} ", hint),
             Style::default().fg(CLASH_THEME.muted).bg(CLASH_THEME.bg),
         ));
     let inner = block.inner(popup);
@@ -64,11 +70,7 @@ pub(crate) fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
         .take(visible_capacity)
         .map(|(idx, node)| {
             let marker = if node == &current { "●" } else { " " };
-            let delay = app
-                .delays
-                .get(node)
-                .map(|d| format!("{}ms", d))
-                .unwrap_or_else(|| "—".into());
+            let delay = app.proxy_delay_text(node);
             let style = if idx == app.ui_state.proxies.selected_node_idx {
                 Style::default()
                     .fg(CLASH_THEME.text)

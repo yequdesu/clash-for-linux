@@ -8,10 +8,11 @@ impl App {
             let Some(name) = self.selected_delay_target() else {
                 return;
             };
+            self.mark_delay_pending(&name);
+            self.status_msg = Some(format!("testing delay: {}", name));
             self.rt.spawn(async move {
-                if let Ok(delay) = api.test_delay(&name).await {
-                    let _ = tx.send(DataEvent::Delay(name, delay));
-                }
+                let result = api.test_delay(&name).await;
+                let _ = tx.send(DataEvent::DelayResult(name, result));
             });
         }
     }
@@ -71,6 +72,16 @@ impl App {
             return;
         }
         let target = nodes[self.ui_state.proxies.selected_node_idx.min(nodes.len() - 1)].clone();
+        if !self.selected_proxy_group_supports_manual_switch() {
+            self.test_selected_delay();
+            self.status_msg = Some(format!(
+                "{}: {} / {}",
+                self.t(Msg::ProxyAutoGroupKeepsChoice),
+                group_name,
+                target
+            ));
+            return;
+        }
         let api = self.api.clone();
         let tx = self.data_tx.clone();
         let event_group = group_name.clone();
@@ -79,12 +90,11 @@ impl App {
         self.rt.spawn(async move {
             let result = api.switch_proxy(&group_name, &target).await;
             let switched = result.is_ok();
-            if switched {
-                if let Ok(delay) = api.test_delay(&target).await {
-                    let _ = tx.send(DataEvent::Delay(target, delay));
-                }
-            }
             let _ = tx.send(DataEvent::SwitchResult(event_group, event_target, result));
+            if switched {
+                let delay_result = api.test_delay(&target).await;
+                let _ = tx.send(DataEvent::DelayResult(target, delay_result));
+            }
         });
         self.status_msg = Some(format!("switching node: {}", status_target));
     }
@@ -108,7 +118,7 @@ impl App {
     pub fn test_all_delays(&mut self) {
         let api = self.api.clone();
         let tx = self.data_tx.clone();
-        let targets = if self.ui_state.proxies.node_picker_open {
+        let mut targets = if self.ui_state.proxies.node_picker_open {
             self.selected_proxy_nodes()
         } else {
             self.visible_proxy_groups()
@@ -116,13 +126,21 @@ impl App {
                 .map(|(name, _)| name)
                 .collect()
         };
+        targets.sort();
+        targets.dedup();
+        if targets.is_empty() {
+            return;
+        }
+        for name in &targets {
+            self.mark_delay_pending(name);
+        }
+        self.status_msg = Some(format!("testing delay: {} targets", targets.len()));
         for name in targets {
             let api = api.clone();
             let tx = tx.clone();
             self.rt.spawn(async move {
-                if let Ok(delay) = api.test_delay(&name).await {
-                    let _ = tx.send(DataEvent::Delay(name, delay));
-                }
+                let result = api.test_delay(&name).await;
+                let _ = tx.send(DataEvent::DelayResult(name, result));
             });
         }
     }
@@ -157,4 +175,41 @@ impl App {
             self.selected_proxy_group_name()
         }
     }
+
+    pub(crate) fn selected_proxy_group_type(&self) -> Option<&str> {
+        let group_name = self.selected_proxy_group_name()?;
+        self.proxies
+            .get(&group_name)
+            .map(|info| info.proxy_type.as_str())
+    }
+
+    pub(crate) fn selected_proxy_group_supports_manual_switch(&self) -> bool {
+        matches!(self.selected_proxy_group_type(), Some("Selector"))
+    }
+
+    pub(crate) fn mark_delay_pending(&mut self, name: &str) {
+        self.delay_pending.insert(name.to_string());
+        self.delay_errors.remove(name);
+    }
+
+    pub(crate) fn proxy_delay_text(&self, name: &str) -> String {
+        if self.delay_pending.contains(name) {
+            return self.t(Msg::ProxyDelayTesting).to_string();
+        }
+        if let Some(error) = self.delay_errors.get(name) {
+            if delay_error_is_timeout(error) {
+                return self.t(Msg::ProxyDelayTimeout).to_string();
+            }
+            return self.t(Msg::ProxyDelayError).to_string();
+        }
+        self.delays
+            .get(name)
+            .map(|d| format!("{}ms", d))
+            .unwrap_or_else(|| "—".into())
+    }
+}
+
+pub(crate) fn delay_error_is_timeout(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("timeout") || lower.contains("timed out") || lower.contains("504")
 }

@@ -4,12 +4,14 @@ use super::{
     parse_geodata_update_version_args, parse_traffic_prune_retention_args, profile_interval_label,
     redact_sensitive_output, sanitize_terminal_line, scaled_bar, traffic_summary, App,
     LogLevelFilter, SettingsPromptKind, SubscriptionAddForm, SubscriptionEditField,
-    SubscriptionEditForm, SubscriptionPrompt, TrafficChartKind, TrafficDimension, TrafficRange,
+    SubscriptionEditForm, SubscriptionPrompt, SudoTarget, TrafficChartKind, TrafficDimension,
+    TrafficRange,
 };
 use crate::action_registry::{self, ActionDanger};
-use crate::api::{ProfileEntry, ProxyInfo, TrafficPoint, TrafficStatus};
+use crate::api::{LogEntry, ProfileEntry, ProxyInfo, TrafficPoint, TrafficStatus};
 use crate::config::Config;
 use crate::event::DataEvent;
+use crate::i18n::Msg;
 use crate::mouse::{HitboxAction, NetworkAction, SettingsAction, TrafficAction};
 use crate::settings::LanguageSetting;
 use crate::ui::app_shell::register_tab_hitboxes;
@@ -46,8 +48,12 @@ fn test_app(rt: &tokio::runtime::Runtime) -> App {
 }
 
 fn selector_proxy(now: &str, all: Vec<&str>) -> ProxyInfo {
+    proxy_info("Selector", now, all)
+}
+
+fn proxy_info(proxy_type: &str, now: &str, all: Vec<&str>) -> ProxyInfo {
     ProxyInfo {
-        proxy_type: "Selector".into(),
+        proxy_type: proxy_type.into(),
         now: Some(now.into()),
         all: Some(all.into_iter().map(String::from).collect()),
         history: None,
@@ -676,6 +682,68 @@ fn subscription_output_event_keeps_multiline_output() {
     assert_eq!(
         app.ui_state.subscriptions.output,
         vec!["line one", "line two"]
+    );
+}
+
+#[test]
+fn subscription_permission_error_opens_sudo_prompt() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Subscriptions;
+    app.prepare_sudo_candidate(
+        "use subscription 5".into(),
+        vec!["sub".into(), "use".into(), "5".into()],
+        SudoTarget::Subscription,
+    );
+
+    app.apply_data_event(DataEvent::SubscriptionResult(Err(
+        "systemctl stop clashctl: Interactive authentication required".into(),
+    )));
+
+    assert!(app.sudo_prompt_active());
+    assert_eq!(
+        app.ui_state
+            .modals
+            .sudo_prompt
+            .as_ref()
+            .map(|prompt| prompt.label.as_str()),
+        Some("use subscription 5")
+    );
+    assert!(app.error_msg.is_none());
+    assert!(app
+        .ui_state
+        .subscriptions
+        .output
+        .iter()
+        .any(|line| line.contains("Sudo") || line.contains("sudo")));
+}
+
+#[test]
+fn subscription_output_permission_error_opens_sudo_prompt() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Subscriptions;
+    app.prepare_sudo_candidate(
+        "subscription log".into(),
+        vec!["sub".into(), "log".into()],
+        SudoTarget::SubscriptionOutput {
+            output_label: "log".into(),
+        },
+    );
+
+    app.apply_data_event(DataEvent::SubscriptionOutputResult(
+        "log".into(),
+        Err("permission denied; sudo required".into()),
+    ));
+
+    assert!(app.sudo_prompt_active());
+    assert_eq!(
+        app.ui_state
+            .modals
+            .sudo_prompt
+            .as_ref()
+            .map(|prompt| prompt.label.as_str()),
+        Some("subscription log")
     );
 }
 
@@ -1825,6 +1893,52 @@ fn proxy_node_second_click_confirms_selection() {
 }
 
 #[test]
+fn automatic_proxy_node_second_click_tests_without_manual_switch() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Proxies;
+    app.proxies.insert(
+        "Auto".into(),
+        proxy_info("URLTest", "B", vec!["A", "B", "C"]),
+    );
+    app.proxy_groups = vec![("Auto".into(), "B".into())];
+    app.open_node_picker();
+    app.ui_state
+        .hitboxes
+        .register(Rect::new(1, 1, 20, 1), HitboxAction::SelectProxyNode(1));
+
+    app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
+
+    assert_eq!(app.selected_proxy_current_node(), "B");
+    assert!(app.delay_pending.contains("B"));
+    assert!(app
+        .status_msg
+        .as_deref()
+        .is_some_and(|msg| msg.contains(app.t(Msg::ProxyAutoGroupKeepsChoice))));
+}
+
+#[test]
+fn proxy_delay_result_tracks_timeout_and_success_states() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Proxies;
+
+    app.mark_delay_pending("A");
+    assert_eq!(app.proxy_delay_text("A"), app.t(Msg::ProxyDelayTesting));
+
+    app.apply_data_event(DataEvent::DelayResult(
+        "A".into(),
+        Err("504 timeout".into()),
+    ));
+    assert!(!app.delay_pending.contains("A"));
+    assert_eq!(app.proxy_delay_text("A"), app.t(Msg::ProxyDelayTimeout));
+
+    app.apply_data_event(DataEvent::DelayResult("A".into(), Ok(42)));
+    assert_eq!(app.proxy_delay_text("A"), "42ms");
+    assert!(!app.delay_errors.contains_key("A"));
+}
+
+#[test]
 fn proxy_switch_result_updates_current_node_locally() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let mut app = test_app(&rt);
@@ -1943,6 +2057,27 @@ fn mouse_wheel_dispatches_to_registered_scroll_area() {
     assert_eq!(app.ui_state.logs.scroll, 3);
     app.handle_mouse_event(MouseEventKind::ScrollUp, 5, 5);
     assert_eq!(app.ui_state.logs.scroll, 0);
+}
+
+#[test]
+fn log_events_are_unicode_safe_and_deduplicated() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Logs;
+    let payload = format!("{} {}", "🇰🇷Korea".repeat(80), "failed");
+    let event = || {
+        DataEvent::Logs(Ok(vec![LogEntry {
+            level: "error".into(),
+            payload: payload.clone(),
+        }]))
+    };
+
+    app.apply_data_event(event());
+    app.apply_data_event(event());
+
+    assert_eq!(app.logs.len(), 1);
+    assert!(app.logs[0].starts_with("ERROR "));
+    assert!(app.logs[0].ends_with("..."));
 }
 
 #[test]

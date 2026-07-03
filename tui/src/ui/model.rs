@@ -1437,6 +1437,8 @@ pub(crate) enum SudoTarget {
     Network,
     Settings(SettingsAction),
     SettingsCommand { redact_output: bool },
+    Subscription,
+    SubscriptionOutput { output_label: String },
     Traffic,
 }
 
