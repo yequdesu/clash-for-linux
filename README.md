@@ -73,6 +73,14 @@ For development or validation only:
 bash install.sh --with-tui
 ```
 
+For a release candidate, install from the explicit tag instead of `latest`:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/yequdesu/clash-for-linux/v0.2.0-rc.1/install.sh
+chmod +x install.sh
+CLASHCTL_RELEASE_BASE_URL="https://github.com/yequdesu/clash-for-linux/releases/download/v0.2.0-rc.1" bash install.sh --with-tui
+```
+
 Common flow:
 
 ```bash

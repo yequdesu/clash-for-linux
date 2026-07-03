@@ -45,7 +45,7 @@ jobs:
       - name: Build clashctl
         run: |
           mkdir -p dist
-          GOOS=linux GOARCH=${{ matrix.goarch }} go build -trimpath -ldflags="-s -w" -o dist/clashctl-linux-${{ matrix.arch }} ./cmd/clashctl
+          GOOS=linux GOARCH=${{ matrix.goarch }} go build -trimpath -ldflags="-s -w -X main.appVersion=${{ github.ref_name }}" -o dist/clashctl-linux-${{ matrix.arch }} ./cmd/clashctl
 
       - name: Build clash-tui
         working-directory: tui
@@ -91,6 +91,22 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') }}
+          make_latest: ${{ (contains(github.ref_name, '-rc') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta')) && 'false' || 'true' }}
+          generate_release_notes: true
+          body: |
+            This is an automated release for `${{ github.ref_name }}`.
+
+            Release candidates are validation builds. Install them with an explicit release URL:
+
+            ```bash
+            curl -fsSLO https://raw.githubusercontent.com/yequdesu/clash-for-linux/${{ github.ref_name }}/install.sh
+            chmod +x install.sh
+            CLASHCTL_RELEASE_BASE_URL="https://github.com/yequdesu/clash-for-linux/releases/download/${{ github.ref_name }}" bash install.sh --with-tui
+            ```
+
+            Uploaded assets include linux amd64/arm64 tarballs and SHA256SUMS.
           files: |
             artifacts/*.tar.gz
             artifacts/SHA256SUMS

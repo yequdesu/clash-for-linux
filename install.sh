@@ -79,16 +79,40 @@ fi
 # ═══════════════════════════════
 REAL_USER="${SUDO_USER:-$USER}"
 REAL_HOME="$(eval echo ~"$REAL_USER")"
-CLASH_BASE_DIR="${CLASH_BASE_DIR:-$REAL_HOME/clashctl}"
+
+_load_dotenv_defaults() {
+    local file="$1"
+    local line key val
+    [ -f "$file" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        case "$line" in ""|\#*|*=*) ;; *) continue ;; esac
+        case "$line" in ""|\#*) continue ;; esac
+        key="${line%%=*}"
+        val="${line#*=}"
+        case "$key" in
+            CLASH_BASE_DIR|KERNEL_NAME|CLASH_SERVICE_NAME|SERVICE_NAME|INIT_TYPE|CLASH_CONFIG_URL|CLASH_SUB_UA|URL_GH_PROXY|VERSION_MIHOMO|VERSION_YQ|VERSION_GEODATA|VERSION_SUBCONVERTER)
+                if [ -z "${!key+x}" ] || [ -z "${!key}" ]; then
+                    case "$val" in
+                        "~") val="$REAL_HOME" ;;
+                        "~/"*) val="$REAL_HOME/${val#~/}" ;;
+                    esac
+                    printf -v "$key" '%s' "$val"
+                fi
+                ;;
+        esac
+    done < "$file"
+}
 
 # ── .env load ──
-[ -f "$SCRIPT_DIR/.env" ] && . "$SCRIPT_DIR/.env" 2>/dev/null || true
+_load_dotenv_defaults "$SCRIPT_DIR/.env"
 CLASH_BASE_DIR="${CLASH_BASE_DIR:-$REAL_HOME/clashctl}"
 KERNEL_NAME="${KERNEL_NAME:-mihomo}"
 SERVICE_NAME="${SERVICE_NAME:-${CLASH_SERVICE_NAME:-clashctl}}"
 INIT_TYPE="${INIT_TYPE:-}"
-case "$KERNEL_NAME" in ""|*[!a-zA-Z0-9_.@-]*) _log_fatal "invalid KERNEL_NAME: $KERNEL_NAME" ;; esac
-case "$SERVICE_NAME" in ""|*[!a-zA-Z0-9_.@-]*) _log_fatal "invalid SERVICE_NAME: $SERVICE_NAME" ;; esac
+_valid_name() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9_.@-]+$'; }
+_valid_name "$KERNEL_NAME" || _log_fatal "invalid KERNEL_NAME: $KERNEL_NAME"
+_valid_name "$SERVICE_NAME" || _log_fatal "invalid SERVICE_NAME: $SERVICE_NAME"
 BIN_KERNEL="${CLASH_BASE_DIR}/bin/${KERNEL_NAME}"
 
 _pid_matches_kernel() {
@@ -684,3 +708,5 @@ else
     _write_install_state
     _log_warn "clashctl not installed — build manually with Go: bash install.sh"
 fi
+
+exit 0

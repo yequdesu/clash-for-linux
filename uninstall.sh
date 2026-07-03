@@ -19,6 +19,8 @@ _load_install_env() {
     local file="$1"
     [ -f "$file" ] || return 0
     while IFS='=' read -r key val; do
+        key="${key%$'\r'}"
+        val="${val%$'\r'}"
         case "$key" in
             CLASH_BASE_DIR) CLASH_BASE_DIR="$val" ;;
             SERVICE_NAME|CLASH_SERVICE_NAME) SERVICE_NAME="$val" ;;
@@ -98,8 +100,9 @@ _load_install_env "$REAL_HOME/.config/clashctl/install.env"
 CLASH_BASE_DIR="${CLASH_BASE_DIR:-$REAL_HOME/clashctl}"
 KERNEL_NAME="${KERNEL_NAME:-mihomo}"
 SERVICE_NAME="${SERVICE_NAME:-clashctl}"
-case "$KERNEL_NAME" in ""|*[!a-zA-Z0-9_.@-]*) KERNEL_NAME="mihomo" ;; esac
-case "$SERVICE_NAME" in ""|*[!a-zA-Z0-9_.@-]*) SERVICE_NAME="clashctl" ;; esac
+_valid_name() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9_.@-]+$'; }
+_valid_name "$KERNEL_NAME" || KERNEL_NAME="mihomo"
+_valid_name "$SERVICE_NAME" || SERVICE_NAME="clashctl"
 case ":$PATH:" in *:/usr/local/bin:*) ;; *) export PATH="/usr/local/bin:$PATH" ;; esac
 
 echo ""
