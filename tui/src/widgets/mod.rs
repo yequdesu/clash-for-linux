@@ -1,4 +1,3 @@
-pub mod card;
 pub mod gauge;
 pub mod sparkline;
 pub mod status_dot;

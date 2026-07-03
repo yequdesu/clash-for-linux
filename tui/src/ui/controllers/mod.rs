@@ -1,0 +1,12 @@
+pub(crate) mod command_palette;
+pub(crate) mod connections;
+pub(crate) mod events;
+pub(crate) mod i18n;
+pub(crate) mod logs;
+pub(crate) mod navigation;
+pub(crate) mod network_settings;
+pub(crate) mod preferences;
+pub(crate) mod proxies;
+pub(crate) mod subscriptions;
+pub(crate) mod traffic;
+pub(crate) mod update;

@@ -8,6 +8,8 @@ mod i18n;
 mod mouse;
 mod settings;
 mod theme;
+mod ui;
+mod update;
 mod widgets;
 mod window;
 
@@ -49,7 +51,7 @@ fn main() -> io::Result<()> {
 
     let event_handler = EventHandler::new(50, data_rx);
 
-    app.refresh_data();
+    update::refresh_data(&mut app);
 
     let result = run(&mut terminal, &mut app, &event_handler);
 
@@ -76,10 +78,10 @@ fn run(
 ) -> io::Result<()> {
     loop {
         while let Some(data_event) = handler.try_recv_data() {
-            app.apply_data_event(data_event);
+            update::apply_data_event(app, data_event);
         }
 
-        terminal.draw(|frame| app::render(frame, app))?;
+        terminal.draw(|frame| ui::app_shell::render(frame, app))?;
 
         match handler.next() {
             Ok(Event::Key(key)) => {
@@ -135,10 +137,10 @@ fn run(
                 if app.pending_confirmation.is_some() {
                     match key.code {
                         KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
-                            app.cancel_pending_action()
+                            update::cancel_pending_action(app)
                         }
                         KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
-                            app.confirm_pending_action()
+                            update::confirm_pending_action(app)
                         }
                         _ => {}
                     }
@@ -201,20 +203,24 @@ fn run(
                         }
                     }
                     KeyCode::Tab | KeyCode::Char('\t') => app.next_tab(),
-                    KeyCode::Right if app.tab == Tab::Settings => app.next_settings_section(),
-                    KeyCode::Left if app.tab == Tab::Settings => app.prev_settings_section(),
+                    KeyCode::Right if app.ui_state.active_page == Tab::Settings => {
+                        app.next_settings_section()
+                    }
+                    KeyCode::Left if app.ui_state.active_page == Tab::Settings => {
+                        app.prev_settings_section()
+                    }
                     KeyCode::Right => app.next_tab(),
                     KeyCode::Left => app.prev_tab(),
                     KeyCode::Char('?') | KeyCode::Char('h') => {
-                        app.tab = Tab::Help;
+                        app.ui_state.active_page = Tab::Help;
                         app.show_help = false;
                     }
-                    KeyCode::Char('R') if app.tab == Tab::Settings => {
+                    KeyCode::Char('R') if app.ui_state.active_page == Tab::Settings => {
                         app.cycle_default_traffic_range();
                     }
                     KeyCode::Char('r') | KeyCode::Char('R') => {
-                        app.refresh_data();
-                        if app.tab == Tab::Traffic {
+                        update::refresh_data(app);
+                        if app.ui_state.active_page == Tab::Traffic {
                             app.refresh_traffic();
                         }
                     }
@@ -237,32 +243,32 @@ fn run(
                         app.traffic_selected_idx = app.traffic_top.len().saturating_sub(1);
                     }
                     KeyCode::Char('1') => {
-                        app.tab = Tab::Subscriptions;
+                        app.ui_state.active_page = Tab::Subscriptions;
                         app.refresh_subscriptions();
                     }
                     KeyCode::Char('2') => {
-                        app.tab = Tab::Proxies;
+                        app.ui_state.active_page = Tab::Proxies;
                     }
                     KeyCode::Char('3') => {
-                        app.tab = Tab::Connections;
+                        app.ui_state.active_page = Tab::Connections;
                     }
                     KeyCode::Char('4') => {
-                        app.tab = Tab::Traffic;
+                        app.ui_state.active_page = Tab::Traffic;
                         app.refresh_traffic();
                     }
                     KeyCode::Char('5') => {
-                        app.tab = Tab::Network;
+                        app.ui_state.active_page = Tab::Network;
                     }
                     KeyCode::Char('6') => {
-                        app.tab = Tab::Logs;
+                        app.ui_state.active_page = Tab::Logs;
                     }
                     KeyCode::Char('7') => {
-                        app.tab = Tab::Settings;
+                        app.ui_state.active_page = Tab::Settings;
                     }
                     KeyCode::Char('8') => {
-                        app.tab = Tab::Help;
+                        app.ui_state.active_page = Tab::Help;
                     }
-                    KeyCode::Enter => match app.tab {
+                    KeyCode::Enter => match app.ui_state.active_page {
                         Tab::Proxies => {
                             if app.node_picker_open {
                                 app.switch_selected_node();
@@ -283,94 +289,100 @@ fn run(
                         }
                         _ => {}
                     },
-                    KeyCode::Char('[') if app.tab == Tab::Traffic => {
+                    KeyCode::Char('[') if app.ui_state.active_page == Tab::Traffic => {
                         app.prev_traffic_range();
                     }
-                    KeyCode::Char(']') if app.tab == Tab::Traffic => {
+                    KeyCode::Char(']') if app.ui_state.active_page == Tab::Traffic => {
                         app.next_traffic_range();
                     }
-                    KeyCode::Char('m') | KeyCode::Char('M') if app.tab == Tab::Traffic => {
+                    KeyCode::Char('m') | KeyCode::Char('M')
+                        if app.ui_state.active_page == Tab::Traffic =>
+                    {
                         app.toggle_traffic_chart();
                     }
-                    KeyCode::Char('y') | KeyCode::Char('Y') if app.tab == Tab::Traffic => {
+                    KeyCode::Char('y') | KeyCode::Char('Y')
+                        if app.ui_state.active_page == Tab::Traffic =>
+                    {
                         app.next_traffic_dimension();
                     }
-                    KeyCode::Char('e') if app.tab == Tab::Traffic => {
+                    KeyCode::Char('e') if app.ui_state.active_page == Tab::Traffic => {
                         app.export_traffic_csv();
                     }
-                    KeyCode::Char('s') if app.tab == Tab::Traffic => {
+                    KeyCode::Char('s') if app.ui_state.active_page == Tab::Traffic => {
                         app.run_traffic_action(TrafficAction::SampleOnce);
                     }
-                    KeyCode::Char('b') if app.tab == Tab::Traffic => {
+                    KeyCode::Char('b') if app.ui_state.active_page == Tab::Traffic => {
                         app.run_traffic_action(TrafficAction::CollectorStart);
                     }
-                    KeyCode::Char('x') if app.tab == Tab::Traffic => {
+                    KeyCode::Char('x') if app.ui_state.active_page == Tab::Traffic => {
                         app.run_traffic_action(TrafficAction::CollectorStop);
                     }
-                    KeyCode::Char('n') if app.tab == Tab::Traffic => {
+                    KeyCode::Char('n') if app.ui_state.active_page == Tab::Traffic => {
                         app.run_traffic_action(TrafficAction::CollectorRestart);
                     }
-                    KeyCode::Char('p') if app.tab == Tab::Traffic => {
+                    KeyCode::Char('p') if app.ui_state.active_page == Tab::Traffic => {
                         app.run_traffic_action(TrafficAction::PruneDefault);
                     }
-                    KeyCode::Char('u') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('u') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.update_selected_subscription();
                     }
-                    KeyCode::Char('a') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('a') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.begin_subscription_add();
                     }
-                    KeyCode::Char('I') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('I') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.begin_subscription_import();
                     }
-                    KeyCode::Char('X') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('X') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.remove_selected_subscription();
                     }
-                    KeyCode::Char('L') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('L') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.show_subscription_log();
                     }
-                    KeyCode::Char('e') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('e') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.begin_subscription_profile_edit();
                     }
-                    KeyCode::Char('i') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('i') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.begin_subscription_edit(SubscriptionEditField::Interval);
                     }
-                    KeyCode::Char('U') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('U') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.begin_subscription_edit(SubscriptionEditField::Url);
                     }
-                    KeyCode::Char('A') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('A') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.begin_subscription_edit(SubscriptionEditField::UserAgent);
                     }
-                    KeyCode::Char('P') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('P') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.begin_subscription_edit(SubscriptionEditField::UpdateProxy);
                     }
-                    KeyCode::Char('M') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('M') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.begin_subscription_edit(SubscriptionEditField::ConvertMode);
                     }
-                    KeyCode::Char('t') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('t') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.begin_subscription_edit(SubscriptionEditField::AddTag);
                     }
-                    KeyCode::Char('T') if app.tab == Tab::Subscriptions => {
+                    KeyCode::Char('T') if app.ui_state.active_page == Tab::Subscriptions => {
                         app.begin_subscription_edit(SubscriptionEditField::RemoveTag);
                     }
-                    KeyCode::Char('s') | KeyCode::Char('S') if app.tab == Tab::Proxies => {
+                    KeyCode::Char('s') | KeyCode::Char('S')
+                        if app.ui_state.active_page == Tab::Proxies =>
+                    {
                         app.toggle_sort();
                     }
-                    KeyCode::Char('x') if app.tab == Tab::Network => {
+                    KeyCode::Char('x') if app.ui_state.active_page == Tab::Network => {
                         app.run_network_action(NetworkAction::Stop);
                     }
-                    KeyCode::Char('n') if app.tab == Tab::Network => {
+                    KeyCode::Char('n') if app.ui_state.active_page == Tab::Network => {
                         app.run_network_action(NetworkAction::Restart);
                     }
-                    KeyCode::Char('v') if app.tab == Tab::Network => {
+                    KeyCode::Char('v') if app.ui_state.active_page == Tab::Network => {
                         app.run_network_action(NetworkAction::Status);
                     }
-                    KeyCode::Char('V') if app.tab == Tab::Network => {
+                    KeyCode::Char('V') if app.ui_state.active_page == Tab::Network => {
                         app.run_network_action(NetworkAction::Doctor);
                     }
-                    KeyCode::Char('c') if app.tab == Tab::Network => {
+                    KeyCode::Char('c') if app.ui_state.active_page == Tab::Network => {
                         app.run_network_action(NetworkAction::ConfigDoctor);
                     }
-                    KeyCode::Char('t') if app.tab == Tab::Network => {
+                    KeyCode::Char('t') if app.ui_state.active_page == Tab::Network => {
                         let action = if app.tun_enabled {
                             NetworkAction::TunOff
                         } else {
@@ -378,110 +390,110 @@ fn run(
                         };
                         app.run_network_action(action);
                     }
-                    KeyCode::Char('e') if app.tab == Tab::Network => {
+                    KeyCode::Char('e') if app.ui_state.active_page == Tab::Network => {
                         app.run_network_action(NetworkAction::Env);
                     }
-                    KeyCode::Char('p') if app.tab == Tab::Network => {
+                    KeyCode::Char('p') if app.ui_state.active_page == Tab::Network => {
                         app.run_network_action(NetworkAction::ProxyOn);
                     }
-                    KeyCode::Char('P') if app.tab == Tab::Network => {
+                    KeyCode::Char('P') if app.ui_state.active_page == Tab::Network => {
                         app.run_network_action(NetworkAction::ProxyOff);
                     }
-                    KeyCode::Char('d') if app.tab == Tab::Network => {
+                    KeyCode::Char('d') if app.ui_state.active_page == Tab::Network => {
                         app.run_network_action(NetworkAction::DesktopStatus);
                     }
-                    KeyCode::Char('D') if app.tab == Tab::Network => {
+                    KeyCode::Char('D') if app.ui_state.active_page == Tab::Network => {
                         app.run_network_action(NetworkAction::DesktopOn);
                     }
-                    KeyCode::Char('O') if app.tab == Tab::Network => {
+                    KeyCode::Char('O') if app.ui_state.active_page == Tab::Network => {
                         app.run_network_action(NetworkAction::DesktopOff);
                     }
-                    KeyCode::Char('d') if app.tab == Tab::Settings => {
+                    KeyCode::Char('d') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::Doctor);
                     }
-                    KeyCode::Char('D') if app.tab == Tab::Settings => {
+                    KeyCode::Char('D') if app.ui_state.active_page == Tab::Settings => {
                         app.run_traffic_action(TrafficAction::Reset);
                     }
-                    KeyCode::Char('c') if app.tab == Tab::Settings => {
+                    KeyCode::Char('c') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::ConfigDoctor);
                     }
-                    KeyCode::Char('B') if app.tab == Tab::Settings => {
+                    KeyCode::Char('B') if app.ui_state.active_page == Tab::Settings => {
                         app.cycle_default_page();
                     }
-                    KeyCode::Char('E') if app.tab == Tab::Settings => {
+                    KeyCode::Char('E') if app.ui_state.active_page == Tab::Settings => {
                         app.cycle_theme_preference();
                     }
-                    KeyCode::Char('F') if app.tab == Tab::Settings => {
+                    KeyCode::Char('F') if app.ui_state.active_page == Tab::Settings => {
                         app.cycle_refresh_interval();
                     }
-                    KeyCode::Char('M') if app.tab == Tab::Settings => {
+                    KeyCode::Char('M') if app.ui_state.active_page == Tab::Settings => {
                         app.toggle_mouse_preference();
                     }
-                    KeyCode::Char('C') if app.tab == Tab::Settings => {
+                    KeyCode::Char('C') if app.ui_state.active_page == Tab::Settings => {
                         app.toggle_dangerous_confirmations();
                     }
-                    KeyCode::Char('T') if app.tab == Tab::Settings => {
+                    KeyCode::Char('T') if app.ui_state.active_page == Tab::Settings => {
                         app.begin_settings_prompt(SettingsPromptKind::TrafficPruneRetention);
                     }
-                    KeyCode::Char('H') if app.tab == Tab::Settings => {
+                    KeyCode::Char('H') if app.ui_state.active_page == Tab::Settings => {
                         app.cycle_default_traffic_chart();
                     }
-                    KeyCode::Char('y') if app.tab == Tab::Settings => {
+                    KeyCode::Char('y') if app.ui_state.active_page == Tab::Settings => {
                         app.cycle_default_traffic_dimension();
                     }
-                    KeyCode::Char('V') if app.tab == Tab::Settings => {
+                    KeyCode::Char('V') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::ConfigView);
                     }
-                    KeyCode::Char('W') if app.tab == Tab::Settings => {
+                    KeyCode::Char('W') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::ConfigRaw);
                     }
-                    KeyCode::Char('v') if app.tab == Tab::Settings => {
+                    KeyCode::Char('v') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::Version);
                     }
-                    KeyCode::Char('t') if app.tab == Tab::Settings => {
+                    KeyCode::Char('t') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::ProxyTest);
                     }
-                    KeyCode::Char('m') if app.tab == Tab::Settings => {
+                    KeyCode::Char('m') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::ConfigMerge);
                     }
-                    KeyCode::Char('a') if app.tab == Tab::Settings => {
+                    KeyCode::Char('a') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::ConfigMergeAutofix);
                     }
-                    KeyCode::Char('s') if app.tab == Tab::Settings => {
+                    KeyCode::Char('s') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::SecretStatus);
                     }
-                    KeyCode::Char('S') if app.tab == Tab::Settings => {
+                    KeyCode::Char('S') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::SecretReveal);
                     }
-                    KeyCode::Char('N') if app.tab == Tab::Settings => {
+                    KeyCode::Char('N') if app.ui_state.active_page == Tab::Settings => {
                         app.begin_secret_set();
                     }
-                    KeyCode::Char('P') if app.tab == Tab::Settings => {
+                    KeyCode::Char('P') if app.ui_state.active_page == Tab::Settings => {
                         app.begin_settings_prompt(SettingsPromptKind::ConfigSetPorts);
                     }
-                    KeyCode::Char('A') if app.tab == Tab::Settings => {
+                    KeyCode::Char('A') if app.ui_state.active_page == Tab::Settings => {
                         app.begin_settings_prompt(SettingsPromptKind::ConfigSetApi);
                     }
-                    KeyCode::Char('Y') if app.tab == Tab::Settings => {
+                    KeyCode::Char('Y') if app.ui_state.active_page == Tab::Settings => {
                         app.begin_settings_prompt(SettingsPromptKind::ConfigSetDnsMode);
                     }
-                    KeyCode::Char('L') if app.tab == Tab::Settings => {
+                    KeyCode::Char('L') if app.ui_state.active_page == Tab::Settings => {
                         app.begin_settings_prompt(SettingsPromptKind::ConfigSetLan);
                     }
-                    KeyCode::Char('z') if app.tab == Tab::Settings => {
+                    KeyCode::Char('z') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::GeodataUpdate);
                     }
-                    KeyCode::Char('Z') if app.tab == Tab::Settings => {
+                    KeyCode::Char('Z') if app.ui_state.active_page == Tab::Settings => {
                         app.begin_settings_prompt(SettingsPromptKind::GeodataUpdateVersion);
                     }
-                    KeyCode::Char('u') if app.tab == Tab::Settings => {
+                    KeyCode::Char('u') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::ApiUpgrade);
                     }
-                    KeyCode::Char('K') if app.tab == Tab::Settings => {
+                    KeyCode::Char('K') if app.ui_state.active_page == Tab::Settings => {
                         app.run_settings_action(SettingsAction::KernelUpgrade);
                     }
                     KeyCode::Char('o') | KeyCode::Char('O') => {
-                        if app.tab == Tab::Proxies {
+                        if app.ui_state.active_page == Tab::Proxies {
                             if app.node_picker_open {
                                 app.close_node_picker();
                             } else {
@@ -490,42 +502,42 @@ fn run(
                         }
                     }
                     KeyCode::Char('d') => {
-                        if app.tab == Tab::Proxies {
+                        if app.ui_state.active_page == Tab::Proxies {
                             app.test_selected_delay();
                         }
                     }
                     KeyCode::Char('D') => {
-                        if app.tab == Tab::Proxies {
+                        if app.ui_state.active_page == Tab::Proxies {
                             app.test_all_delays();
                         }
                     }
                     KeyCode::Char('p') => {
-                        if app.tab != Tab::Logs {
+                        if app.ui_state.active_page != Tab::Logs {
                             app.cycle_proxy_mode();
                         } else {
                             app.toggle_log_pause();
                         }
                     }
                     KeyCode::Char('f') | KeyCode::Char('F') => {
-                        if app.tab == Tab::Logs {
+                        if app.ui_state.active_page == Tab::Logs {
                             app.cycle_log_level();
                         }
                     }
                     KeyCode::Char('c') => {
-                        if app.tab == Tab::Connections {
+                        if app.ui_state.active_page == Tab::Connections {
                             app.close_selected_connection();
-                        } else if app.tab == Tab::Logs {
+                        } else if app.ui_state.active_page == Tab::Logs {
                             app.clear_logs();
                         }
                     }
-                    KeyCode::Char('C') if app.tab == Tab::Connections => {
+                    KeyCode::Char('C') if app.ui_state.active_page == Tab::Connections => {
                         app.close_all_connections();
                     }
                     _ => {}
                 }
             }
             Ok(Event::Mouse(mouse)) => app.handle_mouse_event(mouse.kind, mouse.column, mouse.row),
-            Ok(Event::Tick) => app.on_tick(),
+            Ok(Event::Tick) => update::on_tick(app),
             Ok(_) => {}
             Err(e) => app.error_msg = Some(e.to_string()),
         }
