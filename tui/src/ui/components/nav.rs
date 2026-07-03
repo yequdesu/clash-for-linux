@@ -85,11 +85,6 @@ impl Tab {
             _ => None,
         }
     }
-
-    #[allow(dead_code)]
-    pub fn from_index(idx: usize) -> Tab {
-        Self::all().get(idx).copied().unwrap_or(Tab::Subscriptions)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

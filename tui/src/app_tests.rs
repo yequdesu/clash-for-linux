@@ -17,6 +17,7 @@ use crate::ui::components::action_bar::{
     action_button_item, action_button_rects, action_button_width, display_width,
     hitbox_for_action_spec,
 };
+use crate::ui::components::nav::Tab;
 use crate::ui::modals::subscription::register_subscription_form_hitboxes;
 use crate::ui::pages::settings::{
     SETTINGS_CONFIG_ACTION_IDS, SETTINGS_DIAGNOSTIC_ACTION_IDS, SETTINGS_FORM_ACTION_IDS,
@@ -28,7 +29,6 @@ use crate::ui::pages::traffic::{
     traffic_line_chart_lines, traffic_locked_bucket_lines, traffic_status_lines,
     traffic_window_bounds,
 };
-use crate::widgets::tab_bar::Tab;
 use crossterm::event::{MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use std::sync::mpsc;
@@ -100,7 +100,7 @@ fn hitbox_width_uses_terminal_display_columns_for_cjk_labels() {
     );
 
     let hitboxes =
-        crate::widgets::tab_bar::tab_hitboxes(Rect::new(0, 0, 80, 1), LanguageSetting::ZhCn);
+        crate::ui::components::nav::tab_hitboxes(Rect::new(0, 0, 80, 1), LanguageSetting::ZhCn);
     assert_eq!(hitboxes[0].area, Rect::new(0, 0, 6, 1));
     assert_eq!(hitboxes[1].area.x, 6);
 }
@@ -236,12 +236,12 @@ fn traffic_chart_mouse_pans_and_locks_time_buckets() {
     );
 
     app.handle_mouse_event(MouseEventKind::ScrollDown, 2, 2);
-    assert_eq!(app.traffic_window_offset, 3);
+    assert_eq!(app.ui_state.traffic.window_offset, 3);
     app.handle_mouse_event(MouseEventKind::ScrollUp, 2, 2);
-    assert_eq!(app.traffic_window_offset, 0);
+    assert_eq!(app.ui_state.traffic.window_offset, 0);
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 20, 2);
-    assert_eq!(app.traffic_locked_bucket, Some(12));
+    assert_eq!(app.ui_state.traffic.locked_bucket, Some(12));
     let locked = traffic_locked_bucket_lines(&app)
         .iter()
         .map(|line| {
@@ -256,7 +256,7 @@ fn traffic_chart_mouse_pans_and_locks_time_buckets() {
     assert!(locked.contains("conn 12"));
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 2);
-    assert_eq!(app.traffic_locked_bucket, None);
+    assert_eq!(app.ui_state.traffic.locked_bucket, None);
 }
 
 #[test]
@@ -404,7 +404,11 @@ fn command_palette_submit_can_open_settings_forms() {
     app.submit_command_palette();
 
     assert_eq!(
-        app.settings_prompt.as_ref().map(|prompt| prompt.kind),
+        app.ui_state
+            .settings
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.kind),
         Some(SettingsPromptKind::ConfigSetDnsMode)
     );
 
@@ -417,7 +421,11 @@ fn command_palette_submit_can_open_settings_forms() {
     app.submit_command_palette();
 
     assert_eq!(
-        app.settings_prompt.as_ref().map(|prompt| prompt.kind),
+        app.ui_state
+            .settings
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.kind),
         Some(SettingsPromptKind::TrafficPruneRetention)
     );
 
@@ -430,7 +438,11 @@ fn command_palette_submit_can_open_settings_forms() {
     app.submit_command_palette();
 
     assert_eq!(
-        app.settings_prompt.as_ref().map(|prompt| prompt.kind),
+        app.ui_state
+            .settings
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.kind),
         Some(SettingsPromptKind::GeodataUpdateVersion)
     );
 }
@@ -504,7 +516,7 @@ fn traffic_action_event_reports_output_or_error() {
         app.status_msg.as_deref(),
         Some("traffic action completed: traffic sample")
     );
-    assert_eq!(app.traffic_output, vec!["[+] sampled"]);
+    assert_eq!(app.ui_state.traffic.output, vec!["[+] sampled"]);
 
     app.apply_data_event(DataEvent::TrafficActionResult(
         "traffic sample".into(),
@@ -514,7 +526,7 @@ fn traffic_action_event_reports_output_or_error() {
         app.error_msg.as_deref(),
         Some("Traffic action failed: traffic sample: kernel unavailable")
     );
-    assert_eq!(app.traffic_output, vec!["kernel unavailable"]);
+    assert_eq!(app.ui_state.traffic.output, vec!["kernel unavailable"]);
 }
 
 #[test]
@@ -531,11 +543,15 @@ fn settings_result_event_reports_output_or_error() {
         Some("settings action completed: doctor")
     );
     assert!(app
-        .settings_output
+        .ui_state
+        .settings
+        .output
         .iter()
         .any(|line| line.contains("[+] ok")));
     assert!(app
-        .settings_output
+        .ui_state
+        .settings
+        .output
         .iter()
         .any(|line| line.contains("secret: ********")));
 
@@ -560,7 +576,9 @@ fn settings_secret_reveal_event_allows_explicit_secret_output() {
     ));
 
     assert!(app
-        .settings_output
+        .ui_state
+        .settings
+        .output
         .iter()
         .any(|line| line.contains("visible-secret")));
 }
@@ -577,11 +595,15 @@ fn settings_command_result_redacts_secret_set_output() {
     ));
 
     assert!(app
-        .settings_output
+        .ui_state
+        .settings
+        .output
         .iter()
         .any(|line| line.contains("secret: ********")));
     assert!(!app
-        .settings_output
+        .ui_state
+        .settings
+        .output
         .iter()
         .any(|line| line.contains("new-secret")));
 }
@@ -600,7 +622,10 @@ fn subscription_output_event_keeps_multiline_output() {
         app.status_msg.as_deref(),
         Some("subscription action completed: log")
     );
-    assert_eq!(app.subscription_output, vec!["line one", "line two"]);
+    assert_eq!(
+        app.ui_state.subscriptions.output,
+        vec!["line one", "line two"]
+    );
 }
 
 #[test]
@@ -611,13 +636,13 @@ fn dangerous_network_action_opens_confirmation() {
 
     app.run_network_action(NetworkAction::Stop);
 
-    let pending = app.pending_confirmation.as_ref().unwrap();
+    let pending = app.ui_state.modals.pending_confirmation.as_ref().unwrap();
     assert!(pending.title.contains("stop"));
     assert!(pending.message.contains("clashctl stop"));
 
     app.cancel_pending_action();
-    assert!(app.pending_confirmation.is_none());
-    assert_eq!(app.status_msg.as_deref(), Some("action cancelled"));
+    assert!(app.ui_state.modals.pending_confirmation.is_none());
+    assert_eq!(app.status_msg.as_deref(), Some("Action cancelled"));
 }
 
 #[test]
@@ -628,7 +653,7 @@ fn dangerous_settings_action_opens_confirmation() {
 
     app.run_settings_action(SettingsAction::KernelUpgrade);
 
-    let pending = app.pending_confirmation.as_ref().unwrap();
+    let pending = app.ui_state.modals.pending_confirmation.as_ref().unwrap();
     assert!(pending.title.contains("kernel upgrade"));
     assert!(pending.message.contains("clashctl upgrade-kernel"));
 }
@@ -645,8 +670,8 @@ fn secret_set_prompt_opens_redacted_confirmation() {
     app.push_settings_prompt_char('c');
     app.submit_settings_prompt();
 
-    assert!(app.settings_prompt.is_none());
-    let pending = app.pending_confirmation.as_ref().unwrap();
+    assert!(app.ui_state.settings.prompt.is_none());
+    let pending = app.ui_state.modals.pending_confirmation.as_ref().unwrap();
     assert!(pending.title.contains("Set secret"));
     assert!(pending.message.contains("clashctl secret ********"));
     assert!(!pending.message.contains("s3c"));
@@ -793,8 +818,8 @@ fn config_set_api_prompt_redacts_secret_confirmation() {
     }
     app.submit_settings_prompt();
 
-    assert!(app.settings_prompt.is_none());
-    let pending = app.pending_confirmation.as_ref().unwrap();
+    assert!(app.ui_state.settings.prompt.is_none());
+    let pending = app.ui_state.modals.pending_confirmation.as_ref().unwrap();
     assert!(pending.title.contains("Set API"));
     assert!(pending
         .message
@@ -836,8 +861,8 @@ fn config_set_prompt_opens_confirmation_with_cli_args() {
     }
     app.submit_settings_prompt();
 
-    assert!(app.settings_prompt.is_none());
-    let pending = app.pending_confirmation.as_ref().unwrap();
+    assert!(app.ui_state.settings.prompt.is_none());
+    let pending = app.ui_state.modals.pending_confirmation.as_ref().unwrap();
     assert!(pending.title.contains("Set ports"));
     assert!(pending
         .message
@@ -887,7 +912,7 @@ fn settings_prompt_structured_fields_build_cli_args() {
     }
     app.submit_settings_prompt();
 
-    let pending = app.pending_confirmation.as_ref().unwrap();
+    let pending = app.ui_state.modals.pending_confirmation.as_ref().unwrap();
     match &pending.action {
         super::PendingAction::SettingsCommand { args, .. } => {
             assert_eq!(
@@ -920,7 +945,7 @@ fn mouse_selects_settings_prompt_field() {
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 1, 1);
 
-    assert_eq!(app.settings_prompt.as_ref().unwrap().active, 1);
+    assert_eq!(app.ui_state.settings.prompt.as_ref().unwrap().active, 1);
     assert_eq!(app.status_msg.as_deref(), Some("editing Set API · Secret"));
 }
 
@@ -936,8 +961,8 @@ fn config_set_prompt_validation_keeps_prompt_open() {
     }
     app.submit_settings_prompt();
 
-    assert!(app.pending_confirmation.is_none());
-    assert!(app.settings_prompt.is_some());
+    assert!(app.ui_state.modals.pending_confirmation.is_none());
+    assert!(app.ui_state.settings.prompt.is_some());
     assert!(app
         .error_msg
         .as_deref()
@@ -957,7 +982,11 @@ fn settings_mouse_config_form_actions_open_prompts() {
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 1, 1);
 
     assert_eq!(
-        app.settings_prompt.as_ref().map(|prompt| prompt.kind),
+        app.ui_state
+            .settings
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.kind),
         Some(SettingsPromptKind::ConfigSetLan)
     );
 }
@@ -980,7 +1009,7 @@ fn mouse_click_focuses_settings_prompt_value() {
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 1, 1);
 
-    assert!(app.settings_prompt.is_some());
+    assert!(app.ui_state.settings.prompt.is_some());
     assert!(app.error_msg.is_none());
     assert_eq!(
         app.status_msg.as_deref(),
@@ -988,9 +1017,13 @@ fn mouse_click_focuses_settings_prompt_value() {
     );
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 1, 2);
-    assert!(app.pending_confirmation.is_none());
+    assert!(app.ui_state.modals.pending_confirmation.is_none());
     assert_eq!(
-        app.settings_prompt.as_ref().map(|prompt| prompt.kind),
+        app.ui_state
+            .settings
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.kind),
         Some(SettingsPromptKind::GeodataUpdateVersion)
     );
 }
@@ -1003,7 +1036,7 @@ fn dangerous_traffic_action_opens_confirmation() {
 
     app.run_traffic_action(TrafficAction::Reset);
 
-    let pending = app.pending_confirmation.as_ref().unwrap();
+    let pending = app.ui_state.modals.pending_confirmation.as_ref().unwrap();
     assert!(pending.title.contains("traffic reset"));
     assert!(pending.message.contains("clashctl traffic reset --yes"));
 }
@@ -1260,13 +1293,13 @@ fn subscription_edit_prompt_prefills_profile_metadata() {
     }];
 
     app.begin_subscription_edit(SubscriptionEditField::Interval);
-    let prompt = app.subscription_prompt.as_ref().unwrap();
+    let prompt = app.ui_state.subscriptions.prompt.as_ref().unwrap();
     assert_eq!(prompt.profile_id, 9);
     assert_eq!(prompt.value, "6h");
 
     app.begin_subscription_edit(SubscriptionEditField::UpdateProxy);
     assert_eq!(
-        app.subscription_prompt.as_ref().unwrap().value,
+        app.ui_state.subscriptions.prompt.as_ref().unwrap().value,
         "core".to_string()
     );
 }
@@ -1296,7 +1329,7 @@ fn subscription_profile_edit_form_prefills_profile_metadata() {
 
     app.begin_subscription_profile_edit();
 
-    let form = app.subscription_edit_form.as_ref().unwrap();
+    let form = app.ui_state.subscriptions.edit_form.as_ref().unwrap();
     assert_eq!(form.profile_id, 10);
     assert_eq!(form.name, "Example");
     assert_eq!(form.url, "https://example.test/sub.yaml");
@@ -1314,18 +1347,18 @@ fn subscription_add_and_import_prompts_do_not_require_existing_profile() {
     app.ui_state.active_page = Tab::Subscriptions;
 
     app.begin_subscription_add();
-    let form = app.subscription_add_form.as_ref().unwrap();
+    let form = app.ui_state.subscriptions.add_form.as_ref().unwrap();
     assert!(form.source.is_empty());
     assert_eq!(form.update_proxy, "auto");
     assert_eq!(form.convert_mode, "auto");
-    assert!(app.subscription_prompt.is_none());
+    assert!(app.ui_state.subscriptions.prompt.is_none());
 
     app.begin_subscription_import();
-    let prompt = app.subscription_prompt.as_ref().unwrap();
+    let prompt = app.ui_state.subscriptions.prompt.as_ref().unwrap();
     assert_eq!(prompt.field, SubscriptionEditField::ImportDirectory);
     assert_eq!(prompt.profile_id, 0);
     assert!(prompt.value.is_empty());
-    assert!(app.subscription_add_form.is_none());
+    assert!(app.ui_state.subscriptions.add_form.is_none());
 }
 
 #[test]
@@ -1341,7 +1374,7 @@ fn subscription_add_form_keyboard_navigation_targets_active_field() {
     app.prev_subscription_form_field();
     app.push_subscription_prompt_char('t');
 
-    let form = app.subscription_add_form.as_ref().unwrap();
+    let form = app.ui_state.subscriptions.add_form.as_ref().unwrap();
     assert_eq!(form.source, "ht");
     assert_eq!(form.name, "W");
 }
@@ -1355,7 +1388,7 @@ fn subscription_add_form_empty_source_keeps_form_open() {
     app.begin_subscription_add();
     app.submit_subscription_prompt();
 
-    assert!(app.subscription_add_form.is_some());
+    assert!(app.ui_state.subscriptions.add_form.is_some());
     assert!(app.error_msg.as_deref().unwrap_or("").contains("source"));
 }
 
@@ -1384,7 +1417,7 @@ fn remove_subscription_opens_confirmation() {
 
     app.remove_selected_subscription();
 
-    let pending = app.pending_confirmation.as_ref().unwrap();
+    let pending = app.ui_state.modals.pending_confirmation.as_ref().unwrap();
     assert!(pending.title.contains("remove subscription 5"));
     assert!(pending.message.contains("clashctl sub remove 5"));
 }
@@ -1449,7 +1482,7 @@ fn mouse_click_selects_subscription_row() {
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 5);
 
-    assert_eq!(app.selected_sub_idx, 1);
+    assert_eq!(app.ui_state.subscriptions.selected_idx, 1);
 }
 
 #[test]
@@ -1481,7 +1514,7 @@ fn mouse_click_subscription_edit_action_opens_prompt() {
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 1, 5);
 
-    let prompt = app.subscription_prompt.as_ref().unwrap();
+    let prompt = app.ui_state.subscriptions.prompt.as_ref().unwrap();
     assert_eq!(prompt.profile_id, 7);
     assert_eq!(prompt.field, SubscriptionEditField::Interval);
     assert_eq!(prompt.value, "6h");
@@ -1527,7 +1560,7 @@ fn pending_confirmation_blocks_underlying_mouse_actions() {
             next_update: String::new(),
         },
     ];
-    app.pending_confirmation = Some(super::PendingConfirmation {
+    app.ui_state.modals.pending_confirmation = Some(super::PendingConfirmation {
         title: "Confirm stop".into(),
         message: "Run `clashctl stop`?".into(),
         action: super::PendingAction::Network(NetworkAction::Stop),
@@ -1538,15 +1571,15 @@ fn pending_confirmation_blocks_underlying_mouse_actions() {
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 5);
 
-    assert_eq!(app.selected_sub_idx, 0);
-    assert!(app.pending_confirmation.is_some());
+    assert_eq!(app.ui_state.subscriptions.selected_idx, 0);
+    assert!(app.ui_state.modals.pending_confirmation.is_some());
 }
 
 #[test]
 fn mouse_prompt_submit_and_cancel_actions_are_dispatched() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let mut app = test_app(&rt);
-    app.subscription_prompt = Some(SubscriptionPrompt {
+    app.ui_state.subscriptions.prompt = Some(SubscriptionPrompt {
         field: SubscriptionEditField::Url,
         profile_id: 1,
         value: String::new(),
@@ -1562,7 +1595,7 @@ fn mouse_prompt_submit_and_cancel_actions_are_dispatched() {
         .as_deref()
         .unwrap_or("")
         .contains("cannot be empty"));
-    assert!(app.subscription_prompt.is_some());
+    assert!(app.ui_state.subscriptions.prompt.is_some());
 
     app.ui_state.hitboxes.clear();
     app.ui_state.hitboxes.register(
@@ -1570,7 +1603,7 @@ fn mouse_prompt_submit_and_cancel_actions_are_dispatched() {
         HitboxAction::CancelSubscriptionPrompt,
     );
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 2);
-    assert!(app.subscription_prompt.is_none());
+    assert!(app.ui_state.subscriptions.prompt.is_none());
 }
 
 #[test]
@@ -1586,7 +1619,10 @@ fn mouse_selects_subscription_add_form_field() {
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
 
-    assert_eq!(app.subscription_add_form.as_ref().unwrap().active, 3);
+    assert_eq!(
+        app.ui_state.subscriptions.add_form.as_ref().unwrap().active,
+        3
+    );
 }
 
 #[test]
@@ -1619,7 +1655,15 @@ fn mouse_selects_subscription_edit_form_field() {
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
 
-    assert_eq!(app.subscription_edit_form.as_ref().unwrap().active, 5);
+    assert_eq!(
+        app.ui_state
+            .subscriptions
+            .edit_form
+            .as_ref()
+            .unwrap()
+            .active,
+        5
+    );
 }
 
 #[test]
@@ -1685,7 +1729,7 @@ fn mouse_click_selects_proxy_node_when_picker_is_open() {
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
 
-    assert_eq!(app.selected_node_idx, 2);
+    assert_eq!(app.ui_state.proxies.selected_node_idx, 2);
 }
 
 #[test]
@@ -1705,8 +1749,8 @@ fn node_picker_blocks_underlying_mouse_actions() {
 
     app.handle_mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1);
 
-    assert_eq!(app.selected_proxy_idx, 0);
-    assert!(app.node_picker_open);
+    assert_eq!(app.ui_state.proxies.selected_idx, 0);
+    assert!(app.ui_state.proxies.node_picker_open);
 }
 
 #[test]
@@ -1725,9 +1769,9 @@ fn mouse_wheel_scrolls_proxy_node_picker() {
         .register(Rect::new(0, 0, 40, 10), HitboxAction::ScrollProxyNodes);
 
     app.handle_mouse_event(MouseEventKind::ScrollDown, 5, 5);
-    assert_eq!(app.selected_node_idx, 3);
+    assert_eq!(app.ui_state.proxies.selected_node_idx, 3);
     app.handle_mouse_event(MouseEventKind::ScrollUp, 5, 5);
-    assert_eq!(app.selected_node_idx, 0);
+    assert_eq!(app.ui_state.proxies.selected_node_idx, 0);
 }
 
 #[test]
@@ -1741,9 +1785,9 @@ fn mouse_wheel_dispatches_to_registered_scroll_area() {
         .register(Rect::new(0, 0, 40, 10), HitboxAction::ScrollLogs);
 
     app.handle_mouse_event(MouseEventKind::ScrollDown, 5, 5);
-    assert_eq!(app.log_scroll, 3);
+    assert_eq!(app.ui_state.logs.scroll, 3);
     app.handle_mouse_event(MouseEventKind::ScrollUp, 5, 5);
-    assert_eq!(app.log_scroll, 0);
+    assert_eq!(app.ui_state.logs.scroll, 0);
 }
 
 #[test]
@@ -1794,15 +1838,15 @@ fn node_picker_opens_on_current_node_and_wraps_selection() {
         .insert("Auto".into(), selector_proxy("B", vec!["A", "B", "C"]));
 
     app.open_node_picker();
-    assert!(app.node_picker_open);
-    assert_eq!(app.selected_node_idx, 1);
+    assert!(app.ui_state.proxies.node_picker_open);
+    assert_eq!(app.ui_state.proxies.selected_node_idx, 1);
 
     app.select_node_down();
-    assert_eq!(app.selected_node_idx, 2);
+    assert_eq!(app.ui_state.proxies.selected_node_idx, 2);
     app.select_node_down();
-    assert_eq!(app.selected_node_idx, 0);
+    assert_eq!(app.ui_state.proxies.selected_node_idx, 0);
     app.select_node_up();
-    assert_eq!(app.selected_node_idx, 2);
+    assert_eq!(app.ui_state.proxies.selected_node_idx, 2);
 }
 
 #[test]
@@ -1815,8 +1859,8 @@ fn node_picker_stays_closed_when_selected_group_has_no_nodes() {
         .insert("Direct".into(), selector_proxy("", Vec::new()));
 
     app.open_node_picker();
-    assert!(!app.node_picker_open);
-    assert_eq!(app.selected_node_idx, 0);
+    assert!(!app.ui_state.proxies.node_picker_open);
+    assert_eq!(app.ui_state.proxies.selected_node_idx, 0);
     assert_eq!(
         app.status_msg.as_deref(),
         Some("selected group has no nodes")

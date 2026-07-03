@@ -65,7 +65,7 @@ pub(crate) fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App)
             } else {
                 app.t(Msg::SubscriptionsStatusReady)
             };
-            let style = if i == app.selected_sub_idx {
+            let style = if i == app.ui_state.subscriptions.selected_idx {
                 Style::default()
                     .fg(CLASH_THEME.text)
                     .bg(CLASH_THEME.primary)
@@ -196,13 +196,15 @@ pub(crate) fn subscription_action_buttons(app: &App) -> Vec<(String, HitboxActio
 }
 
 pub(crate) fn render_subscription_output(frame: &mut Frame, area: Rect, app: &App) {
-    let lines = if app.subscription_output.is_empty() {
+    let lines = if app.ui_state.subscriptions.output.is_empty() {
         vec![Line::from(Span::styled(
             format!("  {}", app.t(Msg::SubscriptionsOutputPlaceholder)),
             CLASH_THEME.muted,
         ))]
     } else {
-        app.subscription_output
+        app.ui_state
+            .subscriptions
+            .output
             .iter()
             .map(|line| Line::from(Span::styled(format!("  {}", line), CLASH_THEME.text)))
             .collect()

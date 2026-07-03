@@ -14,7 +14,7 @@ use crate::ui::components::action_bar::*;
 use crate::ui::layout::centered_rect;
 
 pub(crate) fn render_settings_prompt(frame: &mut Frame, area: Rect, app: &mut App) {
-    let Some(prompt) = app.settings_prompt.clone() else {
+    let Some(prompt) = app.ui_state.settings.prompt.clone() else {
         return;
     };
     let popup = centered_rect(area, 68, 44);

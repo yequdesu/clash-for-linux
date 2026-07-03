@@ -162,10 +162,10 @@ pub(crate) fn render_network(frame: &mut Frame, area: Rect, app: &mut App) {
     let output_visible_height = mid_bot[1].height.saturating_sub(2) as usize;
     if !app.network_output.is_empty() && output_visible_height > 0 {
         let max_scroll = output_lines.len().saturating_sub(output_visible_height);
-        app.network_output_scroll = app.network_output_scroll.min(max_scroll);
+        app.ui_state.network.output_scroll = app.ui_state.network.output_scroll.min(max_scroll);
         output_lines = output_lines
             .into_iter()
-            .skip(app.network_output_scroll)
+            .skip(app.ui_state.network.output_scroll)
             .take(output_visible_height)
             .collect();
     }

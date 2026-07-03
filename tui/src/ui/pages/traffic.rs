@@ -26,7 +26,9 @@ pub(crate) fn render_traffic(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let (down_total, up_total, down_rate, up_rate) = traffic_summary(&app.traffic_points);
     let filter = app
-        .traffic_filter_key
+        .ui_state
+        .traffic
+        .filter_key
         .as_deref()
         .map(|key| trunc_str(key, 32))
         .unwrap_or_else(|| app.t(Msg::TrafficAll).into());
@@ -35,11 +37,11 @@ pub(crate) fn render_traffic(frame: &mut Frame, area: Rect, app: &mut App) {
             format!(
                 "  {} [{}]  {} [{}]  {} [{}]  {} [{}]  ",
                 app.t(Msg::TrafficRange),
-                app.traffic_range.label(),
+                app.ui_state.traffic.range.label(),
                 app.t(Msg::TrafficChart),
-                app.traffic_chart.label(),
+                app.ui_state.traffic.chart.label(),
                 app.t(Msg::TrafficBy),
-                app.traffic_dimension.label(),
+                app.ui_state.traffic.dimension.label(),
                 app.t(Msg::TrafficFilter),
                 filter
             ),
@@ -99,7 +101,9 @@ pub(crate) fn register_clamped_hitbox(
 
 pub(crate) fn render_traffic_chart(frame: &mut Frame, area: Rect, app: &mut App) {
     let filter = app
-        .traffic_filter_key
+        .ui_state
+        .traffic
+        .filter_key
         .as_deref()
         .map(|key| trunc_str(key, 28))
         .unwrap_or_else(|| app.t(Msg::TrafficAllTraffic).into());
@@ -115,9 +119,9 @@ pub(crate) fn render_traffic_chart(frame: &mut Frame, area: Rect, app: &mut App)
             format!(
                 " {} · {} · {} · {} · {} ",
                 app.t(Msg::TrafficHistory),
-                app.traffic_range.label(),
-                app.traffic_range.step_arg(),
-                app.traffic_chart.label(),
+                app.ui_state.traffic.range.label(),
+                app.ui_state.traffic.range.step_arg(),
+                app.ui_state.traffic.chart.label(),
                 filter
             ),
             Style::default().fg(CLASH_THEME.primary).bold(),
@@ -131,7 +135,9 @@ pub(crate) fn render_traffic_chart(frame: &mut Frame, area: Rect, app: &mut App)
 
     if app.traffic_points.is_empty() {
         let msg = app
-            .traffic_error
+            .ui_state
+            .traffic
+            .error
             .as_deref()
             .unwrap_or(app.t(Msg::TrafficNoHistory));
         frame.render_widget(
@@ -145,7 +151,7 @@ pub(crate) fn render_traffic_chart(frame: &mut Frame, area: Rect, app: &mut App)
         return;
     }
 
-    if app.traffic_chart == TrafficChartKind::Line {
+    if app.ui_state.traffic.chart == TrafficChartKind::Line {
         render_traffic_line_chart(frame, inner, app);
         return;
     }
@@ -154,7 +160,7 @@ pub(crate) fn render_traffic_chart(frame: &mut Frame, area: Rect, app: &mut App)
     let (start, end) = traffic_window_bounds(
         app.traffic_points.len(),
         max_lines,
-        app.traffic_window_offset,
+        app.ui_state.traffic.window_offset,
     );
     register_traffic_bar_bucket_hitboxes(app, inner, start, end.saturating_sub(start));
     let visible = &app.traffic_points[start..end];
@@ -205,7 +211,7 @@ pub(crate) fn render_traffic_line_chart(frame: &mut Frame, area: Rect, app: &mut
     let (start, end) = traffic_window_bounds(
         app.traffic_points.len(),
         chart_width,
-        app.traffic_window_offset,
+        app.ui_state.traffic.window_offset,
     );
     register_traffic_line_bucket_hitboxes(
         app,
@@ -456,7 +462,7 @@ pub(crate) fn render_traffic_top(frame: &mut Frame, area: Rect, app: &mut App) {
         .title(Span::styled(
             format!(
                 " {} {} ",
-                app.traffic_dimension.label(),
+                app.ui_state.traffic.dimension.label(),
                 app.t(Msg::TrafficBreakdown)
             ),
             Style::default().fg(CLASH_THEME.primary).bold(),
@@ -481,7 +487,7 @@ pub(crate) fn render_traffic_top(frame: &mut Frame, area: Rect, app: &mut App) {
         .iter()
         .enumerate()
         .map(|(idx, row)| {
-            let style = if idx == app.traffic_selected_idx {
+            let style = if idx == app.ui_state.traffic.selected_idx {
                 Style::default()
                     .fg(CLASH_THEME.text)
                     .bg(CLASH_THEME.primary)
@@ -496,7 +502,7 @@ pub(crate) fn render_traffic_top(frame: &mut Frame, area: Rect, app: &mut App) {
     let table = Table::new(rows, [Constraint::Ratio(2, 3), Constraint::Ratio(1, 3)])
         .header(
             Row::new(vec![
-                app.traffic_dimension.label(),
+                app.ui_state.traffic.dimension.label(),
                 app.t(Msg::TrafficTotal),
             ])
             .style(Style::default().fg(CLASH_THEME.muted)),
@@ -512,7 +518,7 @@ pub(crate) fn render_traffic_top(frame: &mut Frame, area: Rect, app: &mut App) {
 }
 
 pub(crate) fn render_traffic_detail(frame: &mut Frame, area: Rect, app: &mut App) {
-    let selected = app.traffic_top.get(app.traffic_selected_idx);
+    let selected = app.traffic_top.get(app.ui_state.traffic.selected_idx);
     let lines = if let Some(row) = selected {
         let mut lines = vec![
             Line::from(vec![
@@ -520,7 +526,7 @@ pub(crate) fn render_traffic_detail(frame: &mut Frame, area: Rect, app: &mut App
                     format!(
                         "  {} {}: ",
                         app.t(Msg::TrafficSelected),
-                        app.traffic_dimension.label()
+                        app.ui_state.traffic.dimension.label()
                     ),
                     CLASH_THEME.muted,
                 ),
@@ -585,7 +591,7 @@ pub(crate) fn render_traffic_detail(frame: &mut Frame, area: Rect, app: &mut App
 }
 
 pub(crate) fn traffic_locked_bucket_lines(app: &App) -> Vec<Line<'static>> {
-    let Some(idx) = app.traffic_locked_bucket else {
+    let Some(idx) = app.ui_state.traffic.locked_bucket else {
         return Vec::new();
     };
     let Some(point) = app.traffic_points.get(idx) else {
@@ -615,7 +621,9 @@ pub(crate) fn traffic_locked_bucket_lines(app: &App) -> Vec<Line<'static>> {
 }
 
 pub(crate) fn traffic_output_lines(app: &App) -> Vec<Line<'static>> {
-    app.traffic_output
+    app.ui_state
+        .traffic
+        .output
         .iter()
         .take(2)
         .map(|line| {

@@ -24,8 +24,11 @@ pub(crate) fn render_logs(frame: &mut Frame, area: Rect, app: &mut App) {
     let max_lines = log_area.height.saturating_sub(2) as usize;
     let visible_logs = app.visible_logs();
     let start = if visible_logs.len() > max_lines {
-        (app.log_scroll.min(visible_logs.len().saturating_sub(1)))
-            .saturating_sub(max_lines.saturating_sub(1))
+        (app.ui_state
+            .logs
+            .scroll
+            .min(visible_logs.len().saturating_sub(1)))
+        .saturating_sub(max_lines.saturating_sub(1))
     } else {
         0
     };
@@ -59,7 +62,11 @@ pub(crate) fn render_logs(frame: &mut Frame, area: Rect, app: &mut App) {
             .collect()
     };
 
-    let pause_str = if app.log_paused { "⏸" } else { "▶" };
+    let pause_str = if app.ui_state.logs.paused {
+        "⏸"
+    } else {
+        "▶"
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(
@@ -76,7 +83,7 @@ pub(crate) fn render_logs(frame: &mut Frame, area: Rect, app: &mut App) {
             format!(
                 " p:{}  f:{}+  c:clear  /:search  scroll:navigate ",
                 pause_str,
-                app.log_level.label()
+                app.ui_state.logs.level.label()
             ),
             Style::default().fg(CLASH_THEME.muted),
         ));

@@ -2,57 +2,61 @@ use crate::ui::prelude::*;
 
 impl App {
     pub fn command_palette_active(&self) -> bool {
-        self.command_palette_open
+        self.ui_state.command_palette.open
     }
 
     pub fn open_command_palette(&mut self) {
-        if self.pending_confirmation.is_some()
-            || self.settings_prompt.is_some()
+        if self.ui_state.modals.pending_confirmation.is_some()
+            || self.ui_state.settings.prompt.is_some()
             || self.subscription_input_active()
         {
-            self.status_msg = Some("close the current dialog before opening commands".into());
+            self.status_msg = Some(self.t(Msg::DialogCloseFirst).into());
             return;
         }
-        self.command_palette_open = true;
-        self.command_query.clear();
-        self.command_selected_idx = 0;
-        self.search_active = false;
+        self.ui_state.command_palette.open = true;
+        self.ui_state.command_palette.query.clear();
+        self.ui_state.command_palette.selected_idx = 0;
+        self.ui_state.proxies.search_active = false;
         self.show_help = false;
         self.error_msg = None;
     }
 
     pub fn close_command_palette(&mut self) {
-        self.command_palette_open = false;
-        self.command_query.clear();
-        self.command_selected_idx = 0;
+        self.ui_state.command_palette.open = false;
+        self.ui_state.command_palette.query.clear();
+        self.ui_state.command_palette.selected_idx = 0;
     }
 
     pub fn push_command_palette_char(&mut self, c: char) {
-        self.command_query.push(c);
-        self.command_selected_idx = 0;
+        self.ui_state.command_palette.query.push(c);
+        self.ui_state.command_palette.selected_idx = 0;
     }
 
     pub fn pop_command_palette_char(&mut self) {
-        self.command_query.pop();
-        self.command_selected_idx = 0;
+        self.ui_state.command_palette.query.pop();
+        self.ui_state.command_palette.selected_idx = 0;
     }
 
     pub fn command_palette_select_down(&mut self) {
         let len = self.command_palette_matches().len();
         if len > 0 {
-            self.command_selected_idx = (self.command_selected_idx + 1).min(len - 1);
+            self.ui_state.command_palette.selected_idx =
+                (self.ui_state.command_palette.selected_idx + 1).min(len - 1);
         }
     }
 
     pub fn command_palette_select_up(&mut self) {
-        self.command_selected_idx = self.command_selected_idx.saturating_sub(1);
+        self.ui_state.command_palette.selected_idx =
+            self.ui_state.command_palette.selected_idx.saturating_sub(1);
     }
 
     pub fn submit_command_palette(&mut self) {
         let matches = self.command_palette_matches();
         let Some(spec) = matches
             .get(
-                self.command_selected_idx
+                self.ui_state
+                    .command_palette
+                    .selected_idx
                     .min(matches.len().saturating_sub(1)),
             )
             .copied()
@@ -65,7 +69,7 @@ impl App {
     }
 
     pub(crate) fn command_palette_matches(&self) -> Vec<&'static action_registry::ActionSpec> {
-        let query = self.command_query.trim().to_lowercase();
+        let query = self.ui_state.command_palette.query.trim().to_lowercase();
         action_registry::all_actions()
             .iter()
             .filter(|spec| {
@@ -98,7 +102,7 @@ impl App {
         if spec.id.starts_with("nav.") {
             self.ui_state.active_page = spec.page;
             self.show_help = false;
-            self.node_picker_open = false;
+            self.ui_state.proxies.node_picker_open = false;
             self.reset_selection();
             if self.ui_state.active_page == Tab::Subscriptions {
                 self.refresh_subscriptions();
@@ -112,7 +116,7 @@ impl App {
         if self.ui_state.active_page != spec.page {
             self.ui_state.active_page = spec.page;
             self.show_help = false;
-            self.node_picker_open = false;
+            self.ui_state.proxies.node_picker_open = false;
             self.reset_selection();
             if self.ui_state.active_page == Tab::Subscriptions {
                 self.refresh_subscriptions();

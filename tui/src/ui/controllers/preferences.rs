@@ -27,36 +27,37 @@ impl App {
     }
 
     pub fn cycle_default_traffic_range(&mut self) {
-        self.traffic_range =
+        self.ui_state.traffic.range =
             TrafficRange::from_setting_key(&self.ui_settings.traffic_default_range).next();
-        self.ui_settings.traffic_default_range = self.traffic_range.setting_key().into();
+        self.ui_settings.traffic_default_range = self.ui_state.traffic.range.setting_key().into();
         self.reset_traffic_view_window();
         self.save_ui_settings(format!(
             "default traffic range: {}",
-            self.traffic_range.label()
+            self.ui_state.traffic.range.label()
         ));
     }
 
     pub fn cycle_default_traffic_chart(&mut self) {
-        self.traffic_chart =
+        self.ui_state.traffic.chart =
             TrafficChartKind::from_setting_key(&self.ui_settings.traffic_default_chart).next();
-        self.ui_settings.traffic_default_chart = self.traffic_chart.setting_key().into();
+        self.ui_settings.traffic_default_chart = self.ui_state.traffic.chart.setting_key().into();
         self.save_ui_settings(format!(
             "default traffic chart: {}",
-            self.traffic_chart.label()
+            self.ui_state.traffic.chart.label()
         ));
     }
 
     pub fn cycle_default_traffic_dimension(&mut self) {
-        self.traffic_dimension =
+        self.ui_state.traffic.dimension =
             TrafficDimension::from_setting_key(&self.ui_settings.traffic_default_dimension).next();
-        self.ui_settings.traffic_default_dimension = self.traffic_dimension.setting_key().into();
-        self.traffic_filter_key = None;
-        self.traffic_selected_idx = 0;
+        self.ui_settings.traffic_default_dimension =
+            self.ui_state.traffic.dimension.setting_key().into();
+        self.ui_state.traffic.filter_key = None;
+        self.ui_state.traffic.selected_idx = 0;
         self.reset_traffic_view_window();
         self.save_ui_settings(format!(
             "default traffic dimension: {}",
-            self.traffic_dimension.label()
+            self.ui_state.traffic.dimension.label()
         ));
     }
 
@@ -72,12 +73,12 @@ impl App {
 
     pub fn toggle_dangerous_confirmations(&mut self) {
         if self.ui_settings.confirm_dangerous_actions {
-            self.pending_confirmation = Some(PendingConfirmation {
-                title: "Confirm settings change".into(),
-                message: "Disable confirmation prompts for dangerous actions?".into(),
+            self.ui_state.modals.pending_confirmation = Some(PendingConfirmation {
+                title: self.confirm_title(self.t(Msg::SettingsConfirmDanger)),
+                message: self.t(Msg::ConfirmDisableDangerous).into(),
                 action: PendingAction::ToggleDangerousConfirmations,
             });
-            self.status_msg = Some("confirm action with Enter/y, cancel with Esc/n".into());
+            self.status_msg = Some(self.confirm_hint());
             return;
         }
         self.apply_dangerous_confirmations_toggle();
@@ -100,7 +101,7 @@ impl App {
                 self.status_msg = Some(success_msg);
             }
             Err(e) => {
-                self.error_msg = Some(format!("save settings failed: {}", e));
+                self.error_msg = Some(self.settings_save_failed(&e));
             }
         }
     }

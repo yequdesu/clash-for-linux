@@ -2,7 +2,6 @@ use ratatui::style::Color;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-#[allow(dead_code)]
 pub struct Theme {
     pub bg_outer: Color,
     pub bg: Color,
@@ -15,7 +14,6 @@ pub struct Theme {
     pub danger: Color,
     pub text: Color,
     pub muted: Color,
-    pub sparkline_bg: Color,
 }
 
 pub struct DynamicTheme;
@@ -40,7 +38,6 @@ const DEFAULT_THEME: Theme = Theme {
     danger: Color::Rgb(239, 68, 68),
     text: Color::Rgb(249, 250, 251),
     muted: Color::Rgb(156, 163, 175),
-    sparkline_bg: Color::Rgb(30, 41, 59),
 };
 
 const HIGH_CONTRAST_THEME: Theme = Theme {
@@ -55,7 +52,6 @@ const HIGH_CONTRAST_THEME: Theme = Theme {
     danger: Color::Rgb(248, 113, 113),
     text: Color::Rgb(255, 255, 255),
     muted: Color::Rgb(209, 213, 219),
-    sparkline_bg: Color::Rgb(18, 18, 22),
 };
 
 const CLASSIC_THEME: Theme = Theme {
@@ -70,7 +66,6 @@ const CLASSIC_THEME: Theme = Theme {
     danger: Color::Rgb(252, 165, 165),
     text: Color::Rgb(226, 232, 240),
     muted: Color::Rgb(148, 163, 184),
-    sparkline_bg: Color::Rgb(24, 32, 38),
 };
 
 impl Deref for DynamicTheme {

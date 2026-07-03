@@ -6,12 +6,12 @@ impl App {
             return;
         }
         if self.should_confirm() && action.requires_confirmation() {
-            self.pending_confirmation = Some(PendingConfirmation {
-                title: format!("Confirm {}", action.label()),
+            self.ui_state.modals.pending_confirmation = Some(PendingConfirmation {
+                title: self.confirm_title(action.label()),
                 message: format!("Run `clashctl {}`?", action.args().join(" ")),
                 action: PendingAction::Network(action),
             });
-            self.status_msg = Some("confirm action with Enter/y, cancel with Esc/n".into());
+            self.status_msg = Some(self.confirm_hint());
             return;
         }
         self.execute_network_action(action);
@@ -34,12 +34,12 @@ impl App {
             return;
         }
         if self.should_confirm() && action.requires_confirmation() {
-            self.pending_confirmation = Some(PendingConfirmation {
-                title: format!("Confirm {}", action.label()),
+            self.ui_state.modals.pending_confirmation = Some(PendingConfirmation {
+                title: self.confirm_title(action.label()),
                 message: format!("Run `clashctl {}`?", action.args().join(" ")),
                 action: PendingAction::Settings(action),
             });
-            self.status_msg = Some("confirm action with Enter/y, cancel with Esc/n".into());
+            self.status_msg = Some(self.confirm_hint());
             return;
         }
         self.execute_settings_action(action);
@@ -49,7 +49,7 @@ impl App {
         if self.ui_state.active_page != Tab::Settings {
             return;
         }
-        self.settings_prompt = Some(SettingsPrompt::new(kind));
+        self.ui_state.settings.prompt = Some(SettingsPrompt::new(kind));
         self.error_msg = None;
         self.status_msg = Some(format!("editing {}", kind.label()));
     }
@@ -71,30 +71,30 @@ impl App {
 
     pub fn next_settings_section(&mut self) {
         if self.ui_state.active_page == Tab::Settings {
-            self.settings_section = self.settings_section.next();
+            self.ui_state.settings.section = self.ui_state.settings.section.next();
         }
     }
 
     pub fn prev_settings_section(&mut self) {
         if self.ui_state.active_page == Tab::Settings {
-            self.settings_section = self.settings_section.prev();
+            self.ui_state.settings.section = self.ui_state.settings.section.prev();
         }
     }
 
     pub fn select_settings_section(&mut self, idx: usize) {
         if let Some(section) = SettingsSection::all().get(idx).copied() {
-            self.settings_section = section;
+            self.ui_state.settings.section = section;
         }
     }
 
     pub fn cancel_settings_prompt(&mut self) {
-        if self.settings_prompt.take().is_some() {
+        if self.ui_state.settings.prompt.take().is_some() {
             self.status_msg = Some("settings edit cancelled".into());
         }
     }
 
     pub fn focus_settings_prompt_value(&mut self) {
-        if let Some(prompt) = self.settings_prompt.as_ref() {
+        if let Some(prompt) = self.ui_state.settings.prompt.as_ref() {
             self.error_msg = None;
             let field = prompt
                 .active_field()
@@ -109,40 +109,40 @@ impl App {
     }
 
     pub fn next_settings_prompt_field(&mut self) {
-        if let Some(prompt) = self.settings_prompt.as_mut() {
+        if let Some(prompt) = self.ui_state.settings.prompt.as_mut() {
             prompt.next_field();
             self.focus_settings_prompt_value();
         }
     }
 
     pub fn prev_settings_prompt_field(&mut self) {
-        if let Some(prompt) = self.settings_prompt.as_mut() {
+        if let Some(prompt) = self.ui_state.settings.prompt.as_mut() {
             prompt.prev_field();
             self.focus_settings_prompt_value();
         }
     }
 
     pub fn select_settings_prompt_field(&mut self, idx: usize) {
-        if let Some(prompt) = self.settings_prompt.as_mut() {
+        if let Some(prompt) = self.ui_state.settings.prompt.as_mut() {
             prompt.select_field(idx);
             self.focus_settings_prompt_value();
         }
     }
 
     pub fn push_settings_prompt_char(&mut self, c: char) {
-        if let Some(prompt) = self.settings_prompt.as_mut() {
+        if let Some(prompt) = self.ui_state.settings.prompt.as_mut() {
             prompt.push_char(c);
         }
     }
 
     pub fn pop_settings_prompt_char(&mut self) {
-        if let Some(prompt) = self.settings_prompt.as_mut() {
+        if let Some(prompt) = self.ui_state.settings.prompt.as_mut() {
             prompt.pop_char();
         }
     }
 
     pub fn submit_settings_prompt(&mut self) {
-        let Some(prompt) = self.settings_prompt.take() else {
+        let Some(prompt) = self.ui_state.settings.prompt.take() else {
             return;
         };
         let value = prompt.value().trim().to_string();
@@ -151,7 +151,7 @@ impl App {
                 "{} cannot be empty",
                 self.settings_prompt_label(prompt.kind)
             ));
-            self.settings_prompt = Some(prompt);
+            self.ui_state.settings.prompt = Some(prompt);
             return;
         }
 
@@ -160,14 +160,14 @@ impl App {
             Ok(args) => args,
             Err(e) => {
                 self.error_msg = Some(e);
-                self.settings_prompt = Some(prompt);
+                self.ui_state.settings.prompt = Some(prompt);
                 return;
             }
         };
         if self.should_confirm() {
             let preview = prompt.kind.command_preview(&args);
-            self.pending_confirmation = Some(PendingConfirmation {
-                title: format!("Confirm {}", self.settings_prompt_label(prompt.kind)),
+            self.ui_state.modals.pending_confirmation = Some(PendingConfirmation {
+                title: self.confirm_title(self.settings_prompt_label(prompt.kind)),
                 message: format!("Run `{}`?", preview),
                 action: PendingAction::SettingsCommand {
                     label,
@@ -175,7 +175,7 @@ impl App {
                     redact_output: true,
                 },
             });
-            self.status_msg = Some("confirm action with Enter/y, cancel with Esc/n".into());
+            self.status_msg = Some(self.confirm_hint());
             return;
         }
         self.execute_settings_command(label, args, true);
@@ -229,7 +229,7 @@ impl App {
         args: Vec<String>,
         target: SudoTarget,
     ) {
-        self.sudo_candidate = Some(SudoPrompt {
+        self.ui_state.modals.sudo_candidate = Some(SudoPrompt {
             label,
             args,
             target,
@@ -239,11 +239,13 @@ impl App {
 
     pub(crate) fn clear_sudo_candidate(&mut self, label: &str) {
         if self
+            .ui_state
+            .modals
             .sudo_candidate
             .as_ref()
             .is_some_and(|candidate| candidate.label == label)
         {
-            self.sudo_candidate = None;
+            self.ui_state.modals.sudo_candidate = None;
         }
     }
 
@@ -252,6 +254,8 @@ impl App {
             return false;
         }
         let Some(mut prompt) = self
+            .ui_state
+            .modals
             .sudo_candidate
             .take()
             .filter(|candidate| candidate.label == label)
@@ -260,47 +264,47 @@ impl App {
         };
         prompt.password.clear();
         self.error_msg = None;
-        self.status_msg = Some(format!("sudo password required for {}", label));
-        self.sudo_prompt = Some(prompt);
+        self.status_msg = Some(self.sudo_required_status(label));
+        self.ui_state.modals.sudo_prompt = Some(prompt);
         true
     }
 
     pub fn sudo_prompt_active(&self) -> bool {
-        self.sudo_prompt.is_some()
+        self.ui_state.modals.sudo_prompt.is_some()
     }
 
     pub fn push_sudo_prompt_char(&mut self, c: char) {
-        if let Some(prompt) = self.sudo_prompt.as_mut() {
+        if let Some(prompt) = self.ui_state.modals.sudo_prompt.as_mut() {
             prompt.password.push(c);
         }
     }
 
     pub fn pop_sudo_prompt_char(&mut self) {
-        if let Some(prompt) = self.sudo_prompt.as_mut() {
+        if let Some(prompt) = self.ui_state.modals.sudo_prompt.as_mut() {
             prompt.password.pop();
         }
     }
 
     pub fn focus_sudo_prompt_value(&mut self) {
-        if let Some(prompt) = self.sudo_prompt.as_ref() {
-            self.status_msg = Some(format!("enter sudo password for {}", prompt.label));
+        if let Some(prompt) = self.ui_state.modals.sudo_prompt.as_ref() {
+            self.status_msg = Some(self.sudo_required_status(&prompt.label));
             self.error_msg = None;
         }
     }
 
     pub fn cancel_sudo_prompt(&mut self) {
-        if self.sudo_prompt.take().is_some() {
-            self.status_msg = Some("sudo action cancelled".into());
+        if self.ui_state.modals.sudo_prompt.take().is_some() {
+            self.status_msg = Some(self.t(Msg::ActionCancelled).into());
         }
     }
 
     pub fn submit_sudo_prompt(&mut self) {
-        let Some(prompt) = self.sudo_prompt.take() else {
+        let Some(prompt) = self.ui_state.modals.sudo_prompt.take() else {
             return;
         };
         if prompt.password.is_empty() {
-            self.error_msg = Some("sudo password cannot be empty".into());
-            self.sudo_prompt = Some(prompt);
+            self.error_msg = Some(self.t(Msg::SudoPasswordEmpty).into());
+            self.ui_state.modals.sudo_prompt = Some(prompt);
             return;
         }
         let retry_candidate = SudoPrompt {
@@ -309,7 +313,7 @@ impl App {
             target: prompt.target.clone(),
             password: String::new(),
         };
-        self.sudo_candidate = Some(retry_candidate);
+        self.ui_state.modals.sudo_candidate = Some(retry_candidate);
         let label = prompt.label.clone();
         let args = prompt.args.clone();
         let target = prompt.target.clone();
@@ -340,7 +344,7 @@ impl App {
     }
 
     pub fn confirm_pending_action(&mut self) {
-        let Some(pending) = self.pending_confirmation.take() else {
+        let Some(pending) = self.ui_state.modals.pending_confirmation.take() else {
             return;
         };
         match pending.action {
@@ -360,8 +364,8 @@ impl App {
     }
 
     pub fn cancel_pending_action(&mut self) {
-        if self.pending_confirmation.take().is_some() {
-            self.status_msg = Some("action cancelled".into());
+        if self.ui_state.modals.pending_confirmation.take().is_some() {
+            self.status_msg = Some(self.t(Msg::ActionCancelled).into());
         }
     }
 }

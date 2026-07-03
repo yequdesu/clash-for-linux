@@ -6,7 +6,9 @@ impl App {
             return;
         }
         let api = self.api.clone();
-        let conn_id = self.connections[self.connections_selected].id.clone();
+        let conn_id = self.connections[self.ui_state.connections.selected_idx]
+            .id
+            .clone();
         self.rt.spawn(async move {
             let _ = api.close_connection(&conn_id).await;
         });

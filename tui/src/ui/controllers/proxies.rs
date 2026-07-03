@@ -53,14 +53,15 @@ impl App {
             return;
         }
         let current = self.selected_proxy_current_node();
-        self.selected_node_idx = nodes.iter().position(|node| node == &current).unwrap_or(0);
-        self.node_picker_open = true;
+        self.ui_state.proxies.selected_node_idx =
+            nodes.iter().position(|node| node == &current).unwrap_or(0);
+        self.ui_state.proxies.node_picker_open = true;
         self.status_msg = Some("node picker opened".into());
     }
 
     pub fn close_node_picker(&mut self) {
-        if self.node_picker_open {
-            self.node_picker_open = false;
+        if self.ui_state.proxies.node_picker_open {
+            self.ui_state.proxies.node_picker_open = false;
             self.status_msg = Some("node picker closed".into());
         }
     }
@@ -68,22 +69,23 @@ impl App {
     pub fn select_node_down(&mut self) {
         let len = self.selected_proxy_nodes().len();
         if len == 0 {
-            self.selected_node_idx = 0;
+            self.ui_state.proxies.selected_node_idx = 0;
             return;
         }
-        self.selected_node_idx = (self.selected_node_idx + 1) % len;
+        self.ui_state.proxies.selected_node_idx =
+            (self.ui_state.proxies.selected_node_idx + 1) % len;
     }
 
     pub fn select_node_up(&mut self) {
         let len = self.selected_proxy_nodes().len();
         if len == 0 {
-            self.selected_node_idx = 0;
+            self.ui_state.proxies.selected_node_idx = 0;
             return;
         }
-        self.selected_node_idx = if self.selected_node_idx == 0 {
+        self.ui_state.proxies.selected_node_idx = if self.ui_state.proxies.selected_node_idx == 0 {
             len - 1
         } else {
-            self.selected_node_idx - 1
+            self.ui_state.proxies.selected_node_idx - 1
         };
     }
 
@@ -95,18 +97,18 @@ impl App {
         if nodes.is_empty() {
             return;
         }
-        let target = nodes[self.selected_node_idx.min(nodes.len() - 1)].clone();
+        let target = nodes[self.ui_state.proxies.selected_node_idx.min(nodes.len() - 1)].clone();
         let api = self.api.clone();
         let tx = self.data_tx.clone();
         self.rt.spawn(async move {
             let result = api.switch_proxy(&group_name, &target).await;
             let _ = tx.send(DataEvent::SwitchResult(result));
         });
-        self.node_picker_open = false;
+        self.ui_state.proxies.node_picker_open = false;
     }
 
     pub fn toggle_sort(&mut self) {
-        self.sort_mode = !self.sort_mode;
+        self.ui_state.proxies.sort_by_delay = !self.ui_state.proxies.sort_by_delay;
         self.clamp_proxy_selection();
     }
 

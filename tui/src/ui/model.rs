@@ -1,21 +1,157 @@
 use crate::api::ProfileEntry;
 use crate::i18n::{SettingsPromptFieldMsg, SubscriptionFieldMsg};
 use crate::mouse::{HitboxRegistry, NetworkAction, SettingsAction, TrafficAction};
+use crate::ui::components::nav::Tab;
 use crate::ui::utils::{log_line_rank, profile_interval_label};
-use crate::widgets::tab_bar::Tab;
 
 pub(crate) struct UiState {
     pub active_page: Tab,
     pub hitboxes: HitboxRegistry,
+    pub proxies: ProxyPageState,
+    pub connections: ConnectionsPageState,
+    pub logs: LogsPageState,
+    pub help: HelpPageState,
+    pub subscriptions: SubscriptionsPageState,
+    pub network: NetworkPageState,
+    pub settings: SettingsPageState,
+    pub traffic: TrafficPageState,
+    pub command_palette: CommandPaletteState,
+    pub modals: ModalState,
 }
 
 impl UiState {
-    pub(crate) fn new(active_page: Tab) -> Self {
+    pub(crate) fn new(
+        active_page: Tab,
+        traffic_range: TrafficRange,
+        traffic_chart: TrafficChartKind,
+        traffic_dimension: TrafficDimension,
+    ) -> Self {
         Self {
             active_page,
             hitboxes: HitboxRegistry::default(),
+            proxies: ProxyPageState::default(),
+            connections: ConnectionsPageState::default(),
+            logs: LogsPageState::default(),
+            help: HelpPageState::default(),
+            subscriptions: SubscriptionsPageState::default(),
+            network: NetworkPageState::default(),
+            settings: SettingsPageState::default(),
+            traffic: TrafficPageState::new(traffic_range, traffic_chart, traffic_dimension),
+            command_palette: CommandPaletteState::default(),
+            modals: ModalState::default(),
         }
     }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ProxyPageState {
+    pub selected_idx: usize,
+    pub node_picker_open: bool,
+    pub selected_node_idx: usize,
+    pub search_active: bool,
+    pub search_query: String,
+    pub sort_by_delay: bool,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ConnectionsPageState {
+    pub selected_idx: usize,
+}
+
+#[derive(Debug)]
+pub(crate) struct LogsPageState {
+    pub scroll: usize,
+    pub paused: bool,
+    pub level: LogLevelFilter,
+}
+
+impl Default for LogsPageState {
+    fn default() -> Self {
+        Self {
+            scroll: 0,
+            paused: false,
+            level: LogLevelFilter::Info,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct HelpPageState {
+    pub scroll: usize,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SubscriptionsPageState {
+    pub selected_idx: usize,
+    pub prompt: Option<SubscriptionPrompt>,
+    pub add_form: Option<SubscriptionAddForm>,
+    pub edit_form: Option<SubscriptionEditForm>,
+    pub output: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct NetworkPageState {
+    pub output_scroll: usize,
+}
+
+#[derive(Debug)]
+pub(crate) struct SettingsPageState {
+    pub output: Vec<String>,
+    pub prompt: Option<SettingsPrompt>,
+    pub section: SettingsSection,
+}
+
+impl Default for SettingsPageState {
+    fn default() -> Self {
+        Self {
+            output: Vec::new(),
+            prompt: None,
+            section: SettingsSection::General,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct TrafficPageState {
+    pub selected_idx: usize,
+    pub error: Option<String>,
+    pub output: Vec<String>,
+    pub range: TrafficRange,
+    pub chart: TrafficChartKind,
+    pub dimension: TrafficDimension,
+    pub filter_key: Option<String>,
+    pub window_offset: usize,
+    pub locked_bucket: Option<usize>,
+}
+
+impl TrafficPageState {
+    fn new(range: TrafficRange, chart: TrafficChartKind, dimension: TrafficDimension) -> Self {
+        Self {
+            selected_idx: 0,
+            error: None,
+            output: Vec::new(),
+            range,
+            chart,
+            dimension,
+            filter_key: None,
+            window_offset: 0,
+            locked_bucket: None,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct CommandPaletteState {
+    pub open: bool,
+    pub query: String,
+    pub selected_idx: usize,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ModalState {
+    pub pending_confirmation: Option<PendingConfirmation>,
+    pub sudo_prompt: Option<SudoPrompt>,
+    pub sudo_candidate: Option<SudoPrompt>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

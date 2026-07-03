@@ -33,13 +33,15 @@ pub(crate) fn render_command_palette(frame: &mut Frame, area: Rect, app: &App) {
     let matches = app.command_palette_matches();
     let max_rows = inner.height.saturating_sub(3) as usize;
     let selected = app
-        .command_selected_idx
+        .ui_state
+        .command_palette
+        .selected_idx
         .min(matches.len().saturating_sub(1));
     let first = selected.saturating_sub(max_rows.saturating_sub(1));
 
     let mut lines = vec![Line::from(vec![
         Span::styled("> ", CLASH_THEME.primary),
-        Span::styled(&app.command_query, CLASH_THEME.text),
+        Span::styled(&app.ui_state.command_palette.query, CLASH_THEME.text),
         Span::styled(
             format!("  {}", app.t(Msg::CommandPaletteSearchHint)),
             CLASH_THEME.muted,

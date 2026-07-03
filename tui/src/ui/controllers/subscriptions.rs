@@ -11,9 +11,9 @@ impl App {
         };
         let profile_id = profile.id;
         let value = field.initial_value(profile);
-        self.subscription_add_form = None;
-        self.subscription_edit_form = None;
-        self.subscription_prompt = Some(SubscriptionPrompt {
+        self.ui_state.subscriptions.add_form = None;
+        self.ui_state.subscriptions.edit_form = None;
+        self.ui_state.subscriptions.prompt = Some(SubscriptionPrompt {
             field,
             profile_id,
             value,
@@ -35,9 +35,9 @@ impl App {
         };
         let profile_id = profile.id;
         let form = SubscriptionEditForm::from_profile(profile);
-        self.subscription_prompt = None;
-        self.subscription_add_form = None;
-        self.subscription_edit_form = Some(form);
+        self.ui_state.subscriptions.prompt = None;
+        self.ui_state.subscriptions.add_form = None;
+        self.ui_state.subscriptions.edit_form = Some(form);
         self.error_msg = None;
         self.status_msg = Some(format!("editing subscription {}", profile_id));
     }
@@ -46,9 +46,9 @@ impl App {
         if self.ui_state.active_page != Tab::Subscriptions {
             return;
         }
-        self.subscription_prompt = None;
-        self.subscription_edit_form = None;
-        self.subscription_add_form = Some(SubscriptionAddForm::new());
+        self.ui_state.subscriptions.prompt = None;
+        self.ui_state.subscriptions.edit_form = None;
+        self.ui_state.subscriptions.add_form = Some(SubscriptionAddForm::new());
         self.error_msg = None;
         self.status_msg = Some("adding subscription".into());
     }
@@ -57,9 +57,9 @@ impl App {
         if self.ui_state.active_page != Tab::Subscriptions {
             return;
         }
-        self.subscription_add_form = None;
-        self.subscription_edit_form = None;
-        self.subscription_prompt = Some(SubscriptionPrompt {
+        self.ui_state.subscriptions.add_form = None;
+        self.ui_state.subscriptions.edit_form = None;
+        self.ui_state.subscriptions.prompt = Some(SubscriptionPrompt {
             field: SubscriptionEditField::ImportDirectory,
             profile_id: 0,
             value: String::new(),
@@ -69,92 +69,92 @@ impl App {
     }
 
     pub fn cancel_subscription_prompt(&mut self) {
-        if self.subscription_prompt.take().is_some()
-            || self.subscription_add_form.take().is_some()
-            || self.subscription_edit_form.take().is_some()
+        if self.ui_state.subscriptions.prompt.take().is_some()
+            || self.ui_state.subscriptions.add_form.take().is_some()
+            || self.ui_state.subscriptions.edit_form.take().is_some()
         {
             self.status_msg = Some("subscription edit cancelled".into());
         }
     }
 
     pub fn push_subscription_prompt_char(&mut self, c: char) {
-        if let Some(form) = self.subscription_add_form.as_mut() {
+        if let Some(form) = self.ui_state.subscriptions.add_form.as_mut() {
             form.push_char(c);
             return;
         }
-        if let Some(form) = self.subscription_edit_form.as_mut() {
+        if let Some(form) = self.ui_state.subscriptions.edit_form.as_mut() {
             form.push_char(c);
             return;
         }
-        if let Some(prompt) = self.subscription_prompt.as_mut() {
+        if let Some(prompt) = self.ui_state.subscriptions.prompt.as_mut() {
             prompt.value.push(c);
         }
     }
 
     pub fn pop_subscription_prompt_char(&mut self) {
-        if let Some(form) = self.subscription_add_form.as_mut() {
+        if let Some(form) = self.ui_state.subscriptions.add_form.as_mut() {
             form.pop_char();
             return;
         }
-        if let Some(form) = self.subscription_edit_form.as_mut() {
+        if let Some(form) = self.ui_state.subscriptions.edit_form.as_mut() {
             form.pop_char();
             return;
         }
-        if let Some(prompt) = self.subscription_prompt.as_mut() {
+        if let Some(prompt) = self.ui_state.subscriptions.prompt.as_mut() {
             prompt.value.pop();
         }
     }
 
     pub fn subscription_input_active(&self) -> bool {
-        self.subscription_prompt.is_some()
-            || self.subscription_add_form.is_some()
-            || self.subscription_edit_form.is_some()
+        self.ui_state.subscriptions.prompt.is_some()
+            || self.ui_state.subscriptions.add_form.is_some()
+            || self.ui_state.subscriptions.edit_form.is_some()
     }
 
     pub fn next_subscription_form_field(&mut self) {
-        if let Some(form) = self.subscription_add_form.as_mut() {
+        if let Some(form) = self.ui_state.subscriptions.add_form.as_mut() {
             form.next_field();
-        } else if let Some(form) = self.subscription_edit_form.as_mut() {
+        } else if let Some(form) = self.ui_state.subscriptions.edit_form.as_mut() {
             form.next_field();
         }
     }
 
     pub fn prev_subscription_form_field(&mut self) {
-        if let Some(form) = self.subscription_add_form.as_mut() {
+        if let Some(form) = self.ui_state.subscriptions.add_form.as_mut() {
             form.prev_field();
-        } else if let Some(form) = self.subscription_edit_form.as_mut() {
+        } else if let Some(form) = self.ui_state.subscriptions.edit_form.as_mut() {
             form.prev_field();
         }
     }
 
     pub fn select_subscription_add_field(&mut self, idx: usize) {
-        if let Some(form) = self.subscription_add_form.as_mut() {
+        if let Some(form) = self.ui_state.subscriptions.add_form.as_mut() {
             form.set_active(idx);
-        } else if let Some(form) = self.subscription_edit_form.as_mut() {
+        } else if let Some(form) = self.ui_state.subscriptions.edit_form.as_mut() {
             form.set_active(idx);
         }
     }
 
     pub fn submit_subscription_prompt(&mut self) {
-        if let Some(form) = self.subscription_add_form.take() {
+        if let Some(form) = self.ui_state.subscriptions.add_form.take() {
             let args = match form.args() {
                 Ok(args) => args,
                 Err(e) => {
                     self.error_msg = Some(e);
-                    self.subscription_add_form = Some(form);
+                    self.ui_state.subscriptions.add_form = Some(form);
                     return;
                 }
             };
             self.run_subscription_args("Add subscription".into(), "new subscription".into(), args);
             return;
         }
-        if let Some(form) = self.subscription_edit_form.take() {
+        if let Some(form) = self.ui_state.subscriptions.edit_form.take() {
             let profile_id = form.profile_id;
             let commands = match form.commands() {
                 Ok(commands) => commands,
                 Err(e) => {
                     self.error_msg = Some(e);
-                    self.subscription_edit_form = Some(form);
+                    self.ui_state.subscriptions.edit_form = Some(form);
                     return;
                 }
             };
@@ -170,7 +170,7 @@ impl App {
             return;
         }
 
-        let Some(prompt) = self.subscription_prompt.take() else {
+        let Some(prompt) = self.ui_state.subscriptions.prompt.take() else {
             return;
         };
         let value = prompt.value.trim().to_string();
@@ -179,7 +179,7 @@ impl App {
                 "{} cannot be empty",
                 self.subscription_edit_field_label(prompt.field)
             ));
-            self.subscription_prompt = Some(prompt);
+            self.ui_state.subscriptions.prompt = Some(prompt);
             return;
         }
 
@@ -272,12 +272,12 @@ impl App {
             return;
         };
         if self.should_confirm() {
-            self.pending_confirmation = Some(PendingConfirmation {
-                title: format!("Confirm remove subscription {}", id),
+            self.ui_state.modals.pending_confirmation = Some(PendingConfirmation {
+                title: self.confirm_title(&format!("remove subscription {}", id)),
                 message: format!("Run `clashctl sub remove {}`?", id),
                 action: PendingAction::SubscriptionRemove(id),
             });
-            self.status_msg = Some("confirm action with Enter/y, cancel with Esc/n".into());
+            self.status_msg = Some(self.confirm_hint());
             return;
         }
         self.execute_subscription_remove(id);

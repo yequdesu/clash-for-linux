@@ -48,7 +48,9 @@ pub(crate) fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
     let start = if visible_capacity == 0 {
         0
     } else {
-        app.selected_node_idx
+        app.ui_state
+            .proxies
+            .selected_node_idx
             .saturating_add(1)
             .saturating_sub(visible_capacity)
     };
@@ -65,7 +67,7 @@ pub(crate) fn render_node_picker(frame: &mut Frame, area: Rect, app: &mut App) {
                 .get(node)
                 .map(|d| format!("{}ms", d))
                 .unwrap_or_else(|| "—".into());
-            let style = if idx == app.selected_node_idx {
+            let style = if idx == app.ui_state.proxies.selected_node_idx {
                 Style::default()
                     .fg(CLASH_THEME.text)
                     .bg(CLASH_THEME.primary)

@@ -65,7 +65,7 @@ pub(crate) fn render_proxies(frame: &mut Frame, area: Rect, app: &mut App) {
         .iter()
         .enumerate()
         .map(|(i, row)| {
-            let style = if i == app.selected_proxy_idx {
+            let style = if i == app.ui_state.proxies.selected_idx {
                 Style::default()
                     .fg(CLASH_THEME.text)
                     .bg(CLASH_THEME.primary)

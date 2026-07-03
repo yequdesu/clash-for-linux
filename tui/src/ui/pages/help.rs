@@ -98,8 +98,8 @@ pub(crate) fn render_help(frame: &mut Frame, area: Rect, app: &mut App) {
         CLASH_THEME.muted,
     )));
     let max_scroll = lines.len().saturating_sub(inner.height as usize);
-    let scroll = app.help_scroll.min(max_scroll);
-    app.help_scroll = scroll;
+    let scroll = app.ui_state.help.scroll.min(max_scroll);
+    app.ui_state.help.scroll = scroll;
     let visible = lines
         .into_iter()
         .skip(scroll)

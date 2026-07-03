@@ -14,7 +14,7 @@ impl App {
     }
 
     pub(crate) fn handle_mouse_click(&mut self, action: Option<HitboxAction>) {
-        if self.pending_confirmation.is_some()
+        if self.ui_state.modals.pending_confirmation.is_some()
             && !matches!(
                 action,
                 Some(HitboxAction::ConfirmPendingAction) | Some(HitboxAction::CancelPendingAction)
@@ -22,7 +22,7 @@ impl App {
         {
             return;
         }
-        if self.settings_prompt.is_some()
+        if self.ui_state.settings.prompt.is_some()
             && !matches!(
                 action,
                 Some(HitboxAction::FocusSettingsPromptValue)
@@ -33,7 +33,7 @@ impl App {
         {
             return;
         }
-        if self.sudo_prompt.is_some()
+        if self.ui_state.modals.sudo_prompt.is_some()
             && !matches!(
                 action,
                 Some(HitboxAction::FocusSudoPromptValue)
@@ -53,7 +53,7 @@ impl App {
         {
             return;
         }
-        if self.node_picker_open
+        if self.ui_state.proxies.node_picker_open
             && !matches!(
                 action,
                 Some(HitboxAction::SelectProxyNode(_))
@@ -74,7 +74,7 @@ impl App {
             HitboxAction::SwitchTab(tab) => {
                 self.ui_state.active_page = tab;
                 self.show_help = false;
-                self.node_picker_open = false;
+                self.ui_state.proxies.node_picker_open = false;
                 self.reset_selection();
                 if self.ui_state.active_page == Tab::Subscriptions {
                     self.refresh_subscriptions();
@@ -107,17 +107,18 @@ impl App {
             HitboxAction::RunTraffic(action) => self.run_traffic_action(action),
             HitboxAction::SelectProxy(idx) => {
                 self.ui_state.active_page = Tab::Proxies;
-                self.selected_proxy_idx =
+                self.ui_state.proxies.selected_idx =
                     idx.min(self.visible_proxy_groups().len().saturating_sub(1));
                 self.clamp_proxy_selection();
             }
             HitboxAction::SelectProxyNode(idx) => {
-                self.selected_node_idx =
+                self.ui_state.proxies.selected_node_idx =
                     idx.min(self.selected_proxy_nodes().len().saturating_sub(1));
                 self.clamp_node_selection();
             }
             HitboxAction::SelectSubscription(idx) => {
-                self.selected_sub_idx = idx.min(self.profiles.len().saturating_sub(1));
+                self.ui_state.subscriptions.selected_idx =
+                    idx.min(self.profiles.len().saturating_sub(1));
                 self.clamp_subscription_selection();
             }
             HitboxAction::BeginSubscriptionAdd => self.begin_subscription_add(),
@@ -154,10 +155,12 @@ impl App {
                 self.select_subscription_add_field(idx);
             }
             HitboxAction::SelectConnection(idx) => {
-                self.connections_selected = idx.min(self.connections.len().saturating_sub(1));
+                self.ui_state.connections.selected_idx =
+                    idx.min(self.connections.len().saturating_sub(1));
             }
             HitboxAction::SelectTrafficRow(idx) => {
-                self.traffic_selected_idx = idx.min(self.traffic_top.len().saturating_sub(1));
+                self.ui_state.traffic.selected_idx =
+                    idx.min(self.traffic_top.len().saturating_sub(1));
                 self.clamp_traffic_selection();
             }
             HitboxAction::SelectTrafficBucket(idx) => self.lock_traffic_bucket(idx),
@@ -190,7 +193,7 @@ impl App {
             HitboxAction::CycleProxyMode => self.cycle_proxy_mode(),
             HitboxAction::ToggleProxySort => self.toggle_sort(),
             HitboxAction::ToggleNodePicker => {
-                if self.node_picker_open {
+                if self.ui_state.proxies.node_picker_open {
                     self.close_node_picker();
                 } else {
                     self.open_node_picker();
@@ -198,7 +201,7 @@ impl App {
             }
             HitboxAction::CloseNodePicker => self.close_node_picker(),
             HitboxAction::SwitchSelectedProxyNode => {
-                if self.node_picker_open {
+                if self.ui_state.proxies.node_picker_open {
                     self.switch_selected_node();
                 } else {
                     self.switch_selected();
@@ -244,20 +247,28 @@ impl App {
             }
             Some(HitboxAction::ScrollHelp) => {
                 if amount > 0 {
-                    self.help_scroll = self.help_scroll.saturating_add(amount as usize);
+                    self.ui_state.help.scroll =
+                        self.ui_state.help.scroll.saturating_add(amount as usize);
                 } else {
-                    self.help_scroll = self
-                        .help_scroll
+                    self.ui_state.help.scroll = self
+                        .ui_state
+                        .help
+                        .scroll
                         .saturating_sub(amount.unsigned_abs() as usize);
                 }
             }
             Some(HitboxAction::ScrollNetworkOutput) => {
                 if amount > 0 {
-                    self.network_output_scroll =
-                        self.network_output_scroll.saturating_add(amount as usize);
+                    self.ui_state.network.output_scroll = self
+                        .ui_state
+                        .network
+                        .output_scroll
+                        .saturating_add(amount as usize);
                 } else {
-                    self.network_output_scroll = self
-                        .network_output_scroll
+                    self.ui_state.network.output_scroll = self
+                        .ui_state
+                        .network
+                        .output_scroll
                         .saturating_sub(amount.unsigned_abs() as usize);
                 }
             }

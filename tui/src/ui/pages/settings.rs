@@ -63,7 +63,7 @@ pub(crate) fn render_settings(frame: &mut Frame, area: Rect, app: &mut App) {
     fill_area(frame, area, CLASH_THEME.surface);
     let rows = Layout::vertical([Constraint::Length(3), Constraint::Min(5)]).split(area);
     render_settings_sections(frame, rows[0], app);
-    match app.settings_section {
+    match app.ui_state.settings.section {
         SettingsSection::General => render_settings_general(frame, rows[1], app),
         SettingsSection::Core => render_settings_core(frame, rows[1], app),
         SettingsSection::Traffic => render_settings_traffic(frame, rows[1], app),
@@ -120,7 +120,7 @@ pub(crate) fn render_settings_sections(frame: &mut Frame, area: Rect, app: &mut 
             break;
         }
         let rect = Rect::new(x, y, width.min(max_x.saturating_sub(x)), 1);
-        let style = if app.settings_section == section {
+        let style = if app.ui_state.settings.section == section {
             Style::default()
                 .fg(CLASH_THEME.bg)
                 .bg(CLASH_THEME.primary)
@@ -216,9 +216,12 @@ pub(crate) fn render_settings_core(frame: &mut Frame, area: Rect, app: &mut App)
 pub(crate) fn render_settings_traffic(frame: &mut Frame, area: Rect, app: &mut App) {
     let (summary_area, action_area) = settings_summary_action_areas(area);
     let lines = vec![
-        setting_value_line("Default range", app.traffic_range.label()),
-        setting_value_line(app.t(Msg::SettingsDefaultChart), app.traffic_chart.label()),
-        setting_value_line("Default by", app.traffic_dimension.label()),
+        setting_value_line("Default range", app.ui_state.traffic.range.label()),
+        setting_value_line(
+            app.t(Msg::SettingsDefaultChart),
+            app.ui_state.traffic.chart.label(),
+        ),
+        setting_value_line("Default by", app.ui_state.traffic.dimension.label()),
         setting_value_line("Store", app.traffic_status.store_dir.clone()),
         setting_value_line(
             "Collector",
@@ -342,14 +345,16 @@ pub(crate) fn render_settings_result(frame: &mut Frame, area: Rect, app: &App) {
         format!("  {}", app.t(Msg::SettingsLastResult)),
         CLASH_THEME.primary,
     ))];
-    if app.settings_output.is_empty() {
+    if app.ui_state.settings.output.is_empty() {
         lines.push(Line::from(Span::styled(
             format!("  {}", app.t(Msg::SettingsResultsPlaceholder)),
             CLASH_THEME.muted,
         )));
     } else {
         lines.extend(
-            app.settings_output
+            app.ui_state
+                .settings
+                .output
                 .iter()
                 .take(area.height.saturating_sub(1) as usize)
                 .map(|line| Line::from(Span::styled(format!("  {}", line), CLASH_THEME.text))),

@@ -1,6 +1,6 @@
 use ratatui::layout::Rect;
 
-use crate::widgets::tab_bar::Tab;
+use crate::ui::components::nav::Tab;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NetworkAction {
@@ -353,7 +353,7 @@ fn contains(area: Rect, x: u16, y: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{HitboxAction, HitboxRegistry, NetworkAction, SettingsAction, TrafficAction};
-    use crate::widgets::tab_bar::Tab;
+    use crate::ui::components::nav::Tab;
     use ratatui::layout::Rect;
 
     #[test]

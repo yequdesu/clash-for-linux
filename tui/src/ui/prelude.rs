@@ -12,7 +12,7 @@ pub(crate) use crate::i18n::{
 pub(crate) use crate::mouse::{HitboxAction, NetworkAction, SettingsAction, TrafficAction};
 pub(crate) use crate::settings::next_refresh_interval_secs;
 pub(crate) use crate::theme::{apply_theme_key, next_theme_key, theme_label, CLASH_THEME};
+pub(crate) use crate::ui::components::nav::Tab;
 pub(crate) use crate::ui::model::*;
 pub(crate) use crate::ui::utils::*;
-pub(crate) use crate::widgets::tab_bar::Tab;
 pub(crate) use ratatui::layout::Margin;

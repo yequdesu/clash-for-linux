@@ -1,5 +1,5 @@
 use crate::mouse::{NetworkAction, SettingsAction, TrafficAction};
-use crate::widgets::tab_bar::Tab;
+use crate::ui::components::nav::Tab;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActionDanger {
@@ -14,9 +14,58 @@ pub enum ActionExecutor {
     Network(NetworkAction),
     Settings(SettingsAction),
     Traffic(TrafficAction),
-    Api(&'static str),
-    Prompt(&'static str),
-    Internal(&'static str),
+    Api(ApiAction),
+    Prompt(PromptAction),
+    Internal(InternalAction),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApiAction {
+    CycleProxyMode,
+    SwitchProxyNode,
+    TestProxyDelay,
+    CloseSelectedConnection,
+    CloseAllConnections,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PromptAction {
+    SubAdd,
+    SubImport,
+    SubEdit,
+    ConfigSetPort,
+    ConfigSetApi,
+    ConfigSetDnsMode,
+    ConfigSetLan,
+    SecretSet,
+    TrafficPruneRetention,
+    GeodataUpdateVersion,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InternalAction {
+    SwitchTab,
+    CycleUiLanguage,
+    CycleThemePreference,
+    CycleDefaultPage,
+    CycleRefreshInterval,
+    ToggleMousePreference,
+    ToggleDangerousConfirmations,
+    SubUse,
+    SubUpdate,
+    SubLog,
+    SubRemove,
+    ToggleProxySort,
+    ToggleNodePicker,
+    CloseNodePicker,
+    TestAllProxyDelays,
+    TrafficExportCsv,
+    CycleDefaultTrafficRange,
+    CycleDefaultTrafficChart,
+    CycleDefaultTrafficDimension,
+    ToggleLogPause,
+    CycleLogLevel,
+    ClearLogs,
 }
 
 impl ActionExecutor {
@@ -25,9 +74,67 @@ impl ActionExecutor {
             Self::Network(action) => clashctl_command(action.args()),
             Self::Settings(action) => clashctl_command(action.args()),
             Self::Traffic(action) => clashctl_command(action.args()),
-            Self::Api(endpoint) => format!("mihomo api {}", endpoint),
-            Self::Prompt(name) => format!("prompt {}", name),
-            Self::Internal(name) => name.to_string(),
+            Self::Api(action) => format!("mihomo api {}", action.command()),
+            Self::Prompt(action) => format!("prompt {}", action.command()),
+            Self::Internal(action) => action.command().to_string(),
+        }
+    }
+}
+
+impl ApiAction {
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::CycleProxyMode => "PATCH /configs mode",
+            Self::SwitchProxyNode => "PUT /proxies/{group}",
+            Self::TestProxyDelay => "GET /proxies/{name}/delay",
+            Self::CloseSelectedConnection => "DELETE /connections/{id}",
+            Self::CloseAllConnections => "DELETE /connections",
+        }
+    }
+}
+
+impl PromptAction {
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::SubAdd => "sub add",
+            Self::SubImport => "sub import",
+            Self::SubEdit => "sub edit",
+            Self::ConfigSetPort => "config set-port",
+            Self::ConfigSetApi => "config set-api",
+            Self::ConfigSetDnsMode => "config set-dns-mode",
+            Self::ConfigSetLan => "config set-lan",
+            Self::SecretSet => "secret set",
+            Self::TrafficPruneRetention => "traffic prune retention",
+            Self::GeodataUpdateVersion => "geodata update version",
+        }
+    }
+}
+
+impl InternalAction {
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::SwitchTab => "switch tab",
+            Self::CycleUiLanguage => "cycle ui language",
+            Self::CycleThemePreference => "cycle theme preference",
+            Self::CycleDefaultPage => "cycle default page",
+            Self::CycleRefreshInterval => "cycle refresh interval",
+            Self::ToggleMousePreference => "toggle mouse preference",
+            Self::ToggleDangerousConfirmations => "toggle dangerous confirmations",
+            Self::SubUse => "clashctl sub use <id>",
+            Self::SubUpdate => "clashctl sub update <id>",
+            Self::SubLog => "clashctl sub log",
+            Self::SubRemove => "clashctl sub remove <id>",
+            Self::ToggleProxySort => "toggle proxy sort",
+            Self::ToggleNodePicker => "toggle node picker",
+            Self::CloseNodePicker => "close node picker",
+            Self::TestAllProxyDelays => "test all proxy delays",
+            Self::TrafficExportCsv => "clashctl traffic export --format csv",
+            Self::CycleDefaultTrafficRange => "cycle default traffic range",
+            Self::CycleDefaultTrafficChart => "cycle default traffic chart",
+            Self::CycleDefaultTrafficDimension => "cycle default traffic dimension",
+            Self::ToggleLogPause => "toggle log pause",
+            Self::CycleLogLevel => "cycle log level",
+            Self::ClearLogs => "clear local logs",
         }
     }
 }
@@ -139,7 +246,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "sidebar/tab",
         description: "Open profile and subscription management.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("switch tab"),
+        executor: ActionExecutor::Internal(InternalAction::SwitchTab),
     },
     ActionSpec {
         id: "nav.proxies",
@@ -149,7 +256,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "sidebar/tab",
         description: "Open proxy groups and node selection.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("switch tab"),
+        executor: ActionExecutor::Internal(InternalAction::SwitchTab),
     },
     ActionSpec {
         id: "nav.connections",
@@ -159,7 +266,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "sidebar/tab",
         description: "Open active connection inspection.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("switch tab"),
+        executor: ActionExecutor::Internal(InternalAction::SwitchTab),
     },
     ActionSpec {
         id: "nav.traffic",
@@ -169,7 +276,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "sidebar/tab",
         description: "Open persistent traffic charts and ranking.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("switch tab"),
+        executor: ActionExecutor::Internal(InternalAction::SwitchTab),
     },
     ActionSpec {
         id: "nav.network",
@@ -179,7 +286,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "sidebar/tab",
         description: "Open kernel, TUN, shell proxy, and desktop proxy controls.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("switch tab"),
+        executor: ActionExecutor::Internal(InternalAction::SwitchTab),
     },
     ActionSpec {
         id: "nav.logs",
@@ -189,7 +296,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "sidebar/tab",
         description: "Open kernel, subscription, and local task logs.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("switch tab"),
+        executor: ActionExecutor::Internal(InternalAction::SwitchTab),
     },
     ActionSpec {
         id: "nav.settings",
@@ -199,7 +306,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "sidebar/tab",
         description: "Open UI settings, config tools, diagnostics, and updates.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("switch tab"),
+        executor: ActionExecutor::Internal(InternalAction::SwitchTab),
     },
     ActionSpec {
         id: "nav.help",
@@ -209,7 +316,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "sidebar/tab",
         description: "Open action list generated from the registry.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("switch tab"),
+        executor: ActionExecutor::Internal(InternalAction::SwitchTab),
     },
     ActionSpec {
         id: "settings.ui.language",
@@ -219,7 +326,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Language",
         description: "Cycle Auto, zh-CN, and en-US UI language and save it.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("cycle ui language"),
+        executor: ActionExecutor::Internal(InternalAction::CycleUiLanguage),
     },
     ActionSpec {
         id: "settings.ui.theme",
@@ -229,7 +336,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Theme",
         description: "Cycle the terminal color palette and save it.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("cycle theme preference"),
+        executor: ActionExecutor::Internal(InternalAction::CycleThemePreference),
     },
     ActionSpec {
         id: "settings.ui.default_page",
@@ -239,7 +346,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Default page",
         description: "Choose which page opens when the TUI starts.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("cycle default page"),
+        executor: ActionExecutor::Internal(InternalAction::CycleDefaultPage),
     },
     ActionSpec {
         id: "settings.ui.refresh_interval",
@@ -249,7 +356,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Refresh",
         description: "Choose how often the TUI refreshes data and save it.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("cycle refresh interval"),
+        executor: ActionExecutor::Internal(InternalAction::CycleRefreshInterval),
     },
     ActionSpec {
         id: "settings.ui.mouse",
@@ -259,7 +366,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Mouse",
         description: "Toggle terminal mouse capture preference for the next TUI launch.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("toggle mouse preference"),
+        executor: ActionExecutor::Internal(InternalAction::ToggleMousePreference),
     },
     ActionSpec {
         id: "settings.ui.confirm",
@@ -269,7 +376,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Confirm",
         description: "Toggle confirmation prompts for dangerous actions.",
         danger: ActionDanger::Confirm,
-        executor: ActionExecutor::Internal("toggle dangerous confirmations"),
+        executor: ActionExecutor::Internal(InternalAction::ToggleDangerousConfirmations),
     },
     ActionSpec {
         id: "sub.add",
@@ -279,7 +386,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Add button",
         description: "Open the parameterized add form.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Prompt("sub add"),
+        executor: ActionExecutor::Prompt(PromptAction::SubAdd),
     },
     ActionSpec {
         id: "sub.import",
@@ -289,7 +396,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Import button",
         description: "Open the local YAML import form.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Prompt("sub import"),
+        executor: ActionExecutor::Prompt(PromptAction::SubImport),
     },
     ActionSpec {
         id: "sub.use",
@@ -299,7 +406,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Use button",
         description: "Activate the selected profile through clashctl.",
         danger: ActionDanger::Confirm,
-        executor: ActionExecutor::Internal("clashctl sub use <id>"),
+        executor: ActionExecutor::Internal(InternalAction::SubUse),
     },
     ActionSpec {
         id: "sub.update",
@@ -309,7 +416,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Update button",
         description: "Update the selected profile.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("clashctl sub update <id>"),
+        executor: ActionExecutor::Internal(InternalAction::SubUpdate),
     },
     ActionSpec {
         id: "sub.edit",
@@ -319,7 +426,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Edit button",
         description: "Edit name, source, interval, proxy, user-agent, convert, and tags.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Prompt("sub edit"),
+        executor: ActionExecutor::Prompt(PromptAction::SubEdit),
     },
     ActionSpec {
         id: "sub.log",
@@ -329,7 +436,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Log",
         description: "Show subscription operation logs.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("clashctl sub log"),
+        executor: ActionExecutor::Internal(InternalAction::SubLog),
     },
     ActionSpec {
         id: "sub.remove",
@@ -339,7 +446,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Remove button",
         description: "Remove the selected profile with rollback handled by clashctl.",
         danger: ActionDanger::Dangerous,
-        executor: ActionExecutor::Internal("clashctl sub remove <id>"),
+        executor: ActionExecutor::Internal(InternalAction::SubRemove),
     },
     ActionSpec {
         id: "proxy.mode.cycle",
@@ -349,7 +456,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Mode selector",
         description: "Cycle Rule, Global, and Direct mode through the Mihomo API.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Api("PATCH /configs mode"),
+        executor: ActionExecutor::Api(ApiAction::CycleProxyMode),
     },
     ActionSpec {
         id: "proxy.sort.toggle",
@@ -359,7 +466,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Sort button",
         description: "Toggle proxy group sorting between name and delay.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("toggle proxy sort"),
+        executor: ActionExecutor::Internal(InternalAction::ToggleProxySort),
     },
     ActionSpec {
         id: "proxy.node.open",
@@ -369,7 +476,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Nodes button",
         description: "Open or close the selected proxy group's node list.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("toggle node picker"),
+        executor: ActionExecutor::Internal(InternalAction::ToggleNodePicker),
     },
     ActionSpec {
         id: "proxy.node.switch",
@@ -379,7 +486,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Switch button",
         description: "Switch the selected group to the selected node.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Api("PUT /proxies/{group}"),
+        executor: ActionExecutor::Api(ApiAction::SwitchProxyNode),
     },
     ActionSpec {
         id: "proxy.node.close",
@@ -389,7 +496,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Close",
         description: "Close the proxy node list.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("close node picker"),
+        executor: ActionExecutor::Internal(InternalAction::CloseNodePicker),
     },
     ActionSpec {
         id: "proxy.delay.selected",
@@ -399,7 +506,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Test selected",
         description: "Run delay test for the selected group.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Api("GET /proxies/{name}/delay"),
+        executor: ActionExecutor::Api(ApiAction::TestProxyDelay),
     },
     ActionSpec {
         id: "proxy.delay.all",
@@ -409,7 +516,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Test all",
         description: "Run delay test for every visible proxy group.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("test all proxy delays"),
+        executor: ActionExecutor::Internal(InternalAction::TestAllProxyDelays),
     },
     ActionSpec {
         id: "conn.close.selected",
@@ -419,7 +526,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Close selected",
         description: "Close one selected active connection.",
         danger: ActionDanger::Confirm,
-        executor: ActionExecutor::Api("DELETE /connections/{id}"),
+        executor: ActionExecutor::Api(ApiAction::CloseSelectedConnection),
     },
     ActionSpec {
         id: "conn.close.all",
@@ -429,7 +536,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Close all",
         description: "Close every active connection.",
         danger: ActionDanger::Dangerous,
-        executor: ActionExecutor::Api("DELETE /connections"),
+        executor: ActionExecutor::Api(ApiAction::CloseAllConnections),
     },
     ActionSpec {
         id: "traffic.sample",
@@ -499,7 +606,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Export CSV",
         description: "Export the selected traffic view as CSV.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("clashctl traffic export --format csv"),
+        executor: ActionExecutor::Internal(InternalAction::TrafficExportCsv),
     },
     ActionSpec {
         id: "settings.traffic.prune_retention",
@@ -509,7 +616,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Prune retention",
         description: "Open a form for traffic prune retention windows.",
         danger: ActionDanger::Confirm,
-        executor: ActionExecutor::Prompt("traffic prune retention"),
+        executor: ActionExecutor::Prompt(PromptAction::TrafficPruneRetention),
     },
     ActionSpec {
         id: "settings.traffic.default_range",
@@ -519,7 +626,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Default range",
         description: "Choose the default Traffic page time range and save it.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("cycle default traffic range"),
+        executor: ActionExecutor::Internal(InternalAction::CycleDefaultTrafficRange),
     },
     ActionSpec {
         id: "settings.traffic.default_chart",
@@ -529,7 +636,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Default chart",
         description: "Choose the default Traffic page chart type and save it.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("cycle default traffic chart"),
+        executor: ActionExecutor::Internal(InternalAction::CycleDefaultTrafficChart),
     },
     ActionSpec {
         id: "settings.traffic.default_dimension",
@@ -539,7 +646,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Default by",
         description: "Choose the default Traffic page aggregation dimension and save it.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("cycle default traffic dimension"),
+        executor: ActionExecutor::Internal(InternalAction::CycleDefaultTrafficDimension),
     },
     ActionSpec {
         id: "network.status",
@@ -769,7 +876,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Set ports",
         description: "Open the proxy port form.",
         danger: ActionDanger::Confirm,
-        executor: ActionExecutor::Prompt("config set-port"),
+        executor: ActionExecutor::Prompt(PromptAction::ConfigSetPort),
     },
     ActionSpec {
         id: "settings.config.set_api",
@@ -779,7 +886,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Set API",
         description: "Open the controller and secret form.",
         danger: ActionDanger::Confirm,
-        executor: ActionExecutor::Prompt("config set-api"),
+        executor: ActionExecutor::Prompt(PromptAction::ConfigSetApi),
     },
     ActionSpec {
         id: "settings.config.set_dns",
@@ -789,7 +896,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "DNS mode",
         description: "Open the DNS mode form.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Prompt("config set-dns-mode"),
+        executor: ActionExecutor::Prompt(PromptAction::ConfigSetDnsMode),
     },
     ActionSpec {
         id: "settings.config.set_lan",
@@ -799,7 +906,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "LAN",
         description: "Open the LAN exposure form.",
         danger: ActionDanger::Confirm,
-        executor: ActionExecutor::Prompt("config set-lan"),
+        executor: ActionExecutor::Prompt(PromptAction::ConfigSetLan),
     },
     ActionSpec {
         id: "settings.secret.status",
@@ -829,7 +936,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Set secret",
         description: "Open the API secret form.",
         danger: ActionDanger::Sensitive,
-        executor: ActionExecutor::Prompt("secret set"),
+        executor: ActionExecutor::Prompt(PromptAction::SecretSet),
     },
     ActionSpec {
         id: "settings.geodata.update",
@@ -849,7 +956,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Geodata version",
         description: "Open a form for updating geodata from a specific release tag or latest.",
         danger: ActionDanger::Confirm,
-        executor: ActionExecutor::Prompt("geodata update version"),
+        executor: ActionExecutor::Prompt(PromptAction::GeodataUpdateVersion),
     },
     ActionSpec {
         id: "settings.api.upgrade",
@@ -879,7 +986,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Pause",
         description: "Pause or resume log updates.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("toggle log pause"),
+        executor: ActionExecutor::Internal(InternalAction::ToggleLogPause),
     },
     ActionSpec {
         id: "logs.filter",
@@ -889,7 +996,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Level selector",
         description: "Cycle the minimum visible log level.",
         danger: ActionDanger::Safe,
-        executor: ActionExecutor::Internal("cycle log level"),
+        executor: ActionExecutor::Internal(InternalAction::CycleLogLevel),
     },
     ActionSpec {
         id: "logs.clear",
@@ -899,7 +1006,7 @@ const ACTIONS: &[ActionSpec] = &[
         mouse: "Clear",
         description: "Clear the TUI local log buffer.",
         danger: ActionDanger::Confirm,
-        executor: ActionExecutor::Internal("clear local logs"),
+        executor: ActionExecutor::Internal(InternalAction::ClearLogs),
     },
 ];
 

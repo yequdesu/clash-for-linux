@@ -20,7 +20,7 @@ impl App {
         if self.tick_count.is_multiple_of(3) && !self.proxy_groups.is_empty() {
             self.test_selected_delay();
         }
-        if self.ui_state.active_page == Tab::Logs && !self.log_paused {
+        if self.ui_state.active_page == Tab::Logs && !self.ui_state.logs.paused {
             self.fetch_logs();
         }
         if self.ui_state.active_page == Tab::Traffic && self.tick_count.is_multiple_of(3) {
@@ -58,7 +58,7 @@ impl App {
     pub(crate) fn fetch_logs(&mut self) {
         let api = self.api.clone();
         let tx = self.data_tx.clone();
-        let level = self.log_level.api_level().to_string();
+        let level = self.ui_state.logs.level.api_level().to_string();
         self.rt.spawn(async move {
             let result = api.get_logs(&level).await;
             let _ = tx.send(DataEvent::Logs(result));
@@ -67,10 +67,10 @@ impl App {
 
     pub(crate) fn fetch_traffic(&mut self) {
         let tx = self.data_tx.clone();
-        let range = self.traffic_range.range_arg().to_string();
-        let step = self.traffic_range.step_arg().to_string();
-        let by = self.traffic_dimension.arg().to_string();
-        let key = self.traffic_filter_key.clone();
+        let range = self.ui_state.traffic.range.range_arg().to_string();
+        let step = self.ui_state.traffic.range.step_arg().to_string();
+        let by = self.ui_state.traffic.dimension.arg().to_string();
+        let key = self.ui_state.traffic.filter_key.clone();
         self.rt.spawn(async move {
             let result =
                 crate::api::read_traffic_snapshot(&range, &step, &by, key.as_deref()).await;
@@ -111,8 +111,6 @@ impl App {
                 self.connections = resp.connections;
                 self.connections_active = self.connections.len();
                 self.connections_total = conn_len;
-                self.traffic_history
-                    .push(resp.upload_total as f64, resp.download_total as f64);
             }
             DataEvent::Connections(Err(_)) => {}
             DataEvent::Version(Ok(info)) => {
@@ -122,7 +120,7 @@ impl App {
             }
             DataEvent::Version(Err(_)) => {}
             DataEvent::Logs(Ok(entries)) => {
-                if self.log_paused {
+                if self.ui_state.logs.paused {
                     return;
                 }
                 for e in entries {
@@ -136,7 +134,7 @@ impl App {
                 if self.logs.len() > 500 {
                     self.logs.drain(0..self.logs.len() - 500);
                 }
-                self.log_scroll = self.visible_logs().len().saturating_sub(1);
+                self.ui_state.logs.scroll = self.visible_logs().len().saturating_sub(1);
             }
             DataEvent::Logs(Err(_)) => {}
             DataEvent::Delay(name, delay) => {
@@ -163,41 +161,41 @@ impl App {
             DataEvent::SubscriptionResult(Ok(msg)) => {
                 self.error_msg = None;
                 self.status_msg = Some(msg);
-                self.subscription_output.clear();
+                self.ui_state.subscriptions.output.clear();
                 self.refresh_subscriptions();
                 self.refresh_data();
             }
             DataEvent::SubscriptionResult(Err(e)) => {
                 self.error_msg = Some(format!("Subscription action failed: {}", e));
-                self.subscription_output = command_output_lines(&e);
+                self.ui_state.subscriptions.output = command_output_lines(&e);
             }
             DataEvent::SubscriptionOutputResult(label, Ok(output)) => {
                 self.error_msg = None;
                 self.status_msg = Some(format!("subscription action completed: {}", label));
-                self.subscription_output = command_output_lines(&output);
+                self.ui_state.subscriptions.output = command_output_lines(&output);
             }
             DataEvent::SubscriptionOutputResult(label, Err(e)) => {
                 self.error_msg = Some(format!("Subscription action failed: {}: {}", label, e));
-                self.subscription_output = command_output_lines(&e);
+                self.ui_state.subscriptions.output = command_output_lines(&e);
             }
             DataEvent::NetworkResult(label, Ok(output)) => {
                 self.clear_sudo_candidate(&label);
                 self.error_msg = None;
                 self.status_msg = Some(format!("network action completed: {}", label));
                 self.network_output = command_output_lines(&output);
-                self.network_output_scroll = 0;
+                self.ui_state.network.output_scroll = 0;
                 self.tun_enabled = crate::api::read_tun_status();
                 self.refresh_data();
             }
             DataEvent::NetworkResult(label, Err(e)) => {
                 if self.maybe_open_sudo_prompt(&label, &e) {
-                    self.network_output = command_output_lines("sudo password required");
-                    self.network_output_scroll = 0;
+                    self.network_output = command_output_lines(self.t(Msg::SudoPasswordRequired));
+                    self.ui_state.network.output_scroll = 0;
                     return;
                 }
                 self.error_msg = Some(format!("Network action failed: {}: {}", label, e));
                 self.network_output = command_output_lines(&e);
-                self.network_output_scroll = 0;
+                self.ui_state.network.output_scroll = 0;
                 self.tun_enabled = crate::api::read_tun_status();
             }
             DataEvent::SettingsResult(action, Ok(output)) => {
@@ -210,17 +208,18 @@ impl App {
                 } else {
                     output
                 };
-                self.settings_output = command_output_lines(&output);
+                self.ui_state.settings.output = command_output_lines(&output);
                 self.refresh_data();
             }
             DataEvent::SettingsResult(action, Err(e)) => {
                 let label = action.label();
                 if self.maybe_open_sudo_prompt(label, &e) {
-                    self.settings_output = command_output_lines("sudo password required");
+                    self.ui_state.settings.output =
+                        command_output_lines(self.t(Msg::SudoPasswordRequired));
                     return;
                 }
                 self.error_msg = Some(format!("Settings action failed: {}: {}", label, e));
-                self.settings_output = command_output_lines(&redact_sensitive_output(&e));
+                self.ui_state.settings.output = command_output_lines(&redact_sensitive_output(&e));
             }
             DataEvent::SettingsCommandResult(label, redact_output, Ok(output)) => {
                 self.clear_sudo_candidate(&label);
@@ -231,51 +230,53 @@ impl App {
                 } else {
                     output
                 };
-                self.settings_output = command_output_lines(&output);
+                self.ui_state.settings.output = command_output_lines(&output);
                 self.refresh_data();
             }
             DataEvent::SettingsCommandResult(label, _redact_output, Err(e)) => {
                 if self.maybe_open_sudo_prompt(&label, &e) {
-                    self.settings_output = command_output_lines("sudo password required");
+                    self.ui_state.settings.output =
+                        command_output_lines(self.t(Msg::SudoPasswordRequired));
                     return;
                 }
                 self.error_msg = Some(format!("Settings action failed: {}: {}", label, e));
-                self.settings_output = command_output_lines(&redact_sensitive_output(&e));
+                self.ui_state.settings.output = command_output_lines(&redact_sensitive_output(&e));
             }
             DataEvent::Traffic(Ok(snapshot)) => {
                 self.traffic_points = snapshot.history;
                 self.traffic_top = snapshot.top;
                 self.traffic_status = snapshot.status;
-                self.traffic_error = None;
+                self.ui_state.traffic.error = None;
                 self.clamp_traffic_selection();
                 self.clamp_traffic_window();
             }
             DataEvent::Traffic(Err(e)) => {
-                self.traffic_error = Some(e);
+                self.ui_state.traffic.error = Some(e);
             }
             DataEvent::TrafficExport(Ok(path)) => {
                 self.error_msg = None;
                 self.status_msg = Some(format!("traffic exported: {}", path));
-                self.traffic_output = vec![format!("exported: {}", path)];
+                self.ui_state.traffic.output = vec![format!("exported: {}", path)];
             }
             DataEvent::TrafficExport(Err(e)) => {
                 self.error_msg = Some(format!("Traffic export failed: {}", e));
-                self.traffic_output = command_output_lines(&e);
+                self.ui_state.traffic.output = command_output_lines(&e);
             }
             DataEvent::TrafficActionResult(label, Ok(output)) => {
                 self.clear_sudo_candidate(&label);
                 self.error_msg = None;
                 self.status_msg = Some(format!("traffic action completed: {}", label));
-                self.traffic_output = command_output_lines(&output);
+                self.ui_state.traffic.output = command_output_lines(&output);
                 self.refresh_traffic();
             }
             DataEvent::TrafficActionResult(label, Err(e)) => {
                 if self.maybe_open_sudo_prompt(&label, &e) {
-                    self.traffic_output = command_output_lines("sudo password required");
+                    self.ui_state.traffic.output =
+                        command_output_lines(self.t(Msg::SudoPasswordRequired));
                     return;
                 }
                 self.error_msg = Some(format!("Traffic action failed: {}: {}", label, e));
-                self.traffic_output = command_output_lines(&e);
+                self.ui_state.traffic.output = command_output_lines(&e);
             }
         }
     }
@@ -283,7 +284,7 @@ impl App {
     pub fn on_shutdown(&mut self) {
         self.window.save();
         if let Err(e) = self.ui_settings.save() {
-            self.error_msg = Some(format!("save settings failed: {}", e));
+            self.error_msg = Some(self.settings_save_failed(&e));
         }
     }
 }

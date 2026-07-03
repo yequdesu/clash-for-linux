@@ -2,6 +2,7 @@ pub(crate) mod command_palette;
 pub(crate) mod connections;
 pub(crate) mod events;
 pub(crate) mod i18n;
+pub(crate) mod key_router;
 pub(crate) mod logs;
 pub(crate) mod navigation;
 pub(crate) mod network_settings;

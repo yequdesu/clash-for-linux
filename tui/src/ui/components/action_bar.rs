@@ -6,7 +6,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
-use crate::action_registry::{self, ActionDanger};
+use crate::action_registry::{self, ActionDanger, ApiAction, InternalAction, PromptAction};
 use crate::mouse::HitboxAction;
 
 pub(crate) struct ActionButtonItem {
@@ -106,62 +106,88 @@ pub(crate) fn hitbox_for_action_spec(spec: &action_registry::ActionSpec) -> Opti
         ActionExecutor::Network(action) => Some(HitboxAction::RunNetwork(action)),
         ActionExecutor::Settings(action) => Some(HitboxAction::RunSettings(action)),
         ActionExecutor::Traffic(action) => Some(HitboxAction::RunTraffic(action)),
-        ActionExecutor::Api("PATCH /configs mode") => Some(HitboxAction::CycleProxyMode),
-        ActionExecutor::Api("PUT /proxies/{group}") => Some(HitboxAction::SwitchSelectedProxyNode),
-        ActionExecutor::Api("GET /proxies/{name}/delay") => {
+        ActionExecutor::Api(ApiAction::CycleProxyMode) => Some(HitboxAction::CycleProxyMode),
+        ActionExecutor::Api(ApiAction::SwitchProxyNode) => {
+            Some(HitboxAction::SwitchSelectedProxyNode)
+        }
+        ActionExecutor::Api(ApiAction::TestProxyDelay) => {
             Some(HitboxAction::TestSelectedProxyDelay)
         }
-        ActionExecutor::Api("DELETE /connections/{id}") => {
+        ActionExecutor::Api(ApiAction::CloseSelectedConnection) => {
             Some(HitboxAction::CloseSelectedConnection)
         }
-        ActionExecutor::Api("DELETE /connections") => Some(HitboxAction::CloseAllConnections),
-        ActionExecutor::Prompt("config set-port") => Some(HitboxAction::BeginConfigSetPorts),
-        ActionExecutor::Prompt("config set-api") => Some(HitboxAction::BeginConfigSetApi),
-        ActionExecutor::Prompt("config set-dns-mode") => Some(HitboxAction::BeginConfigSetDns),
-        ActionExecutor::Prompt("config set-lan") => Some(HitboxAction::BeginConfigSetLan),
-        ActionExecutor::Prompt("traffic prune retention") => {
+        ActionExecutor::Api(ApiAction::CloseAllConnections) => {
+            Some(HitboxAction::CloseAllConnections)
+        }
+        ActionExecutor::Prompt(PromptAction::ConfigSetPort) => {
+            Some(HitboxAction::BeginConfigSetPorts)
+        }
+        ActionExecutor::Prompt(PromptAction::ConfigSetApi) => Some(HitboxAction::BeginConfigSetApi),
+        ActionExecutor::Prompt(PromptAction::ConfigSetDnsMode) => {
+            Some(HitboxAction::BeginConfigSetDns)
+        }
+        ActionExecutor::Prompt(PromptAction::ConfigSetLan) => Some(HitboxAction::BeginConfigSetLan),
+        ActionExecutor::Prompt(PromptAction::TrafficPruneRetention) => {
             Some(HitboxAction::BeginTrafficPruneRetention)
         }
-        ActionExecutor::Prompt("geodata update version") => {
+        ActionExecutor::Prompt(PromptAction::GeodataUpdateVersion) => {
             Some(HitboxAction::BeginGeodataUpdateVersion)
         }
-        ActionExecutor::Prompt("secret set") => Some(HitboxAction::BeginSecretSet),
-        ActionExecutor::Prompt("sub add") => Some(HitboxAction::BeginSubscriptionAdd),
-        ActionExecutor::Prompt("sub import") => Some(HitboxAction::BeginSubscriptionImport),
-        ActionExecutor::Internal("toggle proxy sort") => Some(HitboxAction::ToggleProxySort),
-        ActionExecutor::Internal("toggle node picker") => Some(HitboxAction::ToggleNodePicker),
-        ActionExecutor::Internal("close node picker") => Some(HitboxAction::CloseNodePicker),
-        ActionExecutor::Internal("test all proxy delays") => Some(HitboxAction::TestAllProxyDelays),
-        ActionExecutor::Internal("cycle ui language") => Some(HitboxAction::CycleUiLanguage),
-        ActionExecutor::Internal("cycle theme preference") => {
+        ActionExecutor::Prompt(PromptAction::SecretSet) => Some(HitboxAction::BeginSecretSet),
+        ActionExecutor::Prompt(PromptAction::SubAdd) => Some(HitboxAction::BeginSubscriptionAdd),
+        ActionExecutor::Prompt(PromptAction::SubImport) => {
+            Some(HitboxAction::BeginSubscriptionImport)
+        }
+        ActionExecutor::Internal(InternalAction::ToggleProxySort) => {
+            Some(HitboxAction::ToggleProxySort)
+        }
+        ActionExecutor::Internal(InternalAction::ToggleNodePicker) => {
+            Some(HitboxAction::ToggleNodePicker)
+        }
+        ActionExecutor::Internal(InternalAction::CloseNodePicker) => {
+            Some(HitboxAction::CloseNodePicker)
+        }
+        ActionExecutor::Internal(InternalAction::TestAllProxyDelays) => {
+            Some(HitboxAction::TestAllProxyDelays)
+        }
+        ActionExecutor::Internal(InternalAction::CycleUiLanguage) => {
+            Some(HitboxAction::CycleUiLanguage)
+        }
+        ActionExecutor::Internal(InternalAction::CycleThemePreference) => {
             Some(HitboxAction::CycleThemePreference)
         }
-        ActionExecutor::Internal("cycle default page") => Some(HitboxAction::CycleDefaultPage),
-        ActionExecutor::Internal("cycle refresh interval") => {
+        ActionExecutor::Internal(InternalAction::CycleDefaultPage) => {
+            Some(HitboxAction::CycleDefaultPage)
+        }
+        ActionExecutor::Internal(InternalAction::CycleRefreshInterval) => {
             Some(HitboxAction::CycleRefreshInterval)
         }
-        ActionExecutor::Internal("toggle mouse preference") => {
+        ActionExecutor::Internal(InternalAction::ToggleMousePreference) => {
             Some(HitboxAction::ToggleMousePreference)
         }
-        ActionExecutor::Internal("toggle dangerous confirmations") => {
+        ActionExecutor::Internal(InternalAction::ToggleDangerousConfirmations) => {
             Some(HitboxAction::ToggleDangerousConfirmations)
         }
-        ActionExecutor::Internal("cycle default traffic range") => {
+        ActionExecutor::Internal(InternalAction::CycleDefaultTrafficRange) => {
             Some(HitboxAction::CycleDefaultTrafficRange)
         }
-        ActionExecutor::Internal("cycle default traffic chart") => {
+        ActionExecutor::Internal(InternalAction::CycleDefaultTrafficChart) => {
             Some(HitboxAction::CycleDefaultTrafficChart)
         }
-        ActionExecutor::Internal("cycle default traffic dimension") => {
+        ActionExecutor::Internal(InternalAction::CycleDefaultTrafficDimension) => {
             Some(HitboxAction::CycleDefaultTrafficDimension)
         }
-        ActionExecutor::Internal("toggle log pause") => Some(HitboxAction::ToggleLogPause),
-        ActionExecutor::Internal("cycle log level") => Some(HitboxAction::CycleLogFilter),
-        ActionExecutor::Internal("clear local logs") => Some(HitboxAction::ClearLogs),
-        ActionExecutor::Internal("clashctl traffic export --format csv") => {
+        ActionExecutor::Internal(InternalAction::ToggleLogPause) => {
+            Some(HitboxAction::ToggleLogPause)
+        }
+        ActionExecutor::Internal(InternalAction::CycleLogLevel) => {
+            Some(HitboxAction::CycleLogFilter)
+        }
+        ActionExecutor::Internal(InternalAction::ClearLogs) => Some(HitboxAction::ClearLogs),
+        ActionExecutor::Internal(InternalAction::TrafficExportCsv) => {
             Some(HitboxAction::ExportTraffic)
         }
-        ActionExecutor::Internal("clashctl sub log") => Some(HitboxAction::ShowSubscriptionLog),
+        ActionExecutor::Internal(InternalAction::SubLog) => Some(HitboxAction::ShowSubscriptionLog),
         _ => None,
     }
 }

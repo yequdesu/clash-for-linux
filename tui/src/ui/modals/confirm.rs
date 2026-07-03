@@ -14,7 +14,7 @@ use crate::ui::components::action_bar::*;
 use crate::ui::layout::centered_rect;
 
 pub(crate) fn render_confirmation_prompt(frame: &mut Frame, area: Rect, app: &mut App) {
-    let Some(prompt) = app.pending_confirmation.clone() else {
+    let Some(prompt) = app.ui_state.modals.pending_confirmation.clone() else {
         return;
     };
     let popup = centered_rect(area, 64, 28);

@@ -74,7 +74,7 @@ pub(crate) fn render_connections(frame: &mut Frame, area: Rect, app: &mut App) {
         .iter()
         .enumerate()
         .map(|(i, row)| {
-            let style = if i == app.connections_selected {
+            let style = if i == app.ui_state.connections.selected_idx {
                 Style::default()
                     .fg(CLASH_THEME.text)
                     .bg(CLASH_THEME.primary)

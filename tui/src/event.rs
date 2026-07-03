@@ -4,16 +4,12 @@ use std::time::Duration;
 
 use crate::{api, mouse::SettingsAction};
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Event {
     Init,
-    Quit,
-    Error(String),
     Key(KeyEvent),
     Mouse(MouseEvent),
     Tick,
-    DataReady,
 }
 
 #[derive(Debug)]

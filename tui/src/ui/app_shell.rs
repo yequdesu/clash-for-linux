@@ -2,7 +2,7 @@ use crate::ui::prelude::*;
 
 use crate::i18n::Msg;
 use crate::mouse::HitboxAction;
-use crate::widgets::tab_bar::Tab;
+use crate::ui::components::nav::Tab;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
@@ -96,22 +96,22 @@ fn render_active_page(frame: &mut Frame, content_area: Rect, app: &mut App) {
             Tab::Help => super::pages::help::render_help(frame, content_area, app),
         }
     }
-    if app.node_picker_open {
+    if app.ui_state.proxies.node_picker_open {
         super::modals::node_picker::render_node_picker(frame, content_area, app);
     }
-    if app.subscription_prompt.is_some() {
+    if app.ui_state.subscriptions.prompt.is_some() {
         super::modals::subscription::render_subscription_prompt(frame, content_area, app);
     }
-    if app.settings_prompt.is_some() {
+    if app.ui_state.settings.prompt.is_some() {
         super::modals::settings_prompt::render_settings_prompt(frame, content_area, app);
     }
-    if app.sudo_prompt.is_some() {
+    if app.ui_state.modals.sudo_prompt.is_some() {
         super::modals::sudo::render_sudo_prompt(frame, content_area, app);
     }
-    if app.pending_confirmation.is_some() {
+    if app.ui_state.modals.pending_confirmation.is_some() {
         super::modals::confirm::render_confirmation_prompt(frame, content_area, app);
     }
-    if app.command_palette_open {
+    if app.ui_state.command_palette.open {
         super::modals::command_palette::render_command_palette(frame, content_area, app);
     }
 }
@@ -154,7 +154,7 @@ fn render_top_status(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_compact_nav(frame: &mut Frame, area: Rect, app: &mut App) {
-    crate::widgets::tab_bar::render_tab_bar(
+    crate::ui::components::nav::render_tab_bar(
         frame,
         area,
         app.ui_state.active_page,
@@ -207,7 +207,7 @@ fn render_sidebar_nav(frame: &mut Frame, area: Rect, app: &mut App) {
 }
 
 pub(crate) fn register_tab_hitboxes(area: Rect, app: &mut App) {
-    for hitbox in crate::widgets::tab_bar::tab_hitboxes(area, app.ui_settings.language) {
+    for hitbox in crate::ui::components::nav::tab_hitboxes(area, app.ui_settings.language) {
         app.ui_state
             .hitboxes
             .register(hitbox.area, HitboxAction::SwitchTab(hitbox.tab));
@@ -217,8 +217,12 @@ pub(crate) fn register_tab_hitboxes(area: Rect, app: &mut App) {
 fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     fill_area(frame, area, CLASH_THEME.bg);
     let error_text = app.error_msg.as_deref().unwrap_or("");
-    let search_info = if app.search_active {
-        format!(" [/] {}: {} | ", app.t(Msg::StatusSearch), app.search_query)
+    let search_info = if app.ui_state.proxies.search_active {
+        format!(
+            " [/] {}: {} | ",
+            app.t(Msg::StatusSearch),
+            app.ui_state.proxies.search_query
+        )
     } else {
         String::new()
     };
@@ -228,7 +232,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
             app.t(Msg::StatusMode),
             app.proxy_mode_str,
             app.t(Msg::StatusSort),
-            if app.sort_mode {
+            if app.ui_state.proxies.sort_by_delay {
                 app.t(Msg::SortDelay)
             } else {
                 app.t(Msg::SortName)

@@ -70,4 +70,20 @@ impl App {
             ActionDanger::Dangerous => self.t(Msg::RiskDangerous),
         }
     }
+
+    pub(crate) fn confirm_title(&self, label: &str) -> String {
+        format!("{} {}", self.t(Msg::CommonConfirm), label)
+    }
+
+    pub(crate) fn confirm_hint(&self) -> String {
+        self.t(Msg::ConfirmHint).into()
+    }
+
+    pub(crate) fn sudo_required_status(&self, label: &str) -> String {
+        format!("{}: {}", self.t(Msg::SudoPasswordRequired), label)
+    }
+
+    pub(crate) fn settings_save_failed(&self, error: &str) -> String {
+        format!("{}: {}", self.t(Msg::SettingsSaveFailed), error)
+    }
 }

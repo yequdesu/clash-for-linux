@@ -14,15 +14,15 @@ use crate::ui::components::action_bar::*;
 use crate::ui::layout::centered_rect;
 
 pub(crate) fn render_subscription_prompt(frame: &mut Frame, area: Rect, app: &mut App) {
-    if app.subscription_add_form.is_some() {
+    if app.ui_state.subscriptions.add_form.is_some() {
         render_subscription_add_form(frame, area, app);
         return;
     }
-    if app.subscription_edit_form.is_some() {
+    if app.ui_state.subscriptions.edit_form.is_some() {
         render_subscription_edit_form(frame, area, app);
         return;
     }
-    let Some(prompt) = app.subscription_prompt.as_ref() else {
+    let Some(prompt) = app.ui_state.subscriptions.prompt.as_ref() else {
         return;
     };
     let popup = centered_rect(area, 72, 32);
@@ -113,7 +113,7 @@ pub(crate) fn render_subscription_prompt(frame: &mut Frame, area: Rect, app: &mu
 }
 
 pub(crate) fn render_subscription_edit_form(frame: &mut Frame, area: Rect, app: &mut App) {
-    let Some(form) = app.subscription_edit_form.as_ref() else {
+    let Some(form) = app.ui_state.subscriptions.edit_form.as_ref() else {
         return;
     };
     let popup = centered_rect(area, 82, 56);
@@ -192,7 +192,7 @@ pub(crate) fn render_subscription_edit_form(frame: &mut Frame, area: Rect, app: 
 }
 
 pub(crate) fn render_subscription_add_form(frame: &mut Frame, area: Rect, app: &mut App) {
-    let Some(form) = app.subscription_add_form.as_ref() else {
+    let Some(form) = app.ui_state.subscriptions.add_form.as_ref() else {
         return;
     };
     let popup = centered_rect(area, 82, 56);
