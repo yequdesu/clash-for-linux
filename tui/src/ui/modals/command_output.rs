@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use crate::i18n::Msg;
 use crate::mouse::HitboxAction;
-use crate::ui::components::action_bar::action_button_width;
+use crate::ui::components::action_bar::{action_button_width, display_width};
 
 pub(crate) fn render_command_output_window(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.ui_state.command_output.hidden {
@@ -30,15 +30,7 @@ pub(crate) fn render_command_output_window(frame: &mut Frame, area: Rect, app: &
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLASH_THEME.primary).bg(CLASH_THEME.bg))
-        .style(Style::default().bg(CLASH_THEME.bg))
-        .title(Span::styled(
-            format!(" {} · {} ", app.t(Msg::NetworkCommandOutput), page),
-            Style::default().fg(CLASH_THEME.primary).bold(),
-        ))
-        .title_bottom(Span::styled(
-            format!(" {} ", app.t(Msg::CommandOutputScrollHint)),
-            Style::default().fg(CLASH_THEME.muted).bg(CLASH_THEME.bg),
-        ));
+        .style(Style::default().bg(CLASH_THEME.bg));
     let shell = block.inner(popup);
     frame.render_widget(block, popup);
     fill_area(frame, shell, CLASH_THEME.bg);
@@ -46,52 +38,79 @@ pub(crate) fn render_command_output_window(frame: &mut Frame, area: Rect, app: &
     app.ui_state
         .hitboxes
         .register(popup, HitboxAction::ScrollCommandOutput);
-    render_close_button(frame, shell, app);
 
-    let inner = Rect::new(
+    let header = Rect::new(
+        shell.x.saturating_add(1),
+        shell.y,
+        shell.width.saturating_sub(2),
+        1,
+    );
+    let body = Rect::new(
         shell.x.saturating_add(2),
         shell.y.saturating_add(1),
         shell.width.saturating_sub(4),
         shell.height.saturating_sub(2),
     );
-    fill_area(frame, inner, CLASH_THEME.bg);
+    let footer = Rect::new(
+        shell.x.saturating_add(1),
+        shell.y.saturating_add(shell.height.saturating_sub(1)),
+        shell.width.saturating_sub(2),
+        1,
+    );
+    render_header(frame, header, app, page);
+    render_footer(frame, footer, app);
+    fill_area(frame, body, CLASH_THEME.bg);
 
-    let visible_height = inner.height as usize;
+    let visible_height = body.height as usize;
     let max_scroll = output.len().saturating_sub(visible_height);
     app.ui_state.command_output.scroll = app.ui_state.command_output.scroll.min(max_scroll);
-    let line_width = inner.width.saturating_sub(1) as usize;
+    let line_width = body.width.saturating_sub(1) as usize;
     let lines = output
         .iter()
         .skip(app.ui_state.command_output.scroll)
         .take(visible_height)
-        .map(|line| Line::from(Span::styled(trunc_str(line, line_width), CLASH_THEME.text)))
+        .map(|line| Line::from(Span::styled(fit_width(line, line_width), CLASH_THEME.text)))
         .collect::<Vec<_>>();
 
     frame.render_widget(
         Paragraph::new(lines).style(Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.bg)),
-        inner,
+        body,
     );
 }
 
-fn render_close_button(frame: &mut Frame, shell: Rect, app: &mut App) {
-    let label = app.t(Msg::CommonClose);
-    let width = action_button_width(label);
-    if shell.width <= width.saturating_add(2) || shell.height == 0 {
+fn render_header(frame: &mut Frame, area: Rect, app: &mut App, page: &'static str) {
+    if area.width == 0 || area.height == 0 {
         return;
     }
-    let rect = Rect::new(
-        shell
-            .x
-            .saturating_add(shell.width)
-            .saturating_sub(width)
-            .saturating_sub(1),
-        shell.y,
-        width,
+    fill_area(frame, area, CLASH_THEME.bg);
+    let label = app.t(Msg::CommonClose);
+    let close_width = action_button_width(label);
+    let title_gap = 1;
+    if area.width <= close_width.saturating_add(title_gap) {
+        render_title(frame, area, app, page);
+        return;
+    }
+    let close_rect = Rect::new(
+        area.x
+            .saturating_add(area.width)
+            .saturating_sub(close_width),
+        area.y,
+        close_width,
         1,
     );
+    let title_area = Rect::new(
+        area.x,
+        area.y,
+        close_rect
+            .x
+            .saturating_sub(area.x)
+            .saturating_sub(title_gap),
+        1,
+    );
+    render_title(frame, title_area, app, page);
     app.ui_state
         .hitboxes
-        .register(rect, HitboxAction::CloseCommandOutput);
+        .register(close_rect, HitboxAction::CloseCommandOutput);
     frame.render_widget(
         Paragraph::new(format!(" {} ", label)).style(
             Style::default()
@@ -99,7 +118,38 @@ fn render_close_button(frame: &mut Frame, shell: Rect, app: &mut App) {
                 .bg(CLASH_THEME.warning)
                 .bold(),
         ),
-        rect,
+        close_rect,
+    );
+}
+
+fn render_title(frame: &mut Frame, area: Rect, app: &App, page: &'static str) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let title = format!("{} · {}", app.t(Msg::NetworkCommandOutput), page);
+    frame.render_widget(
+        Paragraph::new(fit_width(&title, area.width as usize)).style(
+            Style::default()
+                .fg(CLASH_THEME.primary)
+                .bg(CLASH_THEME.bg)
+                .bold(),
+        ),
+        area,
+    );
+}
+
+fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    fill_area(frame, area, CLASH_THEME.bg);
+    frame.render_widget(
+        Paragraph::new(fit_width(
+            app.t(Msg::CommandOutputScrollHint),
+            area.width as usize,
+        ))
+        .style(Style::default().fg(CLASH_THEME.muted).bg(CLASH_THEME.bg)),
+        area,
     );
 }
 
@@ -117,6 +167,31 @@ fn active_output(app: &App) -> Option<(&'static str, Vec<String>)> {
         )),
         _ => None,
     }
+}
+
+fn fit_width(value: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if display_width(value) as usize <= max_width {
+        return value.to_string();
+    }
+    let ellipsis = "…";
+    let keep_width = max_width.saturating_sub(display_width(ellipsis) as usize);
+    if keep_width == 0 {
+        return ellipsis.to_string();
+    }
+    let mut out = String::new();
+    for ch in value.chars() {
+        let mut next = out.clone();
+        next.push(ch);
+        if display_width(&next) as usize > keep_width {
+            break;
+        }
+        out = next;
+    }
+    out.push_str(ellipsis);
+    out
 }
 
 fn output_window_area(area: Rect) -> Rect {
