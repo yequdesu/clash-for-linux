@@ -76,7 +76,7 @@ impl AppMouse {
 
     #[cfg(test)]
     pub(crate) fn left_down(x: u16, y: u16) -> Self {
-        Self::new(AppMouseKind::LeftDown, x, y)
+        Self::new(AppMouseKind::LeftClick, x, y)
     }
 
     #[cfg(test)]
@@ -92,8 +92,7 @@ impl AppMouse {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppMouseKind {
-    LeftDown,
+    LeftClick,
     ScrollDown,
     ScrollUp,
-    Other,
 }

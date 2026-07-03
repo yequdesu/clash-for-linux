@@ -33,7 +33,7 @@ fn main() -> io::Result<()> {
 
     let config = config::Config::load();
     let mut app = App::new(config, rt.handle().clone(), data_tx);
-    let mouse_capture_enabled = app.ui_settings.mouse_enabled;
+    let mut mouse_capture_enabled = app.ui_settings.mouse_enabled;
 
     let _guard = panic_handler();
 
@@ -52,7 +52,12 @@ fn main() -> io::Result<()> {
 
     update::refresh_data(&mut app);
 
-    let result = run(&mut terminal, &mut app, &mut event_handler);
+    let result = run(
+        &mut terminal,
+        &mut app,
+        &mut event_handler,
+        &mut mouse_capture_enabled,
+    );
 
     app.on_shutdown();
     terminal::disable_raw_mode()?;
@@ -74,6 +79,7 @@ fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     handler: &mut EventHandler,
+    mouse_capture_enabled: &mut bool,
 ) -> io::Result<()> {
     loop {
         while let Some(data_event) = handler.try_recv_data() {
@@ -99,10 +105,36 @@ fn run(
             Ok(Event::Tick) => update::on_tick(app),
             Err(e) => app.error_msg = Some(e.to_string()),
         }
+        sync_mouse_capture(terminal, app, mouse_capture_enabled)?;
 
         if app.should_quit {
             break;
         }
+    }
+    Ok(())
+}
+
+fn sync_mouse_capture(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+    mouse_capture_enabled: &mut bool,
+) -> io::Result<()> {
+    if app.ui_settings.mouse_enabled == *mouse_capture_enabled {
+        return Ok(());
+    }
+
+    if app.ui_settings.mouse_enabled {
+        terminal
+            .backend_mut()
+            .execute(crossterm_event::EnableMouseCapture)?;
+        *mouse_capture_enabled = true;
+        app.status_msg = Some("mouse capture enabled".into());
+    } else {
+        terminal
+            .backend_mut()
+            .execute(crossterm_event::DisableMouseCapture)?;
+        *mouse_capture_enabled = false;
+        app.status_msg = Some("mouse capture disabled; press 7 then M to enable".into());
     }
     Ok(())
 }

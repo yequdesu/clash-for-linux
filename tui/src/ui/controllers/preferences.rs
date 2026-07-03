@@ -68,7 +68,7 @@ impl App {
         } else {
             "disabled"
         };
-        self.save_ui_settings(format!("mouse capture: {state} after restart"));
+        self.save_ui_settings(format!("mouse capture: {state}"));
     }
 
     pub fn toggle_dangerous_confirmations(&mut self) {

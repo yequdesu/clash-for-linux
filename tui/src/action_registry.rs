@@ -367,7 +367,7 @@ const ACTIONS: &[ActionSpec] = &[
         label: "Toggle mouse capture",
         shortcut: "M",
         mouse: "Mouse",
-        description: "Toggle terminal mouse capture preference for the next TUI launch.",
+        description: "Toggle terminal mouse capture immediately.",
         danger: ActionDanger::Safe,
         executor: ActionExecutor::Internal(InternalAction::ToggleMousePreference),
     },

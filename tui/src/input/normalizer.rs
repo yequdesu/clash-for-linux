@@ -11,6 +11,8 @@ const ESC_SEQUENCE_FRAGMENT_LIMIT: u8 = 12;
 #[derive(Debug, Default)]
 pub(crate) struct InputNormalizer {
     esc_fragments_remaining: u8,
+    pending_left_click: Option<(u16, u16)>,
+    left_dragged: bool,
 }
 
 impl InputNormalizer {
@@ -22,14 +24,14 @@ impl InputNormalizer {
                 }
             }
             CrosstermEvent::Mouse(mouse) => {
-                queue.push(AppInput::Mouse(AppMouse::new(
-                    normalize_mouse_kind(mouse.kind),
-                    mouse.column,
-                    mouse.row,
-                )));
+                if let Some(mouse) = self.normalize_mouse(mouse.kind, mouse.column, mouse.row) {
+                    queue.push(AppInput::Mouse(mouse));
+                }
             }
             CrosstermEvent::Resize(cols, rows) => {
                 self.esc_fragments_remaining = 0;
+                self.pending_left_click = None;
+                self.left_dragged = false;
                 queue.push(AppInput::Resize { cols, rows });
             }
             CrosstermEvent::Paste(text) => queue.push(AppInput::Paste(text)),
@@ -54,6 +56,35 @@ impl InputNormalizer {
             return None;
         }
         Some(key)
+    }
+
+    fn normalize_mouse(&mut self, kind: MouseEventKind, column: u16, row: u16) -> Option<AppMouse> {
+        match kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.pending_left_click = Some((column, row));
+                self.left_dragged = false;
+                None
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                self.left_dragged = true;
+                None
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let click = self.pending_left_click == Some((column, row)) && !self.left_dragged;
+                self.pending_left_click = None;
+                self.left_dragged = false;
+                click.then(|| AppMouse::new(AppMouseKind::LeftClick, column, row))
+            }
+            MouseEventKind::ScrollDown => {
+                Some(AppMouse::new(AppMouseKind::ScrollDown, column, row))
+            }
+            MouseEventKind::ScrollUp => Some(AppMouse::new(AppMouseKind::ScrollUp, column, row)),
+            _ => {
+                self.pending_left_click = None;
+                self.left_dragged = false;
+                None
+            }
+        }
     }
 
     fn drop_escape_fragment(&mut self, key: AppKey) -> bool {
@@ -112,15 +143,6 @@ fn normalize_modifiers(modifiers: KeyModifiers) -> AppModifiers {
     app
 }
 
-fn normalize_mouse_kind(kind: MouseEventKind) -> AppMouseKind {
-    match kind {
-        MouseEventKind::Down(MouseButton::Left) => AppMouseKind::LeftDown,
-        MouseEventKind::ScrollDown => AppMouseKind::ScrollDown,
-        MouseEventKind::ScrollUp => AppMouseKind::ScrollUp,
-        _ => AppMouseKind::Other,
-    }
-}
-
 fn is_escape_fragment(key: AppKey) -> bool {
     if key.modifiers.contains(AppModifiers::ALT) {
         return true;
@@ -175,10 +197,19 @@ fn is_escape_fragment_char(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyEvent, KeyModifiers};
+    use crossterm::event::{KeyEvent, KeyModifiers, MouseEvent};
 
     fn key(code: KeyCode) -> CrosstermEvent {
         CrosstermEvent::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> CrosstermEvent {
+        CrosstermEvent::Mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
     }
 
     #[test]
@@ -209,5 +240,43 @@ mod tests {
             queue.pop(),
             Some(AppInput::Key(AppKey::plain(AppKeyCode::Char('2'))))
         );
+    }
+
+    #[test]
+    fn mouse_click_requires_release_without_drag() {
+        let mut normalizer = InputNormalizer::default();
+        let mut queue = InputQueue::default();
+
+        normalizer.push_crossterm(
+            mouse(MouseEventKind::Down(MouseButton::Left), 3, 4),
+            &mut queue,
+        );
+        assert_eq!(queue.pop(), None);
+        normalizer.push_crossterm(
+            mouse(MouseEventKind::Up(MouseButton::Left), 3, 4),
+            &mut queue,
+        );
+        assert_eq!(
+            queue.pop(),
+            Some(AppInput::Mouse(AppMouse::new(
+                AppMouseKind::LeftClick,
+                3,
+                4
+            )))
+        );
+
+        normalizer.push_crossterm(
+            mouse(MouseEventKind::Down(MouseButton::Left), 3, 4),
+            &mut queue,
+        );
+        normalizer.push_crossterm(
+            mouse(MouseEventKind::Drag(MouseButton::Left), 4, 4),
+            &mut queue,
+        );
+        normalizer.push_crossterm(
+            mouse(MouseEventKind::Up(MouseButton::Left), 4, 4),
+            &mut queue,
+        );
+        assert_eq!(queue.pop(), None);
     }
 }

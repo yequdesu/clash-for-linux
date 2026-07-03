@@ -4,10 +4,9 @@ impl App {
     pub fn handle_mouse_event(&mut self, mouse: crate::input::AppMouse) {
         let action = self.ui_state.hitboxes.action_at(mouse.x, mouse.y);
         match mouse.kind {
-            crate::input::AppMouseKind::LeftDown => self.handle_mouse_click(action),
+            crate::input::AppMouseKind::LeftClick => self.handle_mouse_click(action),
             crate::input::AppMouseKind::ScrollDown => self.handle_mouse_scroll(action, 3),
             crate::input::AppMouseKind::ScrollUp => self.handle_mouse_scroll(action, -3),
-            _ => {}
         }
     }
 
