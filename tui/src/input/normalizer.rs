@@ -39,8 +39,18 @@ impl InputNormalizer {
         }
     }
 
-    pub(crate) fn on_idle(&mut self) {
+    pub(crate) fn on_idle(&mut self, queue: &mut InputQueue) {
         self.esc_fragments_remaining = 0;
+        if let Some((column, row)) = self.pending_left_click.take() {
+            if !self.left_dragged {
+                queue.push(AppInput::Mouse(AppMouse::new(
+                    AppMouseKind::LeftClick,
+                    column,
+                    row,
+                )));
+            }
+        }
+        self.left_dragged = false;
     }
 
     fn normalize_key(&mut self, key: KeyEvent) -> Option<AppKey> {
@@ -234,11 +244,34 @@ mod tests {
         );
         assert_eq!(queue.pop(), None);
 
-        normalizer.on_idle();
+        normalizer.on_idle(&mut queue);
         normalizer.push_crossterm(key(KeyCode::Char('2')), &mut queue);
         assert_eq!(
             queue.pop(),
             Some(AppInput::Key(AppKey::plain(AppKeyCode::Char('2'))))
+        );
+    }
+
+    #[test]
+    fn mouse_down_without_release_falls_back_to_click_on_idle() {
+        let mut normalizer = InputNormalizer::default();
+        let mut queue = InputQueue::default();
+
+        normalizer.push_crossterm(
+            mouse(MouseEventKind::Down(MouseButton::Left), 5, 6),
+            &mut queue,
+        );
+        assert_eq!(queue.pop(), None);
+
+        normalizer.on_idle(&mut queue);
+
+        assert_eq!(
+            queue.pop(),
+            Some(AppInput::Mouse(AppMouse::new(
+                AppMouseKind::LeftClick,
+                5,
+                6
+            )))
         );
     }
 
@@ -277,6 +310,7 @@ mod tests {
             mouse(MouseEventKind::Up(MouseButton::Left), 4, 4),
             &mut queue,
         );
+        normalizer.on_idle(&mut queue);
         assert_eq!(queue.pop(), None);
     }
 }

@@ -68,8 +68,12 @@ impl EventHandler {
                 .map(Event::Input)
                 .unwrap_or(Event::Init))
         } else {
-            self.input.on_idle();
-            Ok(Event::Tick)
+            self.input.on_idle(&mut self.input_queue);
+            Ok(self
+                .input_queue
+                .pop()
+                .map(Event::Input)
+                .unwrap_or(Event::Tick))
         }
     }
 
