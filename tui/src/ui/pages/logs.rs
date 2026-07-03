@@ -67,6 +67,12 @@ pub(crate) fn render_logs(frame: &mut Frame, area: Rect, app: &mut App) {
     } else {
         "▶"
     };
+    let search_suffix =
+        if app.ui_state.logs.search_active || !app.ui_state.logs.search_query.is_empty() {
+            format!("  search:{} ", app.ui_state.logs.search_query)
+        } else {
+            String::new()
+        };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(
@@ -81,9 +87,10 @@ pub(crate) fn render_logs(frame: &mut Frame, area: Rect, app: &mut App) {
         ))
         .title_bottom(Span::styled(
             format!(
-                " p:{}  f:{}+  c:clear  /:search  scroll:navigate ",
+                " p:{}  f:{}+  c:clear  /:search{}  scroll:navigate ",
                 pause_str,
-                app.ui_state.logs.level.label()
+                app.ui_state.logs.level.label(),
+                search_suffix
             ),
             Style::default().fg(CLASH_THEME.muted),
         ));

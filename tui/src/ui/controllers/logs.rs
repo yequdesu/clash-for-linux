@@ -30,6 +30,30 @@ impl App {
         self.status_msg = Some("logs cleared".into());
     }
 
+    pub fn toggle_log_search(&mut self) {
+        self.ui_state.logs.search_active = !self.ui_state.logs.search_active;
+        if !self.ui_state.logs.search_active {
+            self.ui_state.logs.search_query.clear();
+        }
+        self.clamp_log_scroll();
+    }
+
+    pub fn push_log_search_char(&mut self, c: char) {
+        self.ui_state.logs.search_query.push(c);
+        self.clamp_log_scroll();
+    }
+
+    pub fn pop_log_search_char(&mut self) {
+        self.ui_state.logs.search_query.pop();
+        self.clamp_log_scroll();
+    }
+
+    pub fn close_log_search(&mut self) {
+        self.ui_state.logs.search_active = false;
+        self.ui_state.logs.search_query.clear();
+        self.clamp_log_scroll();
+    }
+
     pub fn scroll_logs_down(&mut self, amount: usize) {
         self.ui_state.logs.scroll = self.ui_state.logs.scroll.saturating_add(amount);
         self.clamp_log_scroll();
@@ -49,7 +73,7 @@ impl App {
     }
 
     pub(crate) fn visible_logs(&self) -> Vec<&String> {
-        let query = self.ui_state.proxies.search_query.to_lowercase();
+        let query = self.ui_state.logs.search_query.to_lowercase();
         self.logs
             .iter()
             .filter(|line| self.ui_state.logs.level.matches_line(line))

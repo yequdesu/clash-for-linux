@@ -700,9 +700,10 @@ fn tail_file_lines(path: &Path, max_lines: usize, max_bytes: u64) -> std::io::Re
     let len = file.metadata()?.len();
     let start = len.saturating_sub(max_bytes);
     file.seek(SeekFrom::Start(start))?;
-    let mut buf = String::new();
-    file.read_to_string(&mut buf)?;
-    let mut lines: Vec<String> = buf.lines().map(str::to_string).collect();
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
+    let text = String::from_utf8_lossy(&buf);
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
     if start > 0 && !lines.is_empty() {
         lines.remove(0);
     }

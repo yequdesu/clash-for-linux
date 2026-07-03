@@ -2081,6 +2081,44 @@ fn log_events_are_unicode_safe_and_deduplicated() {
 }
 
 #[test]
+fn log_page_uses_dedicated_search_state() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Logs;
+    app.logs = vec!["INFO alpha".into(), "INFO beta".into()];
+    app.ui_state.proxies.search_query = "missing".into();
+
+    assert_eq!(app.visible_logs().len(), 2);
+
+    app.toggle_log_search();
+    app.push_log_search_char('b');
+
+    let visible = app.visible_logs();
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].as_str(), "INFO beta");
+}
+
+#[test]
+fn escape_and_alt_navigation_do_not_leak_to_page_switching() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = test_app(&rt);
+    app.ui_state.active_page = Tab::Logs;
+
+    crate::ui::controllers::key_router::handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+    );
+    assert_eq!(app.ui_state.active_page, Tab::Logs);
+    assert!(!app.should_quit);
+
+    crate::ui::controllers::key_router::handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Left, KeyModifiers::ALT),
+    );
+    assert_eq!(app.ui_state.active_page, Tab::Logs);
+}
+
+#[test]
 fn mode_display_normalizes_api_values() {
     assert_eq!(mode_display("rule"), "Rule");
     assert_eq!(mode_display("Global"), "Global");

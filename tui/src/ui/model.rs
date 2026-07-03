@@ -63,6 +63,8 @@ pub(crate) struct LogsPageState {
     pub scroll: usize,
     pub paused: bool,
     pub level: LogLevelFilter,
+    pub search_active: bool,
+    pub search_query: String,
 }
 
 impl Default for LogsPageState {
@@ -71,6 +73,8 @@ impl Default for LogsPageState {
             scroll: 0,
             paused: false,
             level: LogLevelFilter::Info,
+            search_active: false,
+            search_query: String::new(),
         }
     }
 }

@@ -18,6 +18,9 @@ pub(crate) fn handle_key_event(app: &mut App, key: KeyEvent) {
         handle_control_key(app, key.code);
         return;
     }
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        return;
+    }
     if handle_search_key(app, key.code) {
         return;
     }
@@ -139,38 +142,44 @@ fn handle_control_key(app: &mut App, code: KeyCode) {
 }
 
 fn handle_search_key(app: &mut App, code: KeyCode) -> bool {
-    if !app.ui_state.proxies.search_active {
-        return false;
+    if app.ui_state.active_page == Tab::Logs && app.ui_state.logs.search_active {
+        match code {
+            KeyCode::Esc => app.close_log_search(),
+            KeyCode::Backspace => app.pop_log_search_char(),
+            KeyCode::Char(c) => app.push_log_search_char(c),
+            _ => {}
+        }
+        return true;
     }
 
-    match code {
-        KeyCode::Esc => {
-            app.ui_state.proxies.search_active = false;
-            app.ui_state.proxies.search_query.clear();
-            app.clamp_proxy_selection();
+    if app.ui_state.active_page == Tab::Proxies && app.ui_state.proxies.search_active {
+        match code {
+            KeyCode::Esc => {
+                app.ui_state.proxies.search_active = false;
+                app.ui_state.proxies.search_query.clear();
+                app.clamp_proxy_selection();
+            }
+            KeyCode::Backspace => {
+                app.ui_state.proxies.search_query.pop();
+                app.clamp_proxy_selection();
+            }
+            KeyCode::Char(c) => {
+                app.ui_state.proxies.search_query.push(c);
+                app.clamp_proxy_selection();
+            }
+            _ => {}
         }
-        KeyCode::Backspace => {
-            app.ui_state.proxies.search_query.pop();
-            app.clamp_proxy_selection();
-        }
-        KeyCode::Char(c) => {
-            app.ui_state.proxies.search_query.push(c);
-            app.clamp_proxy_selection();
-        }
-        _ => {}
+        return true;
     }
-    true
+
+    false
 }
 
 fn handle_page_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Esc => {
-            if app.ui_state.proxies.node_picker_open {
-                app.close_node_picker();
-            } else {
-                app.should_quit = true;
-            }
+            app.status_msg = Some("press q to quit".into());
         }
         KeyCode::Tab | KeyCode::Char('\t') => app.next_tab(),
         KeyCode::Right if app.ui_state.active_page == Tab::Settings => app.next_settings_section(),
@@ -199,9 +208,10 @@ fn handle_page_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('0') => {
             app.window.reset();
         }
-        KeyCode::Char('/') => {
+        KeyCode::Char('/') if app.ui_state.active_page == Tab::Proxies => {
             app.ui_state.proxies.search_active = !app.ui_state.proxies.search_active
         }
+        KeyCode::Char('/') if app.ui_state.active_page == Tab::Logs => app.toggle_log_search(),
         KeyCode::Down | KeyCode::Char('j') => app.select_down(),
         KeyCode::Up | KeyCode::Char('k') => app.select_up(),
         KeyCode::Char('g') => app.reset_selection(),
