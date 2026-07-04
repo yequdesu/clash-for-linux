@@ -85,6 +85,18 @@ chmod +x install.sh
 CLASHCTL_RELEASE_TAG="$TAG" bash install.sh --with-tui
 ```
 
+Short explicit-tag form:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yequdesu/clash-for-linux/v0.2.0-rc.12/install.sh | bash -s -- --with-tui --tag v0.2.0-rc.12
+```
+
+Mirror form:
+
+```bash
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/yequdesu/clash-for-linux/v0.2.0-rc.12/install.sh | bash -s -- --with-tui --tag v0.2.0-rc.12
+```
+
 `install.sh` tries GitHub directly first, then mirrors. Override mirrors with
 `CLASHCTL_GITHUB_MIRRORS="https://gh-proxy.org/ https://mirror.example/{url}"`.
 

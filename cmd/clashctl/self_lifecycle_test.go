@@ -55,3 +55,23 @@ func TestReleaseDownloadURLsHonorsMirrorOnlyMode(t *testing.T) {
 		t.Fatalf("releaseDownloadURLs = %#v, want [%q]", got, want)
 	}
 }
+
+func TestUsingDefaultLatestReleaseRequiresNoExplicitSource(t *testing.T) {
+	oldBase := selfUpdateBaseURL
+	oldTag := selfUpdateTag
+	defer func() {
+		selfUpdateBaseURL = oldBase
+		selfUpdateTag = oldTag
+	}()
+	selfUpdateBaseURL = ""
+	selfUpdateTag = ""
+	t.Setenv("CLASHCTL_RELEASE_BASE_URL", "")
+	t.Setenv("CLASHCTL_RELEASE_TAG", "")
+	if !usingDefaultLatestRelease() {
+		t.Fatal("default latest was not detected")
+	}
+	selfUpdateTag = "v0.2.0-rc.12"
+	if usingDefaultLatestRelease() {
+		t.Fatal("explicit tag should disable default latest mode")
+	}
+}

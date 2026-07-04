@@ -32,7 +32,8 @@ INSTALL_COMPLETION=auto
 RELEASE_TOOLS_INSTALLED=false
 CLASHCTL_SOURCE_URL=""
 CLASH_TUI_SOURCE_URL=""
-for arg in "$@"; do
+while [ "$#" -gt 0 ]; do
+    arg="$1"
     case "$arg" in
         --force)    FORCE=true ;;
         --reset-config) RESET_CONFIG=true ;;
@@ -41,6 +42,14 @@ for arg in "$@"; do
         --tui-only) TUI_ONLY=true; SKIP_CLI=true; WITH_TUI=true ;;
         --completion) INSTALL_COMPLETION=yes ;;
         --no-completion) INSTALL_COMPLETION=no ;;
+        --tag)
+            shift
+            [ "$#" -gt 0 ] || _log_fatal "--tag requires a value"
+            CLASHCTL_RELEASE_TAG="$1"
+            ;;
+        --tag=*)
+            CLASHCTL_RELEASE_TAG="${arg#--tag=}"
+            ;;
         --help|-h)
             echo "Usage: bash install.sh [flags]"
             echo ""
@@ -50,13 +59,18 @@ for arg in "$@"; do
             echo "  --force                  Force reinstall, overwrite existing"
             echo "  --reset-config           With --force, reset resources/config/subscriptions"
             echo "  --skip-cli               Skip CLI build (use pre-built or skip)"
+            echo "  --tag <tag>              Install release artifact from an explicit tag"
             echo "  --completion             Install shell completion without prompting"
             echo "  --no-completion          Do not install shell completion"
             echo ""
             echo "Run as normal user. Password asked once at the beginning."
             exit 0
             ;;
+        *)
+            _log_fatal "unknown flag: $arg"
+            ;;
     esac
+    shift
 done
 
 if $RESET_CONFIG && ! $FORCE; then

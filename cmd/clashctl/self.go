@@ -35,6 +35,8 @@ var selfUninstallRemoveConfig bool
 var selfUninstallKeepKernel bool
 var selfUninstallRemoveKernel bool
 
+const defaultReleaseBaseURL = "https://github.com/yequdesu/clash-for-linux/releases/latest/download"
+
 var selfCmd = &cobra.Command{
 	Use:   "self",
 	Short: "Manage clashctl installation",
@@ -99,6 +101,9 @@ func runSelfUpdate() error {
 
 	artifactPath := filepath.Join(tmpDir, artifact)
 	if err := downloadReleaseFile(base, artifact, artifactPath); err != nil {
+		if usingDefaultLatestRelease() {
+			return fmt.Errorf("%w. GitHub latest may not point to release candidates; use --tag vX.Y.Z or --base-url for RC builds", err)
+		}
 		return err
 	}
 	checksumsPath := filepath.Join(tmpDir, "SHA256SUMS")
@@ -281,7 +286,14 @@ func selfReleaseBaseURL() string {
 	if tag != "" {
 		return "https://github.com/yequdesu/clash-for-linux/releases/download/" + tag
 	}
-	return "https://github.com/yequdesu/clash-for-linux/releases/latest/download"
+	return defaultReleaseBaseURL
+}
+
+func usingDefaultLatestRelease() bool {
+	return selfUpdateBaseURL == "" &&
+		os.Getenv("CLASHCTL_RELEASE_BASE_URL") == "" &&
+		selfUpdateTag == "" &&
+		os.Getenv("CLASHCTL_RELEASE_TAG") == ""
 }
 
 func releaseArch() (string, error) {
