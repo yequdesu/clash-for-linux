@@ -24,6 +24,22 @@ _log_ok()   { printf '\r\033[32m[+]\033[0m %s\r\n' "$*"; }
 _log_info() { printf '\r\033[36m[i]\033[0m %s\r\n' "$*"; }
 _log_warn() { printf '\r\033[33m[!]\033[0m %s\r\n' "$*"; }
 _sudo()     { [ "$(id -u)" -eq 0 ] && "$@" || sudo "$@"; }
+_confirm() {
+    local prompt="$1" def="${2:-y}" answer suffix
+    suffix='[Y/n]'
+    [ "$def" = "n" ] && suffix='[y/N]'
+    if [ ! -t 0 ]; then
+        [ "$def" = "y" ]
+        return
+    fi
+    printf '\r\033[36m[i]\033[0m %s %s ' "$prompt" "$suffix"
+    read -r answer
+    answer="${answer:-$def}"
+    case "$answer" in
+        [Yy]|yes|YES) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 _proxy_unset_cmd() {
     printf 'unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY'
 }
@@ -218,13 +234,53 @@ if command -v crontab >/dev/null 2>&1; then
     _log_info "cleaned crontab"
 fi
 
-# ── Remove install directories ──
-for dir in "$CLASH_BASE_DIR" "$REAL_HOME/.config/clashctl" "$REAL_HOME/.config/clash-tui" /etc/clashctl; do
-    if [ -d "$dir" ]; then
-        _sudo rm -rf "$dir" 2>/dev/null || rm -rf "$dir" 2>/dev/null || true
-        _log_ok "removed $dir"
-    fi
+# ── Remove install-only files and selected user data ──
+for path in "$CLASH_BASE_DIR/bin" "$CLASH_BASE_DIR/runtime" "$CLASH_BASE_DIR/scripts" "$CLASH_BASE_DIR/install-state.json"; do
+    [ -e "$path" ] || continue
+    _sudo rm -rf "$path" 2>/dev/null || rm -rf "$path" 2>/dev/null || true
+    _log_ok "removed install-only path $path"
 done
+
+if _confirm "Keep subscriptions and imported profiles?" y; then
+    _log_info "kept subscriptions and imported profiles"
+else
+    rm -rf "$CLASH_BASE_DIR/resources/profiles" "$CLASH_BASE_DIR/resources/configs" "$CLASH_BASE_DIR/resources/profiles.yaml" "$CLASH_BASE_DIR/resources/profiles.log" 2>/dev/null || true
+    _log_ok "removed subscriptions and imported profiles"
+fi
+if _confirm "Keep local configuration, mixin, and .env?" y; then
+    _log_info "kept local configuration"
+else
+    rm -f "$CLASH_BASE_DIR/resources/config.yaml" "$CLASH_BASE_DIR/resources/mixin.yaml" "$CLASH_BASE_DIR/resources/runtime.yaml" "$CLASH_BASE_DIR/resources/temp.yaml" "$CLASH_BASE_DIR/.env" 2>/dev/null || true
+    _log_ok "removed local configuration"
+fi
+if _confirm "Keep geodata files (Country.mmdb, geosite.dat, geoip.dat)?" y; then
+    _log_info "kept geodata"
+else
+    rm -f "$CLASH_BASE_DIR/resources/Country.mmdb" "$CLASH_BASE_DIR/resources/geosite.dat" "$CLASH_BASE_DIR/resources/geoip.dat" 2>/dev/null || true
+    _log_ok "removed geodata"
+fi
+if _confirm "Keep persistent traffic statistics?" y; then
+    _log_info "kept traffic statistics"
+else
+    rm -rf "$CLASH_BASE_DIR/traffic" 2>/dev/null || true
+    _log_ok "removed traffic statistics"
+fi
+if _confirm "Keep logs?" y; then
+    _log_info "kept logs"
+else
+    rm -rf "$CLASH_BASE_DIR/logs" 2>/dev/null || true
+    _log_ok "removed logs"
+fi
+if _confirm "Keep TUI settings?" y; then
+    _log_info "kept TUI settings"
+else
+    rm -rf "$REAL_HOME/.config/clash-tui" 2>/dev/null || true
+    _log_ok "removed TUI settings"
+fi
+
+rmdir "$CLASH_BASE_DIR/resources" "$CLASH_BASE_DIR" 2>/dev/null || true
+rm -rf "$REAL_HOME/.config/clashctl" 2>/dev/null || true
+_sudo rm -rf /etc/clashctl 2>/dev/null || true
 
 echo ''
 _log_ok "uninstall complete"

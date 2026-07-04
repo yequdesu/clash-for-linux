@@ -30,13 +30,19 @@ Read these first:
 
 Local checks currently cover Go tests, Rust tests, shell syntax, smoke scripts, CLI process exit codes, config rollback, subscription consistency, geodata staging, kernel upgrade rollback, and nohup pid safety.
 
+Validated on `v0.2.0-rc.16`:
+
+- GitHub Actions CI, install smoke, and release workflow.
+- Release artifact + `SHA256SUMS` install on a clean Linux machine.
+- Real Mihomo, yq, geodata, CLI, and TUI download/install path with mirror fallback.
+- Real kernel start/status and SSH-side TUN route guard validation.
+- Interactive uninstall proxy-variable warning and reinstall after data removal.
+
 Still required before a stable release:
 
-- Real Linux VM/systemd install/start/status/log/stop/uninstall.
-- GitHub Actions and release workflow evidence.
-- Release artifact + `SHA256SUMS` install.
-- Real Mihomo, yq, geodata download and startup.
-- Real TUN behavior.
+- Broader distro coverage beyond the validated Debian/Ubuntu paths.
+- Real GNOME/KDE desktop proxy behavior.
+- Final README/release-notes pass after the last RC.
 - Real GNOME/KDE desktop proxy behavior.
 
 ## Local Verification
@@ -116,6 +122,11 @@ Uninstall:
 ```bash
 clashctl self uninstall
 ```
+
+Interactive uninstall asks separately whether to keep subscriptions/imported
+profiles, local config, geodata, persistent traffic statistics, logs, TUI
+settings, kernel tools, and shell completions. Install-only files under the app
+directory are removed even when user data is preserved.
 
 If the current shell has proxy variables from `eval "$(clashctl env)"`, uninstall
 cannot modify that parent shell. The uninstaller will warn and print the cleanup

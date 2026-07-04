@@ -106,3 +106,65 @@ func TestProxyUnsetCommandContainsAllProxyVariables(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyApplicationDataChoicesRemovesOnlySelectedData(t *testing.T) {
+	oldCfg := cfg
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	base := filepath.Join(root, "clashctl")
+	cfg = &config.EnvConfig{
+		ClashBaseDir: base,
+		KernelName:   "mihomo",
+	}
+	defer func() { cfg = oldCfg }()
+
+	paths := []string{
+		cfg.ProfilesMeta(),
+		filepath.Join(cfg.ProfilesDir(), "1.yaml"),
+		filepath.Join(cfg.ConfigsDir(), "import.yaml"),
+		cfg.ProfilesLog(),
+		cfg.ConfigPath(),
+		cfg.MixinPath(),
+		filepath.Join(cfg.ClashBaseDir, ".env"),
+		filepath.Join(cfg.TrafficDir(), "samples.jsonl"),
+		filepath.Join(cfg.LogDir(), "mihomo.log"),
+		filepath.Join(cfg.BinDir(), "mihomo"),
+		filepath.Join(cfg.ClashBaseDir, "scripts", "update.sh"),
+		filepath.Join(userHomeDir(), ".config", "clash-tui", "settings.yaml"),
+	}
+	for _, name := range geodataFileNames {
+		paths = append(paths, filepath.Join(cfg.ResourcesDir(), name))
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := removeInstallOnlyApplicationFiles(); err != nil {
+		t.Fatalf("removeInstallOnlyApplicationFiles: %v", err)
+	}
+	opts := uninstallOptions{
+		keepSubscriptions: true,
+		keepTraffic:       true,
+	}
+	if err := applyApplicationDataChoices(opts); err != nil {
+		t.Fatalf("applyApplicationDataChoices: %v", err)
+	}
+
+	for _, path := range []string{cfg.ProfilesMeta(), filepath.Join(cfg.ProfilesDir(), "1.yaml"), filepath.Join(cfg.ConfigsDir(), "import.yaml"), cfg.ProfilesLog(), filepath.Join(cfg.TrafficDir(), "samples.jsonl")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("kept path missing %s: %v", path, err)
+		}
+	}
+	for _, path := range []string{cfg.ConfigPath(), cfg.MixinPath(), filepath.Join(cfg.ClashBaseDir, ".env"), filepath.Join(cfg.ResourcesDir(), "Country.mmdb"), filepath.Join(cfg.LogDir(), "mihomo.log"), filepath.Join(cfg.BinDir(), "mihomo"), filepath.Join(cfg.ClashBaseDir, "scripts", "update.sh"), filepath.Join(userHomeDir(), ".config", "clash-tui", "settings.yaml")} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("removed path still exists or unexpected error %s: %v", path, err)
+		}
+	}
+}

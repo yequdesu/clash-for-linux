@@ -101,6 +101,10 @@ func shellQuote(value string) string {
 }
 
 func removeSafePath(path string) error {
+	return removeSafePathOrFile(path)
+}
+
+func removeSafePathOrFile(path string) error {
 	clean := filepath.Clean(path)
 	if clean == "." || clean == "/" || clean == filepath.Clean(userHomeDir()) || len(clean) < 5 {
 		return fmt.Errorf("refusing to remove unsafe path: %s", path)

@@ -75,8 +75,8 @@ func init() {
 
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallYes, "yes", false, "run without prompts and remove application data")
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallDryRun, "dry-run", false, "print actions without changing the system")
-	selfUninstallCmd.Flags().BoolVar(&selfUninstallKeepConfig, "keep-config", false, "keep base directory, subscriptions, traffic, and TUI settings")
-	selfUninstallCmd.Flags().BoolVar(&selfUninstallRemoveConfig, "remove-config", false, "remove base directory, subscriptions, traffic, and TUI settings")
+	selfUninstallCmd.Flags().BoolVar(&selfUninstallKeepConfig, "keep-config", false, "keep all application data")
+	selfUninstallCmd.Flags().BoolVar(&selfUninstallRemoveConfig, "remove-config", false, "remove all application data")
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallKeepKernel, "keep-kernel", false, "keep mihomo and yq binaries in /usr/local/bin")
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallRemoveKernel, "remove-kernel", false, "remove mihomo and yq binaries")
 
@@ -172,20 +172,30 @@ func runSelfUninstall() error {
 }
 
 type uninstallOptions struct {
-	yes              bool
-	dryRun           bool
-	keepConfig       bool
-	keepKernel       bool
-	removeCompletion bool
+	yes               bool
+	dryRun            bool
+	keepKernel        bool
+	removeCompletion  bool
+	keepSubscriptions bool
+	keepConfigFiles   bool
+	keepGeodata       bool
+	keepTraffic       bool
+	keepLogs          bool
+	keepTUISettings   bool
 }
 
 func resolveUninstallOptions() (uninstallOptions, error) {
 	opts := uninstallOptions{
-		yes:              selfUninstallYes,
-		dryRun:           selfUninstallDryRun,
-		keepConfig:       selfUninstallKeepConfig,
-		keepKernel:       selfUninstallKeepKernel,
-		removeCompletion: true,
+		yes:               selfUninstallYes,
+		dryRun:            selfUninstallDryRun,
+		keepKernel:        selfUninstallKeepKernel,
+		removeCompletion:  true,
+		keepSubscriptions: selfUninstallKeepConfig,
+		keepConfigFiles:   selfUninstallKeepConfig,
+		keepGeodata:       selfUninstallKeepConfig,
+		keepTraffic:       selfUninstallKeepConfig,
+		keepLogs:          selfUninstallKeepConfig,
+		keepTUISettings:   selfUninstallKeepConfig,
 	}
 	if selfUninstallKeepConfig && selfUninstallRemoveConfig {
 		return opts, fmt.Errorf("--keep-config and --remove-config conflict")
@@ -194,8 +204,15 @@ func resolveUninstallOptions() (uninstallOptions, error) {
 		return opts, fmt.Errorf("--keep-kernel and --remove-kernel conflict")
 	}
 	if selfUninstallYes {
-		opts.keepConfig = selfUninstallKeepConfig
 		opts.keepKernel = selfUninstallKeepKernel
+		if selfUninstallKeepConfig {
+			opts.keepSubscriptions = true
+			opts.keepConfigFiles = true
+			opts.keepGeodata = true
+			opts.keepTraffic = true
+			opts.keepLogs = true
+			opts.keepTUISettings = true
+		}
 		return opts, nil
 	}
 	if !confirm(fmt.Sprintf("Uninstall clashctl from %s?", cfg.ClashBaseDir), false) {
@@ -205,9 +222,12 @@ func resolveUninstallOptions() (uninstallOptions, error) {
 		return opts, err
 	}
 	if !selfUninstallKeepConfig && !selfUninstallRemoveConfig {
-		opts.keepConfig = confirm("Keep configuration, subscriptions, traffic data, and TUI settings?", true)
-	} else {
-		opts.keepConfig = selfUninstallKeepConfig
+		opts.keepSubscriptions = confirm("Keep subscriptions and imported profiles?", true)
+		opts.keepConfigFiles = confirm("Keep local configuration, mixin, and .env?", true)
+		opts.keepGeodata = confirm("Keep geodata files (Country.mmdb, geosite.dat, geoip.dat)?", true)
+		opts.keepTraffic = confirm("Keep persistent traffic statistics?", true)
+		opts.keepLogs = confirm("Keep logs?", true)
+		opts.keepTUISettings = confirm("Keep TUI settings?", true)
 	}
 	if !selfUninstallKeepKernel && !selfUninstallRemoveKernel {
 		opts.keepKernel = confirm("Keep mihomo and yq binaries in /usr/local/bin for future use?", true)
@@ -254,12 +274,11 @@ func performSelfUninstall(opts uninstallOptions) error {
 			ilog.Warn("%v", err)
 		}
 	}
-	if !opts.keepConfig {
-		if err := run("remove application data", removeApplicationData); err != nil {
-			return err
-		}
-	} else {
-		ilog.Info("kept application data: %s", cfg.ClashBaseDir)
+	if err := run("remove install-only files from application directory", removeInstallOnlyApplicationFiles); err != nil {
+		ilog.Warn("%v", err)
+	}
+	if err := run("apply application data choices", func() error { return applyApplicationDataChoices(opts) }); err != nil {
+		return err
 	}
 	if err := run("remove install markers", removeInstallMarkers); err != nil {
 		ilog.Warn("%v", err)
@@ -590,18 +609,6 @@ func removeKernelTools() error {
 	return nil
 }
 
-func removeApplicationData() error {
-	for _, path := range []string{
-		cfg.ClashBaseDir,
-		filepath.Join(userHomeDir(), ".config", "clash-tui"),
-	} {
-		if err := removeSafePath(path); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func removeInstallMarkers() error {
 	for _, path := range []string{
 		"/etc/clashctl",
@@ -612,6 +619,102 @@ func removeInstallMarkers() error {
 		}
 	}
 	return nil
+}
+
+func removeInstallOnlyApplicationFiles() error {
+	for _, path := range []string{
+		cfg.BinDir(),
+		filepath.Join(cfg.ClashBaseDir, "runtime"),
+		filepath.Join(cfg.ClashBaseDir, "scripts"),
+		cfg.InstallState(),
+	} {
+		if err := removeSafePathOrFile(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyApplicationDataChoices(opts uninstallOptions) error {
+	choices := []struct {
+		keep  bool
+		desc  string
+		paths []string
+	}{
+		{
+			keep: opts.keepSubscriptions,
+			desc: "subscriptions and imported profiles",
+			paths: []string{
+				cfg.ProfilesMeta(),
+				cfg.ProfilesDir(),
+				cfg.ConfigsDir(),
+				cfg.ProfilesLog(),
+			},
+		},
+		{
+			keep: opts.keepConfigFiles,
+			desc: "local configuration, mixin, and .env",
+			paths: []string{
+				cfg.ConfigPath(),
+				cfg.MixinPath(),
+				cfg.RuntimePath(),
+				cfg.TempPath(),
+				filepath.Join(cfg.ClashBaseDir, ".env"),
+			},
+		},
+		{
+			keep:  opts.keepGeodata,
+			desc:  "geodata",
+			paths: geodataApplicationPaths(),
+		},
+		{
+			keep:  opts.keepTraffic,
+			desc:  "traffic statistics",
+			paths: []string{cfg.TrafficDir()},
+		},
+		{
+			keep:  opts.keepLogs,
+			desc:  "logs",
+			paths: []string{cfg.LogDir()},
+		},
+		{
+			keep:  opts.keepTUISettings,
+			desc:  "TUI settings",
+			paths: []string{filepath.Join(userHomeDir(), ".config", "clash-tui")},
+		},
+	}
+	for _, choice := range choices {
+		if choice.keep {
+			ilog.Info("kept %s", choice.desc)
+			continue
+		}
+		for _, path := range choice.paths {
+			if err := removeSafePathOrFile(path); err != nil {
+				return fmt.Errorf("remove %s: %w", choice.desc, err)
+			}
+		}
+		ilog.Ok("removed %s", choice.desc)
+	}
+	pruneEmptyApplicationDirs()
+	return nil
+}
+
+func geodataApplicationPaths() []string {
+	paths := make([]string, 0, len(geodataFileNames))
+	for _, name := range geodataFileNames {
+		paths = append(paths, filepath.Join(cfg.ResourcesDir(), name))
+	}
+	return paths
+}
+
+func pruneEmptyApplicationDirs() {
+	for _, path := range []string{
+		cfg.ResourcesDir(),
+		cfg.ClashBaseDir,
+		filepath.Join(userHomeDir(), ".config"),
+	} {
+		_ = os.Remove(path)
+	}
 }
 
 func removeClashctlBinaries() error {
