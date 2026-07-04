@@ -21,6 +21,9 @@ var stopCmd = &cobra.Command{
 			ilog.Info("clear proxy env: eval $(clashctl proxy off)")
 			return
 		}
+		if svc.InitType() == "systemd" {
+			rerunWithSudoOrFatal("stop")
+		}
 		if err := svc.Stop(); err != nil {
 			ilog.Fatal("stop failed: %v", err)
 		}

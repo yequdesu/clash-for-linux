@@ -25,6 +25,9 @@ var startCmd = &cobra.Command{
 				return
 			}
 			ilog.Info("kernel process exists but proxy port is not ready; stopping stale process...")
+			if svc.InitType() == "systemd" {
+				rerunWithSudoOrFatal("start")
+			}
 			if err := svc.Stop(); err != nil {
 				ilog.Fatal("stop stale kernel failed: %v", err)
 			}
@@ -37,6 +40,9 @@ var startCmd = &cobra.Command{
 		}
 
 		ilog.Info("starting kernel...")
+		if svc.InitType() == "systemd" {
+			rerunWithSudoOrFatal("start")
+		}
 		if err := svc.Start(); err != nil {
 			ilog.Fatal("kernel failed: %v", err)
 		}

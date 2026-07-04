@@ -28,6 +28,7 @@ _sudo() { [ "$(id -u)" -eq 0 ] && "$@" || sudo "$@"; }
 #  Flags
 # ═══════════════════════════════
 FORCE=false; WITH_TUI=false; SKIP_CLI=false; TUI_ONLY=false; RESET_CONFIG=false
+INSTALL_COMPLETION=auto
 RELEASE_TOOLS_INSTALLED=false
 CLASHCTL_SOURCE_URL=""
 CLASH_TUI_SOURCE_URL=""
@@ -38,6 +39,8 @@ for arg in "$@"; do
         --with-tui|--tui) WITH_TUI=true ;;
         --skip-cli) SKIP_CLI=true ;;
         --tui-only) TUI_ONLY=true; SKIP_CLI=true; WITH_TUI=true ;;
+        --completion) INSTALL_COMPLETION=yes ;;
+        --no-completion) INSTALL_COMPLETION=no ;;
         --help|-h)
             echo "Usage: bash install.sh [flags]"
             echo ""
@@ -47,6 +50,8 @@ for arg in "$@"; do
             echo "  --force                  Force reinstall, overwrite existing"
             echo "  --reset-config           With --force, reset resources/config/subscriptions"
             echo "  --skip-cli               Skip CLI build (use pre-built or skip)"
+            echo "  --completion             Install shell completion without prompting"
+            echo "  --no-completion          Do not install shell completion"
             echo ""
             echo "Run as normal user. Password asked once at the beginning."
             exit 0
@@ -487,6 +492,13 @@ _install_release_artifacts() {
         CLASH_TUI_SOURCE_URL="${base}/${artifact}"
         _log_ok "clash-tui installed from release artifact"
     fi
+    if [ -d "${tmpdir}/scripts" ]; then
+        _sudo mkdir -p "${CLASH_BASE_DIR}/scripts"
+        for script in update.sh uninstall.sh; do
+            [ -f "${tmpdir}/scripts/${script}" ] || continue
+            _sudo install -D -m 0755 "${tmpdir}/scripts/${script}" "${CLASH_BASE_DIR}/scripts/${script}"
+        done
+    fi
 
     rm -rf "$tmpdir"
     if { $install_cli && [ -x /usr/local/bin/clashctl ]; } || { $install_tui && [ -x /usr/local/bin/clash-tui ]; }; then
@@ -773,6 +785,11 @@ mkdir -p "${CLASH_BASE_DIR}/runtime"
 _copy_or_write_resource "$SCRIPT_DIR/resources/mixin.yaml" "$CLASH_BASE_DIR/resources/mixin.yaml" mixin
 _copy_or_write_resource "$SCRIPT_DIR/resources/profiles.yaml" "$CLASH_BASE_DIR/resources/profiles.yaml" profiles
 _copy_or_write_resource "$SCRIPT_DIR/.env" "$CLASH_BASE_DIR/.env" env
+if [ -f "$SCRIPT_DIR/update.sh" ] || [ -f "$SCRIPT_DIR/uninstall.sh" ]; then
+    _sudo mkdir -p "${CLASH_BASE_DIR}/scripts"
+    [ -f "$SCRIPT_DIR/update.sh" ] && _sudo install -D -m 0755 "$SCRIPT_DIR/update.sh" "${CLASH_BASE_DIR}/scripts/update.sh"
+    [ -f "$SCRIPT_DIR/uninstall.sh" ] && _sudo install -D -m 0755 "$SCRIPT_DIR/uninstall.sh" "${CLASH_BASE_DIR}/scripts/uninstall.sh"
+fi
 if $RESET_CONFIG || [ ! -e "${CLASH_BASE_DIR}/resources/config.yaml" ]; then
     : > "${CLASH_BASE_DIR}/resources/config.yaml"
 fi
@@ -880,6 +897,20 @@ if [ -x /usr/local/bin/clashctl ]; then
     echo '  eval $(clashctl env)       load proxy env'
     echo '  clashctl tui               launch TUI dashboard'
     [ -x /usr/local/bin/clash-tui ] && echo '  clash-tui                  launch TUI directly'
+    if [ "$INSTALL_COMPLETION" = "yes" ]; then
+        CLASH_BASE_DIR="$CLASH_BASE_DIR" SERVICE_NAME="$SERVICE_NAME" KERNEL_NAME="$KERNEL_NAME" INIT_TYPE="$INIT_TYPE" /usr/local/bin/clashctl completion install || _log_warn "completion install failed"
+    elif [ "$INSTALL_COMPLETION" = "auto" ] && [ -t 0 ]; then
+        detected_shell="$(basename "${SHELL:-}")"
+        if [ -n "$detected_shell" ]; then
+            printf '\r\033[36m[i]\033[0m Detected shell: %s. Install clashctl completion? [Y/n] ' "$detected_shell"
+            read -r completion_answer
+            case "${completion_answer:-y}" in
+                [Yy]|yes|YES)
+                    CLASH_BASE_DIR="$CLASH_BASE_DIR" SERVICE_NAME="$SERVICE_NAME" KERNEL_NAME="$KERNEL_NAME" INIT_TYPE="$INIT_TYPE" /usr/local/bin/clashctl completion install "$detected_shell" || _log_warn "completion install failed"
+                    ;;
+            esac
+        fi
+    fi
 else
     _write_install_state
     _log_warn "clashctl not installed — build manually with Go: bash install.sh"

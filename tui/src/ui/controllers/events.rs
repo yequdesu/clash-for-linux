@@ -76,9 +76,20 @@ impl App {
                 }
             }
             HitboxAction::SelectSubscription(idx) => {
-                self.ui_state.subscriptions.selected_idx =
-                    idx.min(self.profiles.len().saturating_sub(1));
+                if self.profiles.is_empty() {
+                    return;
+                }
+                let idx = idx.min(self.profiles.len().saturating_sub(1));
+                let was_selected = idx == self.ui_state.subscriptions.selected_idx;
+                self.ui_state.subscriptions.selected_idx = idx;
                 self.clamp_subscription_selection();
+                if was_selected {
+                    if self.selected_subscription_id() == Some(self.active_profile_id) {
+                        self.status_msg = Some("subscription already active".into());
+                    } else {
+                        self.use_selected_subscription();
+                    }
+                }
             }
             HitboxAction::BeginSubscriptionAdd => self.begin_subscription_add(),
             HitboxAction::BeginSubscriptionImport => self.begin_subscription_import(),

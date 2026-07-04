@@ -11,6 +11,10 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"; cd "$SCRIPT_DIR"
 
+if command -v clashctl >/dev/null 2>&1 && clashctl self update --help >/dev/null 2>&1; then
+    exec clashctl self update "$@"
+fi
+
 _log_ok()   { printf '\r\033[32m[+]\033[0m %s\r\n' "$*"; }
 _log_info() { printf '\r\033[36m[i]\033[0m %s\r\n' "$*"; }
 _log_warn() { printf '\r\033[33m[!]\033[0m %s\r\n' "$*"; }

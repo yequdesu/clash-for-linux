@@ -260,7 +260,14 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         .fg(CLASH_THEME.bg)
         .bg(CLASH_THEME.secondary)
         .bold();
-    let message = if app.error_msg.is_some() {
+    let task_text = app
+        .ui_state
+        .command_task
+        .as_ref()
+        .and_then(command_task_text);
+    let message = if let Some(task_text) = task_text.as_deref() {
+        task_text
+    } else if app.error_msg.is_some() {
         error_text.as_str()
     } else {
         status_text.as_str()
@@ -295,4 +302,13 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Paragraph::new(line).style(Style::default().bg(CLASH_THEME.bg)),
         area,
     );
+}
+
+fn command_task_text(task: &CommandTaskState) -> Option<String> {
+    match task.phase {
+        CommandTaskPhase::AwaitingSudo => Some(format!("sudo required: {}", task.label)),
+        CommandTaskPhase::Running => Some(format!("running: {}", task.label)),
+        CommandTaskPhase::Done => None,
+        CommandTaskPhase::Failed => Some(format!("failed: {} · see command output", task.label)),
+    }
 }

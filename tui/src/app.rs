@@ -165,6 +165,44 @@ impl App {
             _ => false,
         }
     }
+
+    pub(crate) fn mark_command_running(&mut self, label: impl Into<String>) {
+        let label = label.into();
+        self.error_msg = None;
+        self.status_msg = Some(format!("running: {}", label));
+        self.ui_state.command_task = Some(CommandTaskState {
+            label,
+            phase: CommandTaskPhase::Running,
+        });
+    }
+
+    pub(crate) fn mark_command_awaiting_sudo(&mut self, label: impl Into<String>) {
+        let label = label.into();
+        self.error_msg = None;
+        self.status_msg = Some(format!("sudo required: {}", label));
+        self.ui_state.command_task = Some(CommandTaskState {
+            label,
+            phase: CommandTaskPhase::AwaitingSudo,
+        });
+    }
+
+    pub(crate) fn mark_command_done(&mut self, label: impl Into<String>) {
+        let label = label.into();
+        self.error_msg = None;
+        self.ui_state.command_task = Some(CommandTaskState {
+            label,
+            phase: CommandTaskPhase::Done,
+        });
+    }
+
+    pub(crate) fn mark_command_failed(&mut self, label: impl Into<String>) {
+        let label = label.into();
+        self.error_msg = Some(format!("failed: {}", label));
+        self.ui_state.command_task = Some(CommandTaskState {
+            label,
+            phase: CommandTaskPhase::Failed,
+        });
+    }
 }
 
 #[cfg(test)]

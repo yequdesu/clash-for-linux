@@ -1,6 +1,6 @@
 # Clash for Linux
 
-Linux-first Clash/Mihomo management toolkit with a CLI control plane (`clashctl`), a terminal TUI (`clash-tui`), and install/update/uninstall scripts.
+Linux-first Clash/Mihomo management toolkit with a CLI control plane (`clashctl`), a terminal TUI (`clash-tui`), and a shell bootstrap installer.
 
 This repository is currently in a hardening phase. The codebase has gained atomic config writes, subscription rollback paths, safer service management, CLI exit-code checks, CI/smoke entry points, and audit documentation. It should not be treated as a stable release until the external validation checklist has passed on real Linux/systemd, release artifacts, TUN, desktop proxy, and real Mihomo/geodata downloads.
 
@@ -12,7 +12,8 @@ Components:
 
 - `clashctl`: Linux CLI for install-time and runtime control.
 - `clash-tui`: Rust terminal UI for status, nodes, connections, logs, and subscription actions.
-- `install.sh`, `update.sh`, `uninstall.sh`: installer and lifecycle scripts.
+- `install.sh`: first-install bootstrap script.
+- `clashctl self update/uninstall`: installed lifecycle management.
 - `scripts/smoke`: local and CI smoke checks.
 
 The TUI is a terminal application, not a Tauri desktop GUI.
@@ -101,7 +102,20 @@ clashctl tui
 Uninstall:
 
 ```bash
-bash uninstall.sh
+clashctl self uninstall
+```
+
+Update the installed CLI/TUI from release artifacts:
+
+```bash
+clashctl self update
+```
+
+Install or remove shell completion:
+
+```bash
+clashctl completion install
+clashctl completion uninstall
 ```
 
 For release-grade verification, follow [docs/EXTERNAL_VALIDATION_CHECKLIST.md](docs/EXTERNAL_VALIDATION_CHECKLIST.md).

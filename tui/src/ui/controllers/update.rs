@@ -96,7 +96,7 @@ impl App {
             }
             DataEvent::Proxies(Err(e)) => {
                 if self.error_msg.is_none() {
-                    self.error_msg = Some(e);
+                    self.error_msg = Some(api_unavailable_status(&e));
                 }
             }
             DataEvent::Connections(Ok(resp)) => {
@@ -176,9 +176,9 @@ impl App {
             DataEvent::ModeResult(Err(e)) => {
                 self.error_msg = Some(format!("Mode switch failed: {}", e));
             }
-            DataEvent::SubscriptionResult(Ok(msg)) => {
-                self.error_msg = None;
-                self.status_msg = Some(msg);
+            DataEvent::SubscriptionResult(Ok(_msg)) => {
+                self.mark_command_done("subscription action");
+                self.status_msg = Some("subscription action completed".into());
                 self.ui_state.modals.sudo_candidate = None;
                 self.ui_state.subscriptions.output.clear();
                 self.refresh_subscriptions();
@@ -192,13 +192,13 @@ impl App {
                     return;
                 }
                 self.ui_state.modals.sudo_candidate = None;
-                self.error_msg = Some(format!("Subscription action failed: {}", e));
+                self.mark_command_failed("subscription action");
                 self.ui_state.subscriptions.output = command_output_lines(&e);
                 self.reveal_command_output();
             }
             DataEvent::SubscriptionOutputResult(label, Ok(output)) => {
-                self.error_msg = None;
                 self.ui_state.modals.sudo_candidate = None;
+                self.mark_command_done(format!("subscription {}", label));
                 self.status_msg = Some(format!("subscription action completed: {}", label));
                 self.ui_state.subscriptions.output = command_output_lines(&output);
                 self.reveal_command_output();
@@ -211,13 +211,13 @@ impl App {
                     return;
                 }
                 self.ui_state.modals.sudo_candidate = None;
-                self.error_msg = Some(format!("Subscription action failed: {}: {}", label, e));
+                self.mark_command_failed(format!("subscription {}", label));
                 self.ui_state.subscriptions.output = command_output_lines(&e);
                 self.reveal_command_output();
             }
             DataEvent::NetworkResult(label, Ok(output)) => {
                 self.clear_sudo_candidate(&label);
-                self.error_msg = None;
+                self.mark_command_done(format!("network {}", label));
                 self.status_msg = Some(format!("network action completed: {}", label));
                 self.network_output = command_output_lines(&output);
                 self.reveal_command_output();
@@ -230,15 +230,15 @@ impl App {
                     self.reveal_command_output();
                     return;
                 }
-                self.error_msg = Some(format!("Network action failed: {}: {}", label, e));
+                self.mark_command_failed(format!("network {}", label));
                 self.network_output = command_output_lines(&e);
                 self.reveal_command_output();
                 self.tun_enabled = crate::api::read_tun_status();
             }
             DataEvent::SettingsResult(action, Ok(output)) => {
-                self.error_msg = None;
                 let label = action.label();
                 self.clear_sudo_candidate(label);
+                self.mark_command_done(format!("settings {}", label));
                 self.status_msg = Some(format!("settings action completed: {}", label));
                 let output = if action.redact_output() {
                     redact_sensitive_output(&output)
@@ -257,13 +257,13 @@ impl App {
                     self.reveal_command_output();
                     return;
                 }
-                self.error_msg = Some(format!("Settings action failed: {}: {}", label, e));
+                self.mark_command_failed(format!("settings {}", label));
                 self.ui_state.settings.output = command_output_lines(&redact_sensitive_output(&e));
                 self.reveal_command_output();
             }
             DataEvent::SettingsCommandResult(label, redact_output, Ok(output)) => {
                 self.clear_sudo_candidate(&label);
-                self.error_msg = None;
+                self.mark_command_done(format!("settings {}", label));
                 self.status_msg = Some(format!("settings action completed: {}", label));
                 let output = if redact_output {
                     redact_sensitive_output(&output)
@@ -281,7 +281,7 @@ impl App {
                     self.reveal_command_output();
                     return;
                 }
-                self.error_msg = Some(format!("Settings action failed: {}: {}", label, e));
+                self.mark_command_failed(format!("settings {}", label));
                 self.ui_state.settings.output = command_output_lines(&redact_sensitive_output(&e));
                 self.reveal_command_output();
             }
@@ -297,19 +297,19 @@ impl App {
                 self.ui_state.traffic.error = Some(e);
             }
             DataEvent::TrafficExport(Ok(path)) => {
-                self.error_msg = None;
+                self.mark_command_done(format!("traffic exported: {}", path));
                 self.status_msg = Some(format!("traffic exported: {}", path));
                 self.ui_state.traffic.output = vec![format!("exported: {}", path)];
                 self.reveal_command_output();
             }
             DataEvent::TrafficExport(Err(e)) => {
-                self.error_msg = Some(format!("Traffic export failed: {}", e));
+                self.mark_command_failed("traffic export");
                 self.ui_state.traffic.output = command_output_lines(&e);
                 self.reveal_command_output();
             }
             DataEvent::TrafficActionResult(label, Ok(output)) => {
                 self.clear_sudo_candidate(&label);
-                self.error_msg = None;
+                self.mark_command_done(label.clone());
                 self.status_msg = Some(format!("traffic action completed: {}", label));
                 self.ui_state.traffic.output = command_output_lines(&output);
                 self.reveal_command_output();
@@ -322,7 +322,7 @@ impl App {
                     self.reveal_command_output();
                     return;
                 }
-                self.error_msg = Some(format!("Traffic action failed: {}: {}", label, e));
+                self.mark_command_failed(label);
                 self.ui_state.traffic.output = command_output_lines(&e);
                 self.reveal_command_output();
             }
@@ -345,5 +345,18 @@ pub(crate) fn trim_log_payload(payload: &str) -> String {
         format!("{}...", trimmed)
     } else {
         trimmed
+    }
+}
+
+fn api_unavailable_status(error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("connection refused")
+        || lower.contains("error sending request")
+        || lower.contains("tcp connect")
+        || lower.contains("failed to connect")
+    {
+        "kernel API unavailable; start kernel from Network".into()
+    } else {
+        "kernel API request failed".into()
     }
 }

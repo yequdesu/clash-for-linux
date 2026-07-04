@@ -3,14 +3,29 @@ use crate::ui::prelude::*;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use crate::action_registry::{self};
 use crate::i18n::Msg;
 
 use crate::ui::components::action_bar::*;
 use crate::ui::components::panel::Panel;
+
+const NETWORK_KERNEL_ACTION_IDS: &[&str] = &[
+    "network.status",
+    "network.doctor",
+    "network.config_doctor",
+    "network.start",
+    "network.stop",
+    "network.restart",
+];
+const NETWORK_TUN_ACTION_IDS: &[&str] = &["network.tun.on", "network.tun.off"];
+const NETWORK_PROXY_ACTION_IDS: &[&str] = &["network.proxy.on", "network.env", "network.proxy.off"];
+const NETWORK_DESKTOP_ACTION_IDS: &[&str] = &[
+    "network.desktop.status",
+    "network.desktop.on",
+    "network.desktop.off",
+];
 
 pub(crate) fn render_network(frame: &mut Frame, area: Rect, app: &mut App) {
     if area.height < 12 {
@@ -20,7 +35,6 @@ pub(crate) fn render_network(frame: &mut Frame, area: Rect, app: &mut App) {
     let rows = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(6),
-        Constraint::Length(5),
         Constraint::Min(5),
     ])
     .split(area);
@@ -124,12 +138,16 @@ pub(crate) fn render_network(frame: &mut Frame, area: Rect, app: &mut App) {
     }
     Panel::new(app.t(Msg::NetworkCurrentProxy)).render(frame, mid_top[1], proxy_lines);
 
-    // Row 2: Network actions
-    render_network_actions(frame, rows[2], app);
+    // Row 2: grouped actions + diagnostics/status details
+    let bottom = if rows[2].width >= 100 && rows[2].height >= 10 {
+        Layout::horizontal([Constraint::Ratio(3, 5), Constraint::Ratio(2, 5)]).split(rows[2])
+    } else {
+        Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).split(rows[2])
+    };
+    render_network_actions(frame, bottom[0], app);
 
-    // Row 3: Connections and system info
-    let mid_bot =
-        Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).split(rows[3]);
+    let info_rows =
+        Layout::vertical([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).split(bottom[1]);
     let conn_lines = vec![Line::from(vec![Span::styled(
         format!(
             "  Active: {}   Total: {}",
@@ -137,31 +155,56 @@ pub(crate) fn render_network(frame: &mut Frame, area: Rect, app: &mut App) {
         ),
         CLASH_THEME.text,
     )])];
-    Panel::new(app.t(Msg::PageConnections)).render(frame, mid_bot[0], conn_lines);
+    Panel::new(app.t(Msg::PageConnections)).render(frame, info_rows[0], conn_lines);
 
     let sys_lines = vec![Line::from(vec![
         Span::styled(format!("  OS: {}  ", app.os_info), CLASH_THEME.text),
         Span::styled(format!("Arch: {}", app.arch_info), CLASH_THEME.text),
     ])];
-    Panel::new(app.t(Msg::NetworkSystemInfo)).render(frame, mid_bot[1], sys_lines);
+    Panel::new(app.t(Msg::NetworkSystemInfo)).render(frame, info_rows[1], sys_lines);
 }
 
 pub(crate) fn render_network_actions(frame: &mut Frame, area: Rect, app: &mut App) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(
-            Style::default()
-                .fg(CLASH_THEME.border)
-                .bg(CLASH_THEME.surface),
-        )
-        .style(Style::default().bg(CLASH_THEME.surface))
-        .title(Span::styled(
-            format!(" {} ", app.t(Msg::NetworkActions)),
-            Style::default().fg(CLASH_THEME.primary).bold(),
-        ));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let inner = Panel::new(app.t(Msg::NetworkActions)).render_block(frame, area);
     fill_area(frame, inner, CLASH_THEME.surface);
-    let buttons = action_buttons_from_specs(app, action_registry::network_action_specs());
-    render_action_buttons(frame, app, inner, &buttons);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let groups = [
+        (app.t(Msg::ActionsKernel), NETWORK_KERNEL_ACTION_IDS),
+        (app.t(Msg::ActionsTun), NETWORK_TUN_ACTION_IDS),
+        (app.t(Msg::ActionsProxy), NETWORK_PROXY_ACTION_IDS),
+        (app.t(Msg::ActionsDesktop), NETWORK_DESKTOP_ACTION_IDS),
+    ];
+    let mut y = inner.y;
+    let max_y = inner.y.saturating_add(inner.height);
+    for (title, action_ids) in groups {
+        if y >= max_y {
+            break;
+        }
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!("  {}", title),
+                CLASH_THEME.primary,
+            )))
+            .style(Style::default().bg(CLASH_THEME.surface)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y = y.saturating_add(1);
+        let buttons = action_buttons_from_ids(app, action_ids);
+        let button_height = action_buttons_needed_height(inner.width, &buttons)
+            .max(1)
+            .min(max_y.saturating_sub(y));
+        if button_height == 0 {
+            break;
+        }
+        render_action_buttons(
+            frame,
+            app,
+            Rect::new(inner.x, y, inner.width, button_height),
+            &buttons,
+        );
+        y = y.saturating_add(button_height).saturating_add(1);
+    }
 }

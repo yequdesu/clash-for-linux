@@ -2,7 +2,7 @@ use crate::ui::prelude::*;
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Style, Stylize};
-use ratatui::text::Span;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Row, Table};
 use ratatui::Frame;
 
@@ -18,7 +18,9 @@ pub(crate) fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App)
     fill_area(frame, area, CLASH_THEME.surface);
 
     let (table_area, actions_area) = if area.height >= 12 {
-        let rows = Layout::vertical([Constraint::Min(8), Constraint::Length(4)]).split(area);
+        let action_height = if area.height >= 22 { 8 } else { 6 };
+        let rows =
+            Layout::vertical([Constraint::Min(8), Constraint::Length(action_height)]).split(area);
         (rows[0], Some(rows[1]))
     } else {
         (area, None)
@@ -130,11 +132,41 @@ pub(crate) fn render_subscriptions(frame: &mut Frame, area: Rect, app: &mut App)
 
 pub(crate) fn render_subscription_actions(frame: &mut Frame, area: Rect, app: &mut App) {
     let inner = Panel::new(app.t(Msg::ProxyActions)).render_block(frame, area);
-    let buttons: Vec<ActionButtonItem> = subscription_action_buttons(app)
-        .into_iter()
-        .map(|(label, action)| action_button_item(label, action, ActionDanger::Safe))
-        .collect();
-    render_action_buttons(frame, app, inner, &buttons);
+    fill_area(frame, inner, CLASH_THEME.surface);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let groups = subscription_action_groups(app);
+    let mut y = inner.y;
+    let max_y = inner.y.saturating_add(inner.height);
+    for (title, buttons) in groups {
+        if y >= max_y {
+            break;
+        }
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!("  {}", title),
+                CLASH_THEME.primary,
+            )))
+            .style(Style::default().bg(CLASH_THEME.surface)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y = y.saturating_add(1);
+        let button_height = action_buttons_needed_height(inner.width, &buttons)
+            .max(1)
+            .min(max_y.saturating_sub(y));
+        if button_height == 0 {
+            break;
+        }
+        render_action_buttons(
+            frame,
+            app,
+            Rect::new(inner.x, y, inner.width, button_height),
+            &buttons,
+        );
+        y = y.saturating_add(button_height).saturating_add(1);
+    }
 }
 
 pub(crate) fn subscription_action_buttons(app: &App) -> Vec<(String, HitboxAction)> {
@@ -182,4 +214,56 @@ pub(crate) fn subscription_action_buttons(app: &App) -> Vec<(String, HitboxActio
             HitboxAction::EditSubscriptionRemoveTag,
         ),
     ]
+}
+
+fn subscription_action_groups(app: &App) -> Vec<(&'static str, Vec<ActionButtonItem>)> {
+    let item = |label: String, action| action_button_item(label, action, ActionDanger::Safe);
+    let mut groups = Vec::new();
+    let buttons = subscription_action_buttons(app);
+    let find = |action: &HitboxAction| {
+        buttons
+            .iter()
+            .find(|(_, candidate)| candidate == action)
+            .map(|(label, action)| item(label.clone(), action.clone()))
+    };
+
+    groups.push((
+        app.t(Msg::ActionsPrimary),
+        [
+            HitboxAction::UseSubscription,
+            HitboxAction::UpdateSubscription,
+            HitboxAction::BeginSubscriptionAdd,
+            HitboxAction::BeginSubscriptionImport,
+            HitboxAction::ShowSubscriptionLog,
+            HitboxAction::RemoveSubscription,
+        ]
+        .iter()
+        .filter_map(|action| find(action))
+        .collect(),
+    ));
+    groups.push((
+        app.t(Msg::ActionsEdit),
+        [
+            HitboxAction::EditSubscriptionName,
+            HitboxAction::EditSubscriptionUrl,
+            HitboxAction::EditSubscriptionInterval,
+            HitboxAction::EditSubscriptionUserAgent,
+            HitboxAction::EditSubscriptionUpdateProxy,
+            HitboxAction::EditSubscriptionConvertMode,
+        ]
+        .iter()
+        .filter_map(|action| find(action))
+        .collect(),
+    ));
+    groups.push((
+        app.t(Msg::ActionsTags),
+        [
+            HitboxAction::EditSubscriptionAddTag,
+            HitboxAction::EditSubscriptionRemoveTag,
+        ]
+        .iter()
+        .filter_map(|action| find(action))
+        .collect(),
+    ));
+    groups
 }

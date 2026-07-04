@@ -182,12 +182,6 @@ pub fn cli_variant_coverage() -> &'static [CliVariantCoverage] {
     CLI_VARIANT_COVERAGE
 }
 
-pub fn network_action_specs() -> impl Iterator<Item = &'static ActionSpec> {
-    ACTIONS
-        .iter()
-        .filter(|spec| matches!(spec.executor, ActionExecutor::Network(_)))
-}
-
 pub fn action_by_id(id: &str) -> Option<&'static ActionSpec> {
     ACTIONS.iter().find(|spec| spec.id == id)
 }

@@ -20,9 +20,13 @@ impl App {
     pub(crate) fn execute_network_action(&mut self, action: NetworkAction) {
         let label = action.label().to_string();
         let args = action.args();
+        if self.command_needs_sudo_prompt(&args, &SudoTarget::Network) {
+            self.begin_sudo_flow(label, args, SudoTarget::Network);
+            return;
+        }
         self.prepare_sudo_candidate(label.clone(), args.clone(), SudoTarget::Network);
         let tx = self.data_tx.clone();
-        self.status_msg = Some(format!("running network action: {}", label));
+        self.mark_command_running(format!("network {}", label));
         self.rt.spawn(async move {
             let result = crate::api::run_clashctl(&args).await;
             let _ = tx.send(DataEvent::NetworkResult(label, result));
@@ -183,13 +187,15 @@ impl App {
 
     pub(crate) fn execute_settings_action(&mut self, action: SettingsAction) {
         let args = action.args();
-        self.prepare_sudo_candidate(
-            action.label().to_string(),
-            args.clone(),
-            SudoTarget::Settings(action),
-        );
+        let label = action.label().to_string();
+        let target = SudoTarget::Settings(action);
+        if self.command_needs_sudo_prompt(&args, &target) {
+            self.begin_sudo_flow(label, args, target);
+            return;
+        }
+        self.prepare_sudo_candidate(label.clone(), args.clone(), target);
         let tx = self.data_tx.clone();
-        self.status_msg = Some(format!("running settings action: {}", action.label()));
+        self.mark_command_running(format!("settings {}", label));
         self.rt.spawn(async move {
             let result = crate::api::run_clashctl(&args).await;
             let _ = tx.send(DataEvent::SettingsResult(action, result));
@@ -202,13 +208,14 @@ impl App {
         args: Vec<String>,
         redact_output: bool,
     ) {
-        self.prepare_sudo_candidate(
-            label.clone(),
-            args.clone(),
-            SudoTarget::SettingsCommand { redact_output },
-        );
+        let target = SudoTarget::SettingsCommand { redact_output };
+        if self.command_needs_sudo_prompt(&args, &target) {
+            self.begin_sudo_flow(label, args, target);
+            return;
+        }
+        self.prepare_sudo_candidate(label.clone(), args.clone(), target);
         let tx = self.data_tx.clone();
-        self.status_msg = Some(format!("running settings action: {}", label));
+        self.mark_command_running(format!("settings {}", label));
         self.rt.spawn(async move {
             let result = crate::api::run_clashctl(&args).await;
             let _ = tx.send(DataEvent::SettingsCommandResult(
@@ -230,6 +237,17 @@ impl App {
         target: SudoTarget,
     ) {
         self.ui_state.modals.sudo_candidate = Some(SudoPrompt {
+            label,
+            args,
+            target,
+            password: String::new(),
+        });
+    }
+
+    pub(crate) fn begin_sudo_flow(&mut self, label: String, args: Vec<String>, target: SudoTarget) {
+        self.mark_command_awaiting_sudo(label.clone());
+        self.ui_state.modals.sudo_candidate = None;
+        self.ui_state.modals.sudo_prompt = Some(SudoPrompt {
             label,
             args,
             target,
@@ -264,7 +282,7 @@ impl App {
         };
         prompt.password.clear();
         self.error_msg = None;
-        self.status_msg = Some(self.sudo_required_status(label));
+        self.mark_command_awaiting_sudo(label);
         self.ui_state.modals.sudo_prompt = Some(prompt);
         true
     }
@@ -279,7 +297,7 @@ impl App {
         prompt.password.clear();
         let label = prompt.label.clone();
         self.error_msg = None;
-        self.status_msg = Some(self.sudo_required_status(&label));
+        self.mark_command_awaiting_sudo(label);
         self.ui_state.modals.sudo_prompt = Some(prompt);
         true
     }
@@ -334,7 +352,7 @@ impl App {
         let target = prompt.target.clone();
         let password = prompt.password;
         let tx = self.data_tx.clone();
-        self.status_msg = Some(format!("running sudo action: {}", label));
+        self.mark_command_running(format!("sudo {}", label));
         self.rt.spawn(async move {
             let result = crate::api::run_clashctl_sudo(&args, &password).await;
             match target {
@@ -389,4 +407,38 @@ impl App {
             self.status_msg = Some(self.t(Msg::ActionCancelled).into());
         }
     }
+
+    pub(crate) fn command_needs_sudo_prompt(&self, args: &[String], target: &SudoTarget) -> bool {
+        if running_as_root() {
+            return false;
+        }
+        match target {
+            SudoTarget::Network => network_args_need_sudo(args),
+            SudoTarget::Subscription => {
+                !self.version.is_empty() && subscription_args_need_sudo(args)
+            }
+            _ => false,
+        }
+    }
+}
+
+fn running_as_root() -> bool {
+    if std::env::var("USER").is_ok_and(|user| user == "root") {
+        return true;
+    }
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .is_some_and(|uid| uid.trim() == "0")
+}
+
+fn network_args_need_sudo(args: &[String]) -> bool {
+    matches!(args, [cmd] if matches!(cmd.as_str(), "start" | "stop" | "restart"))
+        || matches!(args, [cmd, mode] if cmd == "tun" && matches!(mode.as_str(), "on" | "off"))
+}
+
+fn subscription_args_need_sudo(args: &[String]) -> bool {
+    matches!(args, [cmd, subcmd, ..] if cmd == "sub" && subcmd == "use")
 }

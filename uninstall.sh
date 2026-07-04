@@ -10,6 +10,10 @@
 # ═══════════════════════════════════════════════════════════════
 set -euo pipefail
 
+if command -v clashctl >/dev/null 2>&1 && clashctl self uninstall --help >/dev/null 2>&1; then
+    exec clashctl self uninstall "$@"
+fi
+
 _log_ok()   { printf '\r\033[32m[+]\033[0m %s\r\n' "$*"; }
 _log_info() { printf '\r\033[36m[i]\033[0m %s\r\n' "$*"; }
 _log_warn() { printf '\r\033[33m[!]\033[0m %s\r\n' "$*"; }

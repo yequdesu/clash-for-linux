@@ -554,10 +554,8 @@ fn traffic_export_event_reports_saved_path_or_error() {
     assert!(app.error_msg.is_none());
 
     app.apply_data_event(DataEvent::TrafficExport(Err("disk full".into())));
-    assert_eq!(
-        app.error_msg.as_deref(),
-        Some("Traffic export failed: disk full")
-    );
+    assert_eq!(app.error_msg.as_deref(), Some("failed: traffic export"));
+    assert_eq!(app.ui_state.traffic.output, vec!["disk full"]);
 }
 
 #[test]
@@ -579,10 +577,7 @@ fn traffic_action_event_reports_output_or_error() {
         "traffic sample".into(),
         Err("kernel unavailable".into()),
     ));
-    assert_eq!(
-        app.error_msg.as_deref(),
-        Some("Traffic action failed: traffic sample: kernel unavailable")
-    );
+    assert_eq!(app.error_msg.as_deref(), Some("failed: traffic sample"));
     assert_eq!(app.ui_state.traffic.output, vec!["kernel unavailable"]);
 }
 
@@ -616,10 +611,8 @@ fn settings_result_event_reports_output_or_error() {
         SettingsAction::Doctor,
         Err("failed".into()),
     ));
-    assert_eq!(
-        app.error_msg.as_deref(),
-        Some("Settings action failed: doctor: failed")
-    );
+    assert_eq!(app.error_msg.as_deref(), Some("failed: settings doctor"));
+    assert_eq!(app.ui_state.settings.output, vec!["failed"]);
 }
 
 #[test]

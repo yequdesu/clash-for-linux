@@ -18,6 +18,9 @@ var restartCmd = &cobra.Command{
 		if err := ensureSafeKernelStartFromSSH(cfg, restartAllowSSHTunRisk, false); err != nil {
 			ilog.Fatal("%v", err)
 		}
+		if svc.InitType() == "systemd" {
+			rerunWithSudoOrFatal("restart")
+		}
 		if svc.IsRunning() {
 			if err := svc.Stop(); err != nil {
 				ilog.Fatal("stop failed: %v", err)

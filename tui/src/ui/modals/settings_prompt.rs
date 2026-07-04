@@ -55,20 +55,29 @@ pub(crate) fn render_settings_prompt(frame: &mut Frame, area: Rect, app: &mut Ap
         if active {
             displayed.push('█');
         }
+        let label_style = if active {
+            Style::default().fg(CLASH_THEME.bg).bg(CLASH_THEME.warning)
+        } else {
+            Style::default().fg(CLASH_THEME.muted).bg(CLASH_THEME.bg)
+        };
+        let value_style = if active {
+            Style::default()
+                .fg(CLASH_THEME.text)
+                .bg(CLASH_THEME.surface)
+        } else {
+            Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.bg)
+        };
         lines.push(Line::from(vec![
             Span::styled(
                 format!(
-                    "{} {:<14} ",
+                    "{} {:<14}",
                     marker,
                     app.settings_prompt_field_label(field.field)
                 ),
-                if active {
-                    CLASH_THEME.warning
-                } else {
-                    CLASH_THEME.muted
-                },
+                label_style,
             ),
-            Span::styled(displayed, CLASH_THEME.text),
+            Span::styled("  ", Style::default().bg(CLASH_THEME.bg)),
+            Span::styled(format!(" {} ", displayed), value_style),
         ]));
     }
     lines.push(Line::from(""));

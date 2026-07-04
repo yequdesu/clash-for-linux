@@ -174,7 +174,7 @@ impl App {
         self.prepare_sudo_candidate(label.clone(), args.clone(), SudoTarget::Traffic);
         let tx = self.data_tx.clone();
         let report_to_settings = self.ui_state.active_page == Tab::Settings;
-        self.status_msg = Some(format!("running traffic action: {}", label));
+        self.mark_command_running(label.clone());
         self.rt.spawn(async move {
             let result = crate::api::run_clashctl(&args).await;
             if report_to_settings {

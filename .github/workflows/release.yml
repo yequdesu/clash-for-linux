@@ -60,7 +60,12 @@ jobs:
       - name: Package artifacts
         run: |
           chmod +x dist/clashctl-linux-${{ matrix.arch }} dist/clash-tui-linux-${{ matrix.arch }}
-          tar -C dist -czf clash-for-linux-${{ matrix.arch }}.tar.gz clashctl-linux-${{ matrix.arch }} clash-tui-linux-${{ matrix.arch }}
+          mkdir -p dist/scripts
+          cp install.sh dist/install.sh
+          cp update.sh dist/scripts/update.sh
+          cp uninstall.sh dist/scripts/uninstall.sh
+          chmod +x dist/install.sh dist/scripts/update.sh dist/scripts/uninstall.sh
+          tar -C dist -czf clash-for-linux-${{ matrix.arch }}.tar.gz clashctl-linux-${{ matrix.arch }} clash-tui-linux-${{ matrix.arch }} install.sh scripts/update.sh scripts/uninstall.sh
 
       - uses: actions/upload-artifact@v4
         with:

@@ -156,7 +156,7 @@ pub(crate) fn render_subscription_edit_form(frame: &mut Frame, area: Rect, app: 
         let value_style = if active {
             Style::default()
                 .fg(CLASH_THEME.text)
-                .bg(CLASH_THEME.primary)
+                .bg(CLASH_THEME.surface)
         } else {
             Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.bg)
         };
@@ -166,8 +166,8 @@ pub(crate) fn render_subscription_edit_form(frame: &mut Frame, area: Rect, app: 
                 format!("  {:<14}", app.subscription_add_field_label(*field)),
                 label_style,
             ),
-            Span::styled(" ", value_style),
-            Span::styled(value, value_style),
+            Span::styled("  ", Style::default().bg(CLASH_THEME.bg)),
+            Span::styled(format!(" {} ", value), value_style),
         ]));
     }
     lines.push(Line::from(""));
@@ -231,7 +231,7 @@ pub(crate) fn render_subscription_add_form(frame: &mut Frame, area: Rect, app: &
         let value_style = if active {
             Style::default()
                 .fg(CLASH_THEME.text)
-                .bg(CLASH_THEME.primary)
+                .bg(CLASH_THEME.surface)
         } else {
             Style::default().fg(CLASH_THEME.text).bg(CLASH_THEME.bg)
         };
@@ -241,8 +241,8 @@ pub(crate) fn render_subscription_add_form(frame: &mut Frame, area: Rect, app: &
                 format!("  {:<14}", app.subscription_add_field_label(*field)),
                 label_style,
             ),
-            Span::styled(" ", value_style),
-            Span::styled(value, value_style),
+            Span::styled("  ", Style::default().bg(CLASH_THEME.bg)),
+            Span::styled(format!(" {} ", value), value_style),
         ]));
     }
     lines.push(Line::from(""));

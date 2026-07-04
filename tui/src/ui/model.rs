@@ -16,6 +16,7 @@ pub(crate) struct UiState {
     pub traffic: TrafficPageState,
     pub command_palette: CommandPaletteState,
     pub command_output: CommandOutputWindowState,
+    pub command_task: Option<CommandTaskState>,
     pub modals: ModalState,
 }
 
@@ -38,6 +39,7 @@ impl UiState {
             traffic: TrafficPageState::new(traffic_range, traffic_chart, traffic_dimension),
             command_palette: CommandPaletteState::default(),
             command_output: CommandOutputWindowState::default(),
+            command_task: None,
             modals: ModalState::default(),
         }
     }
@@ -97,6 +99,20 @@ pub(crate) struct SubscriptionsPageState {
 pub(crate) struct CommandOutputWindowState {
     pub scroll: usize,
     pub hidden: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CommandTaskPhase {
+    AwaitingSudo,
+    Running,
+    Done,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CommandTaskState {
+    pub label: String,
+    pub phase: CommandTaskPhase,
 }
 
 #[derive(Debug)]
