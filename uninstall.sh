@@ -12,7 +12,10 @@ set -euo pipefail
 
 if command -v clashctl >/dev/null 2>&1 && clashctl self uninstall --help >/dev/null 2>&1; then
     if [ ! -t 0 ] && [ "$#" -eq 0 ]; then
-        exec clashctl self uninstall --yes
+        if [ "$(id -u)" -eq 0 ]; then
+            exec clashctl self uninstall --yes
+        fi
+        exec sudo -E clashctl self uninstall --yes
     fi
     exec clashctl self uninstall "$@"
 fi
