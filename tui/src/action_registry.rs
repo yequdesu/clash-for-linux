@@ -1250,6 +1250,56 @@ const CLI_COVERAGE: &[CliCoverage] = &[
         cli_only_reason: None,
     },
     CliCoverage {
+        command: "completion",
+        action_ids: &[],
+        cli_only_reason: Some("completion namespace; generated scripts are CLI-only"),
+    },
+    CliCoverage {
+        command: "completion bash",
+        action_ids: &[],
+        cli_only_reason: Some("writes shell completion script to stdout"),
+    },
+    CliCoverage {
+        command: "completion zsh",
+        action_ids: &[],
+        cli_only_reason: Some("writes shell completion script to stdout"),
+    },
+    CliCoverage {
+        command: "completion fish",
+        action_ids: &[],
+        cli_only_reason: Some("writes shell completion script to stdout"),
+    },
+    CliCoverage {
+        command: "completion powershell",
+        action_ids: &[],
+        cli_only_reason: Some("writes shell completion script to stdout"),
+    },
+    CliCoverage {
+        command: "completion install",
+        action_ids: &[],
+        cli_only_reason: Some("shell integration installer is CLI-only"),
+    },
+    CliCoverage {
+        command: "completion uninstall",
+        action_ids: &[],
+        cli_only_reason: Some("shell integration cleanup is CLI-only"),
+    },
+    CliCoverage {
+        command: "self",
+        action_ids: &[],
+        cli_only_reason: Some("lifecycle namespace command"),
+    },
+    CliCoverage {
+        command: "self update",
+        action_ids: &[],
+        cli_only_reason: Some("application lifecycle update is CLI-only"),
+    },
+    CliCoverage {
+        command: "self uninstall",
+        action_ids: &[],
+        cli_only_reason: Some("destructive uninstall is intentionally CLI-only"),
+    },
+    CliCoverage {
         command: "traffic",
         action_ids: &["nav.traffic"],
         cli_only_reason: Some("namespace command that prints help"),

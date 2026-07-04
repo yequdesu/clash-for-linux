@@ -238,7 +238,7 @@ fn subscription_action_groups(app: &App) -> Vec<(&'static str, Vec<ActionButtonI
             HitboxAction::RemoveSubscription,
         ]
         .iter()
-        .filter_map(|action| find(action))
+        .filter_map(&find)
         .collect(),
     ));
     groups.push((
@@ -252,7 +252,7 @@ fn subscription_action_groups(app: &App) -> Vec<(&'static str, Vec<ActionButtonI
             HitboxAction::EditSubscriptionConvertMode,
         ]
         .iter()
-        .filter_map(|action| find(action))
+        .filter_map(&find)
         .collect(),
     ));
     groups.push((
@@ -262,7 +262,7 @@ fn subscription_action_groups(app: &App) -> Vec<(&'static str, Vec<ActionButtonI
             HitboxAction::EditSubscriptionRemoveTag,
         ]
         .iter()
-        .filter_map(|action| find(action))
+        .filter_map(find)
         .collect(),
     ));
     groups
