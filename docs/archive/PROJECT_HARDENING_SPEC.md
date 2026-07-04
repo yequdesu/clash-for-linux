@@ -1,3 +1,9 @@
+# 历史归档说明
+
+本文档是早期硬化规格和验收目标，已归档。它适合作为需求背景，不再作为当前实现状态、安装方式或发布状态依据。当前状态以仓库根目录 `README.md` 和 `docs/README.md` 为准。
+
+English: Archived historical hardening specification. It is not current release guidance.
+
 # Clash for Linux Hardening Specification
 
 本文档定义本项目从“可用原型”提升为“稳定、可靠、可审计的 Linux Clash/Mihomo 管理项目”的确定性改造要求。

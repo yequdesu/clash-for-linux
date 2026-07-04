@@ -59,6 +59,6 @@ docker run --rm -v "$PWD:/repo" -w /repo ubuntu:24.04 bash -lc '
 '
 ```
 
-This smoke test does not replace a real VM/systemd test. Before a stable release, run at least one full install on a VM with real Mihomo/yq/geodata downloads and `systemctl status clashctl`.
+This smoke test does not replace real VM/systemd validation. `v0.2.0-rc.16` has already passed a real clean-machine install path with Mihomo/yq/geodata downloads; repeat the same validation for the final release tag.
 
 For the full external validation sequence, including real install, release artifact, TUN, desktop proxy, upgrade, geodata, and uninstall checks, use `docs/EXTERNAL_VALIDATION_CHECKLIST.md`.

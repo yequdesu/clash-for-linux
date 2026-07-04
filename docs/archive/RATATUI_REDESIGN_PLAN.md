@@ -1,3 +1,9 @@
+# 历史归档说明
+
+本文档是 Ratatui 页面和交互设计的历史规划，已归档。部分设计已经实现，部分已经被调整或放弃；它不再代表当前 TUI 状态。当前用户说明以仓库根目录 `README.md` 为准。
+
+English: Archived historical Ratatui redesign plan. It is not the current TUI status.
+
 # Ratatui Redesign Plan
 
 本文档定义 `clash-tui` 的详细整改设计。目标是在 Linux 命令行环境中，让 Ratatui 界面覆盖 `cmd/clashctl` 已提供的主要控制能力，并以清晰分区、低心智负担、鼠标和键盘双入口的方式接近桌面 GUI 的易用性。

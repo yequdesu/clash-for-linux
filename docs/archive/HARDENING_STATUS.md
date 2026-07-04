@@ -1,3 +1,9 @@
+# 历史归档说明
+
+本文档是早期硬化阶段状态记录，已归档。它包含的 `PARTIAL_LOCAL`、待验证项、版本号和风险判断不代表当前项目状态。当前状态以仓库根目录 `README.md` 和 `docs/README.md` 为准。
+
+English: Archived historical status. It is not the current project status.
+
 # Clash for Linux Hardening Status
 
 本文档记录当前硬化工作的可审查状态。`PROJECT_HARDENING_SPEC.md` 定义目标和验收标准；本文档只记录当前工作树已经实现、已经本地验证、仍需外部验证或后续处理的事实。

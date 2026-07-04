@@ -1,3 +1,9 @@
+# 历史归档说明
+
+本文档是早期项目审计报告，已归档。部分问题已经修复或由后续 RC 验证覆盖，文中的评级和风险判断不代表当前项目状态。当前状态以仓库根目录 `README.md` 和 `docs/README.md` 为准。
+
+English: Archived historical audit. It is not the current project status.
+
 # Clash for Linux Project Audit Report
 
 本文档是对当前工作树的工程审计结论，覆盖 Go 控制面、终端 TUI、功能完整度、稳定性、可靠性、可审计性、易用性和常见 Linux Clash/Mihomo 使用痛点。

@@ -1,6 +1,6 @@
 # External Validation Checklist
 
-本文档用于真实 Linux、CI、release、TUN 和桌面代理验证。它不替代 `PROJECT_HARDENING_SPEC.md`，只定义外部验证时应执行的命令、应保存的证据和通过标准。
+本文档用于真实 Linux、CI、release、TUN 和桌面代理验证。它是当前有效验证清单；历史硬化规格已归档到 `docs/archive/PROJECT_HARDENING_SPEC.md`。
 
 建议只在干净 VM、临时云主机或专用测试机执行。不要直接在日常主力机上验证卸载、TUN、桌面代理和内核升级。
 
@@ -409,6 +409,6 @@ notes:
 
 回填规则：
 
-- `HARDENING_STATUS.md` 中的 `PARTIAL_LOCAL` 只有在对应真实验证通过后才能改为真实完成状态。
+- 历史 `docs/archive/HARDENING_STATUS.md` 中的旧状态判定仅作为归档参考；当前状态以仓库根目录 `README.md` 和 `docs/README.md` 为准。
 - 如果真实验证失败，先记录失败命令、输出、日志和环境，不要只记录“失败”。
 - 对于 release、systemd、TUN、desktop proxy，必须至少保存一份成功日志，才能作为稳定发布依据。

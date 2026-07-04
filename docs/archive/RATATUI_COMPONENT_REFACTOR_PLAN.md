@@ -1,3 +1,9 @@
+# 历史归档说明
+
+本文档是 Ratatui 组件化/retained UI 重构方向的历史设计资料，已归档。它不代表当前 TUI 已实现结构，也不作为当前开发计划。若要恢复其中设计，应先基于当前代码重新审查。
+
+English: Archived historical Ratatui refactor plan. It is not the current implementation plan.
+
 # Ratatui Component Refactor Plan
 
 Status: worktree-first deterministic architecture plan
