@@ -631,11 +631,16 @@ if [ -d "$CLASH_BASE_DIR" ] && [ -f "$CLASH_BASE_DIR/bin/yq" ]; then
         fi
     else
         _log_warn "already installed at $CLASH_BASE_DIR"
-        if $WITH_TUI; then
+        if [ ! -x /usr/local/bin/clashctl ]; then
+            _log_warn "clashctl binary is missing; repairing CLI installation"
+        elif $WITH_TUI && [ ! -x /usr/local/bin/clash-tui ]; then
             _install_tui
+            _log_ok "TUI installed"
+            exit 0
+        else
+            _log_info "use --force to reinstall"
+            exit 1
         fi
-        _log_info "use --force to reinstall"
-        exit 1
     fi
 fi
 
