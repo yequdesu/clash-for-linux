@@ -512,9 +512,12 @@ _install_release_artifacts() {
 #  Function: install CLI (clashctl)
 # ═══════════════════════════════════════════════
 _install_cli() {
-    if [ -x /usr/local/bin/clashctl ]; then
+    if [ -x /usr/local/bin/clashctl ] && ! $FORCE; then
         _log_info "clashctl already installed"
         return 0
+    fi
+    if [ -x /usr/local/bin/clashctl ] && $FORCE; then
+        _log_info "force reinstall — replacing clashctl"
     fi
 
     if _install_release_artifacts true "$WITH_TUI" && [ -x /usr/local/bin/clashctl ]; then
@@ -556,9 +559,12 @@ _install_tui() {
     echo ""
     _log_section "Installing TUI Dashboard"
 
-    if [ -x /usr/local/bin/clash-tui ]; then
+    if [ -x /usr/local/bin/clash-tui ] && ! $FORCE; then
         _log_info "clash-tui already installed"
         return 0
+    fi
+    if [ -x /usr/local/bin/clash-tui ] && $FORCE; then
+        _log_info "force reinstall — replacing clash-tui"
     fi
 
     if _install_release_artifacts false true && [ -x /usr/local/bin/clash-tui ]; then
