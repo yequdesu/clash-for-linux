@@ -117,6 +117,11 @@ Uninstall:
 clashctl self uninstall
 ```
 
+If the current shell has proxy variables from `eval "$(clashctl env)"`, uninstall
+cannot modify that parent shell. The uninstaller will warn and print the cleanup
+command; run `unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY`
+or open a new shell session.
+
 Update the installed CLI/TUI from release artifacts:
 
 ```bash

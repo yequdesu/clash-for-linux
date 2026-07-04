@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/yequdesu/linux-cli-tui-clash/internal/config"
@@ -73,5 +74,35 @@ func TestUsingDefaultLatestReleaseRequiresNoExplicitSource(t *testing.T) {
 	selfUpdateTag = "v0.2.0-rc.12"
 	if usingDefaultLatestRelease() {
 		t.Fatal("explicit tag should disable default latest mode")
+	}
+}
+
+func TestActiveShellProxyEnvNamesIncludesSavedSudoMarker(t *testing.T) {
+	for _, key := range []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY", "CLASHCTL_UNINSTALL_PROXY_ENV_NAMES"} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("https_proxy", "http://127.0.0.1:7897")
+	t.Setenv("CLASHCTL_UNINSTALL_PROXY_ENV_NAMES", "http_proxy,https_proxy")
+	got := activeShellProxyEnvNames()
+	for _, want := range []string{"https_proxy", "http_proxy"} {
+		found := false
+		for _, name := range got {
+			if name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("activeShellProxyEnvNames = %#v, missing %s", got, want)
+		}
+	}
+}
+
+func TestProxyUnsetCommandContainsAllProxyVariables(t *testing.T) {
+	cmd := proxyUnsetCommand()
+	for _, key := range []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"} {
+		if !strings.Contains(cmd, key) {
+			t.Fatalf("proxyUnsetCommand missing %s: %s", key, cmd)
+		}
 	}
 }

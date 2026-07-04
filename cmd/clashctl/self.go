@@ -161,6 +161,7 @@ func runSelfUninstall() error {
 		return fmt.Errorf("interactive uninstall requires a terminal; rerun with --yes or --dry-run")
 	}
 	if runningAsRoot() == false && !selfUninstallDryRun {
+		rememberActiveShellProxyEnvForSudo()
 		rerunWithSudoOrFatal("self uninstall")
 	}
 	opts, err := resolveUninstallOptions()
@@ -199,6 +200,9 @@ func resolveUninstallOptions() (uninstallOptions, error) {
 	}
 	if !confirm(fmt.Sprintf("Uninstall clashctl from %s?", cfg.ClashBaseDir), false) {
 		return opts, fmt.Errorf("cancelled")
+	}
+	if err := warnActiveShellProxyBeforeUninstall(); err != nil {
+		return opts, err
 	}
 	if !selfUninstallKeepConfig && !selfUninstallRemoveConfig {
 		opts.keepConfig = confirm("Keep configuration, subscriptions, traffic data, and TUI settings?", true)
@@ -269,6 +273,7 @@ func performSelfUninstall(opts uninstallOptions) error {
 		return err
 	}
 	ilog.Ok("uninstall complete")
+	remindShellProxyCleanupAfterUninstall()
 	return nil
 }
 

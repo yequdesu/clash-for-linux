@@ -67,6 +67,10 @@ func printProxyExports(cfg *config.EnvConfig) {
 }
 
 func printProxyUnsets() {
+	fmt.Println(proxyUnsetCommand())
+}
+
+func proxyUnsetCommand() string {
 	keys := []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"}
-	fmt.Printf("unset %s\n", strings.Join(keys, " "))
+	return fmt.Sprintf("unset %s", strings.Join(keys, " "))
 }

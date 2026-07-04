@@ -24,6 +24,42 @@ _log_ok()   { printf '\r\033[32m[+]\033[0m %s\r\n' "$*"; }
 _log_info() { printf '\r\033[36m[i]\033[0m %s\r\n' "$*"; }
 _log_warn() { printf '\r\033[33m[!]\033[0m %s\r\n' "$*"; }
 _sudo()     { [ "$(id -u)" -eq 0 ] && "$@" || sudo "$@"; }
+_proxy_unset_cmd() {
+    printf 'unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY'
+}
+_active_proxy_env() {
+    local out="" key
+    for key in http_proxy HTTP_PROXY https_proxy HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY; do
+        if [ -n "${!key:-}" ]; then
+            out="${out}${out:+, }${key}"
+        fi
+    done
+    printf '%s' "$out"
+}
+_warn_active_proxy_env() {
+    local names
+    names="$(_active_proxy_env)"
+    [ -n "$names" ] || return 0
+    _log_warn "current shell proxy variables are active: $names"
+    _log_warn "uninstall cannot clear variables exported in the parent shell"
+    _log_info "after uninstall, run: $(_proxy_unset_cmd)"
+    if [ -t 0 ]; then
+        printf '\r\033[36m[i]\033[0m Continue uninstall with active shell proxy variables? [Y/n] '
+        read -r answer
+        case "${answer:-y}" in
+            [Yy]|yes|YES) ;;
+            *) _log_warn "cancelled"; exit 1 ;;
+        esac
+    fi
+}
+_remind_proxy_cleanup() {
+    local names
+    names="$(_active_proxy_env)"
+    [ -n "$names" ] || return 0
+    _log_warn "shell proxy variables may still be active in this terminal: $names"
+    _log_info "restore current shell network with: $(_proxy_unset_cmd)"
+    _log_info "or open a new shell session"
+}
 
 _load_install_env() {
     local file="$1"
@@ -118,6 +154,7 @@ case ":$PATH:" in *:/usr/local/bin:*) ;; *) export PATH="/usr/local/bin:$PATH" ;
 echo ""
 _log_info "Linux CLI & TUI Clash — Uninstaller"
 _log_info "You will be asked for your sudo password ONCE."
+_warn_active_proxy_env
 
 if [ "$(id -u)" -ne 0 ]; then
     sudo -v || _log_warn "sudo auth failed — some items may not be removed"
@@ -191,3 +228,4 @@ done
 
 echo ''
 _log_ok "uninstall complete"
+_remind_proxy_cleanup

@@ -7,6 +7,8 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+
+	ilog "github.com/yequdesu/linux-cli-tui-clash/internal/log"
 )
 
 func userHomeDir() string {
@@ -117,4 +119,56 @@ func uniqueStrings(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func activeShellProxyEnvNames() []string {
+	keys := []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"}
+	var names []string
+	for _, key := range keys {
+		if os.Getenv(key) != "" {
+			names = append(names, key)
+		}
+	}
+	if saved := os.Getenv("CLASHCTL_UNINSTALL_PROXY_ENV_NAMES"); saved != "" {
+		for _, name := range strings.Split(saved, ",") {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				names = append(names, name)
+			}
+		}
+	}
+	return uniqueStrings(names)
+}
+
+func rememberActiveShellProxyEnvForSudo() {
+	names := activeShellProxyEnvNames()
+	if len(names) > 0 {
+		_ = os.Setenv("CLASHCTL_UNINSTALL_PROXY_ENV_NAMES", strings.Join(names, ","))
+	}
+}
+
+func warnActiveShellProxyBeforeUninstall() error {
+	names := activeShellProxyEnvNames()
+	if len(names) == 0 {
+		return nil
+	}
+	ilog.Warn("current shell proxy variables are active: %s", strings.Join(names, ", "))
+	ilog.Warn("uninstall cannot clear variables exported in the parent shell")
+	ilog.Info("after uninstall, run: %s", proxyUnsetCommand())
+	if !selfUninstallYes && !selfUninstallDryRun && stdinIsTerminal() {
+		if !confirm("Continue uninstall with active shell proxy variables?", true) {
+			return fmt.Errorf("cancelled")
+		}
+	}
+	return nil
+}
+
+func remindShellProxyCleanupAfterUninstall() {
+	names := activeShellProxyEnvNames()
+	if len(names) == 0 {
+		return
+	}
+	ilog.Warn("shell proxy variables may still be active in this terminal: %s", strings.Join(names, ", "))
+	ilog.Info("restore current shell network with: %s", proxyUnsetCommand())
+	ilog.Info("or open a new shell session")
 }
